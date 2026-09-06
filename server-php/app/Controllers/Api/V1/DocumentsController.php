@@ -263,6 +263,54 @@ class DocumentsController extends BaseController
         }
     }
 
+    /**
+     * POST inventory-documents/{id}/revise — reverse + re-create + post in one transaction.
+     * Body: the create payload (lines, metadata, …) plus optional reason. Idempotent on the
+     * Idempotency-Key and request hash like createAndPost.
+     */
+    public function revise($id = null)
+    {
+        $a = $this->authorize(null);
+        if (isset($a['response'])) {
+            return $a['response'];
+        }
+        $ctx = $a['ctx'];
+        $session = $a['session'];
+        $cmpId = (int) $ctx['cmp_id'];
+        try {
+            $current = $this->documents->get($cmpId, (int) $id);
+        } catch (\Throwable $e) {
+            return $this->failFromException($e);
+        }
+        $perm = $this->authorizeAny([PermissionRegistry::documentPermission((string) $current['document_type'], 'reverse'), 'documents.reverse']);
+        if (isset($perm['response'])) {
+            return $perm['response'];
+        }
+        $body = $this->request->getJSON(true) ?? [];
+        $key = $this->idempotencyKey();
+        $hash = IdempotencyService::hashRequest($body);
+        if ($replay = $this->idempotency->replay($cmpId, $key, 'inventory_document_revise', $hash)) {
+            return $this->respond($replay['body'], $replay['status']);
+        }
+        try {
+            $body['document_type'] = $body['document_type'] ?? $current['document_type'];
+            $sourceApp = strtolower((string) ($body['source_app'] ?? $current['source_app'] ?? $session['source_app'] ?? 'inventory'));
+            $body['idempotency_key'] = $key;
+            $doc = $this->posting->revise($ctx, (int) $id, $body, $session['uuid'], (string) ($body['reason'] ?? ''), $sourceApp, [
+                'session' => $session, 'actor' => $session['uuid'],
+                'negative_override' => !empty($body['negative_override']),
+                'skip_approval' => ($session['kind'] ?? '') === 'service',
+                'fy_range' => $body['fy_range'] ?? null,
+            ]);
+            $resp = ['data' => $doc, 'duplicate' => false];
+            $this->idempotency->remember($cmpId, $key, 'inventory_document_revise', (int) $doc['document_id'], (string) $doc['document_uuid'], 201, $resp, $hash);
+
+            return $this->respond($resp, 201);
+        } catch (\Throwable $e) {
+            return $this->failFromException($e);
+        }
+    }
+
     public function reverse($id = null)
     {
         $a = $this->authorize(null);

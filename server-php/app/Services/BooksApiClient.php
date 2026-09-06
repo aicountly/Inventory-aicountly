@@ -32,6 +32,20 @@ class BooksApiClient
         return 'https://books.aicountly.com';
     }
 
+    /**
+     * BOOKS_API_BASE may be the API root (https://books.aicountly.com/api) or a bare origin; a
+     * local spark-serve origin (http://127.0.0.1:8080) serves the API at its root.
+     */
+    public function apiRoot(): string
+    {
+        $base = $this->base();
+        if (preg_match('#/api$#', $base) || preg_match('#^https?://(127\.0\.0\.1|localhost)(:\d+)?$#', $base)) {
+            return $base;
+        }
+
+        return $base . '/api';
+    }
+
     /** @return array{ok:bool, status:int, body:?array, error:?string} */
     public function postEvent(array $envelope): array
     {
@@ -57,7 +71,7 @@ class BooksApiClient
         if ($key === '' || str_starts_with($key, 'CHANGE_ME')) {
             return ['ok' => false, 'status' => 0, 'body' => null, 'error' => 'BOOKS_SERVICE_KEY not configured'];
         }
-        $url = $this->base() . '/api/' . ltrim($path, '/');
+        $url = $this->apiRoot() . '/' . ltrim($path, '/');
         $ch = curl_init($url);
         $headers = ['Accept: application/json', 'Content-Type: application/json', 'X-Service-Key: ' . $key, 'X-Source-App: inventory'];
         $opts = [

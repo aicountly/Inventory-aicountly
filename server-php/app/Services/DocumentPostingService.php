@@ -119,6 +119,42 @@ class DocumentPostingService
      *
      * @return array<string, mixed> the reversed document
      */
+    /**
+     * Replace a posted document with a new version in ONE database transaction: reverse the
+     * current document, create the replacement from $payload and post it. Either both happen
+     * or neither — an edit in Books can never leave stock reversed without its replacement.
+     *
+     * @param array{cmp_id:int, fy_id:int, bo_id:int} $ctx
+     * @param array<string, mixed> $payload same shape as DocumentService::create()
+     * @param array<string, mixed> $options post() options (skip_approval, negative_override, fy_range)
+     * @return array<string, mixed> the new posted document (+ 'replaced_document_id')
+     */
+    public function revise(array $ctx, int $documentId, array $payload, ?string $actor, string $reason, string $sourceApp = 'inventory', array $options = []): array
+    {
+        $cmpId = (int) $ctx['cmp_id'];
+        $db = \Config\Database::connect();
+        $db->transStart();
+        try {
+            $old = $this->reverse($cmpId, $documentId, $actor, $reason !== '' ? $reason : 'Revised', $options);
+            $payload['metadata'] = array_merge(is_array($payload['metadata'] ?? null) ? $payload['metadata'] : [], ['revises_document_id' => $documentId, 'revision_reason' => $reason]);
+            $created = $this->documents->create($ctx, $payload, $actor, $sourceApp);
+            $posted = $this->post($cmpId, (int) $created['document_id'], $actor, $options);
+            $db->transComplete();
+            if ($db->transStatus() === false) {
+                throw new \RuntimeException('Could not revise document', 500);
+            }
+        } catch (\Throwable $e) {
+            $db->transRollback();
+            $db->resetTransStatus();
+            throw $e;
+        }
+        $posted['replaced_document_id'] = $documentId;
+        $posted['replaced_status'] = $old['status'] ?? 'REVERSED';
+        $this->audit->log($cmpId, 'document', (int) $posted['document_id'], 'document.revise', $actor, ['reason' => $reason, 'replaced_document_id' => $documentId], null, ['status' => $posted['status']]);
+
+        return $posted;
+    }
+
     public function reverse(int $cmpId, int $documentId, ?string $actor, string $reason, array $options = []): array
     {
         $doc = $this->documents->get($cmpId, $documentId);

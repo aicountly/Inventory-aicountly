@@ -105,6 +105,7 @@ $routes->group('', ['namespace' => 'App\Controllers\Api', 'filter' => 'cors'], s
         $routes->post('inventory-documents/(:num)/reject', 'DocumentsController::reject/$1');
         $routes->post('inventory-documents/(:num)/post', 'DocumentsController::post/$1');
         $routes->post('inventory-documents/(:num)/reverse', 'DocumentsController::reverse/$1');
+        $routes->post('inventory-documents/(:num)/revise', 'DocumentsController::revise/$1');
         $routes->post('inventory-documents/(:num)/cancel', 'DocumentsController::cancel/$1');
         $routes->get('inventory-documents/(:num)/print-snapshot', 'DocumentsController::printSnapshot/$1');
         $routes->get('pending-quantities', 'PendingController::index');
