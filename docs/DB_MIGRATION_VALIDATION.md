@@ -33,3 +33,12 @@ Every section below is written to `validate.summary.json`; a difference outside 
 
 ## Stock rebuild test
 `inv_stock_balances.on_hand_qty` is materialised from `inv_item_openings` (FY rule) + `inv_stock_movements`. The validator rebuilds it independently (StockBalanceService::closingQuantities) and compares, then compares the same figures with a walk over Books' tables using Books' rules. Both must agree to 0.0001.
+
+## Live-mode rehearsal (after cutover, same databases)
+With `INVENTORY_MODE=live` and both APIs running locally, Books posted purchases, sales, a credit note and a debit note through Inventory (composite states `COMPLETED`), cancelled a sales invoice (stock document `REVERSED`), edited a posted invoice in place (Inventory `revise`: old document `REVERSED`, replacement `POSTED`, Books COGS pair rewritten), posted with Inventory stopped in `deferred` mode (`INVENTORY_PENDING`, completed by `books:inventory-retry` with cost and COGS applied) and in `strict` mode (no voucher written, drafts left for retry), delivered outbox events (document posted / reversed, 54 valuation revisions from a back-dated recalculation) and ran `inventory:reconcile`, which explained the whole Books ↔ Inventory difference (unexplained 0.00).
+
+Defects the rehearsal caught before any production data was touched, all fixed on this branch:
+* the revision event used `old_/new_valuation_amount` while the Books handler read `previous_/revised_amount` (it would have zeroed COGS pairs) — handler normalises both and refuses to apply a revision without an amount; `books:inventory-retry --refresh-costs` repairs from Inventory's current valuation;
+* a recalculation revised lines but not the document's stored accounting effects;
+* reconciliation double-counted reversed documents whose Books voucher was cancelled or replaced, and inline COGS revisions reported as revaluations;
+* the migrator would have replaced a company that already had live documents — it now refuses.
