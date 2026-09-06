@@ -36,6 +36,7 @@ Rehearsal result (company 9001, FY 7102, after live postings, a cancel and an ed
 | `REVERSED_INVENTORY` | someone reversed the document in Inventory; cancel the Books voucher or `--resync` to re-post |
 | `MISSING_IN_INVENTORY` | voucher posted while Books was in legacy mode → `--resync` |
 | `MISSING_IN_BOOKS` | an Inventory document claims a Books source that does not exist → reverse it in Inventory |
+| ledger differs although statuses are `IN_SYNC` | `php spark books:inventory-retry --repair-cogs --cmp <cmp> [--fy <fy>]` rewrites or inserts the COGS journal pairs from the item-line costs Inventory keeps current |
 
 ## Schedule
 Nightly per active company (Inventory cron: `php spark inventory:reconcile --all` if scheduled, otherwise the *Run now* button) and after every cutover / restore. Results are kept; the dashboard shows the last run's `unexplained`.
