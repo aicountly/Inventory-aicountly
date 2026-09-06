@@ -4,7 +4,7 @@
 
 ```
 web/          React app (Vite). Builds to web/dist.
-server-php/   PHP API. Plain PHP, no build step — deployed as-is.
+server-php/   CodeIgniter 4 API. Deployed as source; Composer runs on the server (post-deploy hook).
 docs/         this file, plus the auth notes
 ```
 
@@ -12,8 +12,8 @@ docs/         this file, plus the auth notes
 
 | Workflow | Deploys | Destination | Reachable at |
 | --- | --- | --- | --- |
-| Deploy to cPanel Production | `web/dist/` then `server-php/` | `<remote root>/` and `<remote root>/api/` | https://inventory.aicountly.com (+ `/api`) |
-| Deploy to cPanel Sandbox | `web/dist/` then `server-php/` | `<remote root>/` and `<remote root>/api/` | https://inventory.gh.aicountly.com (+ `/api`) |
+| Deploy to cPanel Production | `web/dist/` then `server-php/` (then `cpanel-post-deploy-api.sh` over SSH) | `<remote root>/` and `<remote root>/api/` | https://inventory.aicountly.com (+ `/api`) |
+| Deploy to cPanel Sandbox | `web/dist/` then `server-php/` (then `cpanel-post-deploy-api.sh` over SSH) | `<remote root>/` and `<remote root>/api/` | https://inventory.gh.aicountly.com (+ `/api`) |
 
 `<remote root>` is the `*_SSH_REMOTE_ROOT` secret for that environment,
 normally `public_html` (or the subdomain's own document root).
@@ -138,3 +138,32 @@ itself, a system directory, or anything containing `..` is refused.
    `https://<host>/api/health` returns the right `env` and open the site to
    sign in. See [auth/AICOUNTLY_AUTH_WORKFLOW.md](auth/AICOUNTLY_AUTH_WORKFLOW.md)
    for what a healthy login looks like.
+
+
+## The API on the server (CodeIgniter 4)
+
+`api/.htaccess` rewrites every request to `api/public/index.php`, so `https://<host>/api/v1/...`
+reaches the framework with `app.baseURL = https://<host>/api/`. The deploy rsyncs `server-php/`
+without `vendor/`, `tests/` and `writable/` state (see `scripts/cpanel-rsync-api.filters`), then
+runs `cpanel-post-deploy-api.sh <api dir>` over SSH, which:
+
+1. installs Composer dependencies (`composer install --no-dev --optimize-autoloader`, bootstrapping
+   `composer.phar` in the account's home if cPanel has none);
+2. creates `.env` from `.env.example` on the very first deploy only (never overwrites secrets) and pins
+   `app.baseURL` / `INVENTORY_APP_URL` to the site host;
+3. makes `writable/` writable;
+4. applies pending SQL migrations: `php spark inventory:sql-migrate` (tracked in `inv_sql_migrations`);
+5. probes `public/status.php` and resets the CLI OPcache.
+
+Settings that must exist in `api/.env` (see `server-php/.env.example`): `database.default.*` (PostgreSQL 16),
+`INVENTORY_SERVICE_KEYS` (`books:<key>,pos:<key>`), `BOOKS_SERVICE_KEY`, `BOOKS_API_BASE`,
+`MANAGE_API_BASE`, `PORTAL_AUTH_BASE`, `CORS_ALLOWED_ORIGINS`, and for the one-time migration the
+read-only Books connection `BOOKS_DB_*`.
+
+Cron (cPanel → Cron Jobs), every minute:
+
+```
+cd /home/<user>/public_html/<host>/api && php spark inventory:outbox-dispatch >/dev/null 2>&1
+cd /home/<user>/public_html/<host>/api && php spark inventory:recalc-worker  >/dev/null 2>&1
+```
+and nightly `php spark inventory:reconcile --all`.
