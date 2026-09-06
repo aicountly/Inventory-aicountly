@@ -17,10 +17,14 @@ Runs in Inventory (`POST /v1/reconciliation/run {as_of}`, screen *Reconciliation
 | `unacknowledged_valuation_revisions` | COGS revisions Books has not applied yet |
 | `revaluation` | Inventory revaluation documents vs Books revaluation journals |
 | `manual_journal` | manual journals on Stock-in-Hand in Books |
+| `valuation_method_variance` | closing valuation (cost-layer replay, FIFO/LIFO/WAC, negative stock priced at last cost) − (opening + Σ movement values); a costing effect, not a missing posting |
+| `transfer_valuation_gap` | stock transfers whose receiving side is not valued at the issuing cost — only history migrated from Books, which valued the receiving side at 0 |
 | `missing_source` | Books vouchers with item lines and no inventory document |
 | `rounding` / `unexplained` | residual below 1.00 / above |
 
-`difference = Σ buckets + rounding + unexplained`. A run is clean when `unexplained = 0`.
+`difference = Σ buckets + rounding + unexplained`. A run is clean when `unexplained = 0`. A reversed document whose Books voucher is also cancelled contributes nothing (both sides dropped it).
+
+Rehearsal result (company 9001, FY 7102, after live postings, a cancel and an edit): difference 1 402 151.09 = opening_difference 1 406 898.29 (the rehearsal never posted an opening-stock journal in Books) + valuation_method_variance −2 930.70 + transfer_valuation_gap −1 816.50 (two migrated transfers Books valued at 0 on the receiving side), unexplained 0.00.
 
 ## Composite posting status
 `IN_SYNC`, `PENDING_INVENTORY`, `FAILED_INVENTORY`, `REVERSED_INVENTORY`, `CANCELLED_BOTH`, `CANCELLED_IN_BOOKS`, `MISSING_IN_BOOKS`, `PENDING_IN_BOOKS`, `FAILED_IN_BOOKS`, `MISSING_IN_INVENTORY`, `BOOKS_UNAVAILABLE`. Anything but `IN_SYNC` / `CANCELLED_BOTH` has a fix:

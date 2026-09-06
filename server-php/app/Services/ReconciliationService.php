@@ -191,6 +191,24 @@ class ReconciliationService
         // 6. Manual journals (Books only).
         $manual = self::sumEntries($books['manual_journals']);
         $buckets['manual_journal'] = ['amount' => round(-$manual['sum'], 4), 'count' => $manual['count'], 'books_reported' => $books['manual_journals']];
+        // 7b. Costing-method variance: the ledger follows movement values (receipts at cost,
+        // issues at COGS) while the closing valuation replays the cost layers (FIFO/LIFO/WAC,
+        // negative stock priced at the last known cost, migrated lines with no cost). The gap
+        // between the two is a valuation effect, not a missing posting.
+        $ledgerLike = $this->ledgerLikeValue($cmpId, $fyId, $boId, $asOf, $inventoryOpening);
+        $buckets['valuation_method_variance'] = [
+            'amount' => round($inventoryValue - $ledgerLike['value'], 4),
+            'count' => abs($inventoryValue - $ledgerLike['value']) >= 0.0001 ? 1 : 0,
+            'closing_valuation' => $inventoryValue,
+            'opening_plus_movements' => round($ledgerLike['value'], 4),
+            'movement_value_in' => $ledgerLike['in'],
+            'movement_value_out' => $ledgerLike['out'],
+            'unvalued_movements' => $ledgerLike['unvalued'],
+        ];
+        // 7c. Transfers must net to zero (the receiving side is priced at the issuing cost). A
+        // gap comes from history migrated from Books, which valued the receiving side at 0.
+        $transferGap = $this->transferValuationGap($cmpId, $fyId, $boId, $asOf);
+        $buckets['transfer_valuation_gap'] = ['amount' => $transferGap['amount'], 'count' => $transferGap['count'], 'documents' => $transferGap['documents']];
         // 8. Missing source (Books posting entries without an inventory document).
         $missing = array_values(array_filter($postingStatus['entries'], static fn ($e) => $e['sync_status'] === self::SYNC_MISSING_INVENTORY));
         $missingSum = 0.0;
@@ -337,6 +355,53 @@ class ReconciliationService
      * @param list<array<string,mixed>> $booksReported
      * @return array<string, mixed>
      */
+    /**
+     * Opening value + signed value of every movement up to the date (physical and reversal
+     * movements of documents still counted), i.e. what a perpetual ledger would show.
+     *
+     * @return array{value: float, in: float, out: float, unvalued: int}
+     */
+    private function ledgerLikeValue(int $cmpId, int $fyId, int $boId, string $asOf, float $opening): array
+    {
+        $db = \Config\Database::connect();
+        $b = $db->table('inv_stock_movements m')
+            ->select("COALESCE(SUM(CASE WHEN m.value > 0 THEN m.value ELSE 0 END), 0) AS v_in, COALESCE(SUM(CASE WHEN m.value < 0 THEN -m.value ELSE 0 END), 0) AS v_out, COUNT(*) FILTER (WHERE m.value IS NULL AND m.qty <> 0) AS unvalued", false)
+            ->where('m.cmp_id', $cmpId)->where('m.fy_id', $fyId)->where('m.movement_date <=', $asOf);
+        if ($boId > 0) {
+            $b->where('m.bo_id', $boId);
+        }
+        $r = $b->get()->getRowArray() ?: [];
+        $in = round((float) ($r['v_in'] ?? 0), 4);
+        $out = round((float) ($r['v_out'] ?? 0), 4);
+
+        return ['value' => round($opening + $in - $out, 4), 'in' => $in, 'out' => $out, 'unvalued' => (int) ($r['unvalued'] ?? 0)];
+    }
+
+    /** @return array{amount: float, count: int, documents: list<array<string, mixed>>} */
+    private function transferValuationGap(int $cmpId, int $fyId, int $boId, string $asOf): array
+    {
+        $db = \Config\Database::connect();
+        $b = $db->table('inv_stock_movements m')
+            ->select('m.document_id, d.document_no, d.document_date, COALESCE(SUM(m.value), 0) AS gap', false)
+            ->join('inv_documents d', 'd.document_id = m.document_id')
+            ->where('m.cmp_id', $cmpId)->where('m.fy_id', $fyId)->where('m.movement_date <=', $asOf)
+            ->where('d.document_type', 'STOCK_TRANSFER')->where('m.movement_kind', 'physical')
+            ->groupBy('m.document_id, d.document_no, d.document_date')
+            ->having('ABS(COALESCE(SUM(m.value), 0)) >=', 0.0001, false);
+        if ($boId > 0) {
+            $b->where('m.bo_id', $boId);
+        }
+        $docs = [];
+        $sum = 0.0;
+        foreach ($b->get()->getResultArray() as $r) {
+            $gap = round((float) $r['gap'], 4);
+            $sum += $gap;
+            $docs[] = ['document_id' => (int) $r['document_id'], 'document_no' => $r['document_no'], 'document_date' => substr((string) $r['document_date'], 0, 10), 'gap' => $gap];
+        }
+
+        return ['amount' => round($sum, 4), 'count' => count($docs), 'documents' => $docs];
+    }
+
     private function documentBucket(int $cmpId, int $fyId, int $boId, string $asOf, array $statuses, bool $booksOnly, float $sign, array $booksReported): array
     {
         $db = \Config\Database::connect();
@@ -351,12 +416,29 @@ class ReconciliationService
         if ($booksOnly) {
             $b->where('d.source_app', 'books');
         }
+        // A reversed document whose Books voucher is cancelled too explains nothing: both sides
+        // dropped it. Books reports its status per tracker entry (books_status).
+        $cancelledInBooks = [];
+        foreach ($booksReported as $e) {
+            if (is_array($e) && strtolower((string) ($e['books_status'] ?? '')) === 'cancelled') {
+                if (!empty($e['vch_txn_id'])) {
+                    $cancelledInBooks['id:' . (int) $e['vch_txn_id']] = true;
+                }
+                if (!empty($e['vch_uuid'])) {
+                    $cancelledInBooks['uuid:' . strtolower((string) $e['vch_uuid'])] = true;
+                }
+            }
+        }
         $rows = [];
         $sum = 0.0;
         foreach ($b->get()->getResultArray() as $r) {
             $spec = DocumentTypeRegistry::get((string) $r['document_type']);
             // Documents that never carry valuation (packing, reservation, challan ...) explain nothing.
             $effect = !empty($spec['valuation']) ? round((float) $r['stock_effect'], 4) : 0.0;
+            if ((string) $r['status'] === 'REVERSED' && (string) $r['source_app'] === 'books'
+                && (isset($cancelledInBooks['id:' . (int) $r['source_document_id']]) || isset($cancelledInBooks['uuid:' . strtolower((string) $r['source_document_uuid'])]))) {
+                $effect = 0.0;
+            }
             $sum += $effect;
             $rows[] = [
                 'document_id' => (int) $r['document_id'], 'document_uuid' => $r['document_uuid'], 'document_type' => $r['document_type'], 'document_no' => $r['document_no'],
