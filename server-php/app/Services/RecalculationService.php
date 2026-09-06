@@ -113,6 +113,32 @@ class RecalculationService
      *
      * @return array{lines:int, revisions: list<array<string,mixed>>}
      */
+    /**
+     * Keep the COGS_ISSUE entry of a document's stored accounting effects in step with a revised
+     * line, so every reader of accounting_effects_json (Books refresh, prints, audits) sees the
+     * revised cost.
+     */
+    private function refreshDocumentEffects($db, int $documentId, int $lineId, float $amount, float $rate): void
+    {
+        $row = $db->table('inv_documents')->select('accounting_effects_json')->where('document_id', $documentId)->get()->getRowArray();
+        $effects = json_decode((string) ($row['accounting_effects_json'] ?? '[]'), true);
+        if (!is_array($effects)) {
+            return;
+        }
+        $changed = false;
+        foreach ($effects as &$e) {
+            if (($e['effect'] ?? '') === 'COGS_ISSUE' && (int) ($e['line_id'] ?? 0) === $lineId) {
+                $e['amount'] = round($amount, 4);
+                $e['valuation_rate'] = round($rate, 4);
+                $changed = true;
+            }
+        }
+        unset($e);
+        if ($changed) {
+            $db->table('inv_documents')->where('document_id', $documentId)->update(['accounting_effects_json' => json_encode($effects, JSON_UNESCAPED_UNICODE)]);
+        }
+    }
+
     public function replayItem(int $cmpId, int $fyId, int $itemId, bool $dryRun): array
     {
         $db = \Config\Database::connect();
@@ -185,6 +211,7 @@ class RecalculationService
                 ];
                 if (!$dryRun) {
                     $db->table('inv_document_lines')->where('line_id', $lineId)->update(['valuation_rate' => $val['valuation_rate'], 'valuation_amount' => $val['valuation_amount'], 'valuation_method_applied' => $val['valuation_method_applied']]);
+                    $this->refreshDocumentEffects($db, (int) $ev['document_id'], $lineId, (float) $val['valuation_amount'], (float) $val['valuation_rate']);
                     $db->table('inv_stock_movements')->where('movement_id', (int) $m['movement_id'])->update(['unit_cost' => $val['valuation_rate'], 'value' => round(((float) $m['qty'] > 0 ? 1 : -1) * $new, 4)]);
                 }
             }
