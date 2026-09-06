@@ -79,6 +79,13 @@ class Migrator
     public function migrateCompany(int $cmpId): array
     {
         $this->stats = ['cmp_id' => $cmpId, 'tables' => [], 'warnings' => []];
+        // Never touch a company that has gone live: documents without a legacy source were
+        // created through the API after cutover and a re-run (or --replace) would destroy them.
+        $live = (int) $this->inv->table('inv_documents')->where('cmp_id', $cmpId)->where('legacy_source_table', null)->countAllResults();
+        if ($live > 0) {
+            $this->log->event('company_refused_live_data', ['cmp_id' => $cmpId, 'live_documents' => $live], 'error');
+            throw new \RuntimeException(sprintf('Company %d already has %d live inventory document(s) created after cutover; refusing to migrate or replace it. Use reconciliation and books:inventory-retry --resync instead.', $cmpId, $live));
+        }
         $this->log->event('company_start', ['cmp_id' => $cmpId, 'dry_run' => $this->dryRun, 'replace' => $this->replace]);
         $inv = $this->inv;
         $inv->transStart();

@@ -211,7 +211,7 @@ class RecalculationService
                 ];
                 if (!$dryRun) {
                     $db->table('inv_document_lines')->where('line_id', $lineId)->update(['valuation_rate' => $val['valuation_rate'], 'valuation_amount' => $val['valuation_amount'], 'valuation_method_applied' => $val['valuation_method_applied']]);
-                    $this->refreshDocumentEffects($db, (int) $ev['document_id'], $lineId, (float) $val['valuation_amount'], (float) $val['valuation_rate']);
+                    $this->refreshDocumentEffects($db, (int) $m['document_id'], $lineId, (float) $val['valuation_amount'], (float) $val['valuation_rate']);
                     $db->table('inv_stock_movements')->where('movement_id', (int) $m['movement_id'])->update(['unit_cost' => $val['valuation_rate'], 'value' => round(((float) $m['qty'] > 0 ? 1 : -1) * $new, 4)]);
                 }
             }
