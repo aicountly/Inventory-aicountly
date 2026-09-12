@@ -213,7 +213,7 @@ cPanel's PostgreSQL screen does not offer a read-only privilege level the way it
 does, so tighten it yourself. Connect as the Books database owner, which can grant on its own
 tables without any superuser access:
 ```bash
-psql -w -h 127.0.0.200 -p 5432 -U booksaicountly_smartbooksaic_user -d booksaicountly_smartbooksaic
+psql -h 127.0.0.200 -p 5432 -U booksaicountly_smartbooksaic_user -d booksaicountly_smartbooksaic
 ```
 then:
 ```sql
@@ -224,12 +224,15 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO booksaicount
 ALTER ROLE booksaicountly_invread SET default_transaction_read_only = on;
 \q
 ```
+These two `psql` calls deliberately omit `-w` and will prompt for the password, because
+`~/.pgpass` is not set up until B1. Everything from B1 onward uses `-w`.
+
 The last line is the belt-and-braces one: every session that role opens starts read-only, so a
 write fails even if some grant slips through later.
 
 **Prove it before trusting it.** Connect as the read-only role and confirm both halves:
 ```bash
-psql -w -h 127.0.0.200 -p 5432 -U booksaicountly_invread -d booksaicountly_smartbooksaic \
+psql -h 127.0.0.200 -p 5432 -U booksaicountly_invread -d booksaicountly_smartbooksaic \
   -c "SELECT count(*) FROM books_voucher_headers;" \
   -c "CREATE TABLE should_not_work (x int);"
 ```
