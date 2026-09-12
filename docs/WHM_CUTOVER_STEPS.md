@@ -417,6 +417,18 @@ Put Books in maintenance mode. No voucher may post from this point until cutover
 migration is a point-in-time copy, and anything posted during the freeze would be missed by it.
 
 ### B3. Back up Books, and prove the backup is real (root)
+Check there is room first. A dump that dies halfway on a full disk, during the freeze, with
+users locked out, is the worst way to discover this. Books holds ~69,700 vouchers, so expect a
+compressed dump in the hundreds of megabytes, and the verify restore in B3 needs roughly the
+uncompressed size again on the database volume:
+```bash
+df -h /root /var/lib/pgsql 2>/dev/null || df -h /root
+psql -w -U booksaicountly_smartbooksaic_user -d booksaicountly_smartbooksaic \
+  -tAc "SELECT pg_size_pretty(pg_database_size('booksaicountly_smartbooksaic'));"
+```
+**Paste both back before running the dump.** If free space is not comfortably more than twice the
+reported database size, stop and tell me rather than starting the dump.
+
 ```bash
 pg_dump -Fc -Z6 --no-owner --no-acl -w -U booksaicountly_smartbooksaic_user -d booksaicountly_smartbooksaic \
   -f /root/inv_migration_backups/books_pre_inventory_$(date +%Y%m%d_%H%M).dump
