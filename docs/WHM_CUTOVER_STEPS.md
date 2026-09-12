@@ -60,6 +60,9 @@ one shared readable path before Phase B starts rather than discovering the probl
 | Manage account | `manageaicountly` (unchanged by this cutover) |
 | PHP | 8.2.33 at root and in both accounts, above the 8.1 floor |
 | PostgreSQL | server **13.23**, client **13.23**, distribution packages, no `/usr/pgsql-*` side-by-side install |
+| Books database | `booksaicountly_smartbooksaic` on `127.0.0.200:5432`, user `booksaicountly_smartbooksaic_user` |
+| Inventory database | not created yet — create it in cPanel for the `inventoryaic` account (A5) |
+| Inventory `api/` today | a placeholder from an earlier SSH/workflow test (`index.php`, `src/`, no `.env`); the deploy rsyncs with `--delete`, so it is replaced wholesale. Owner has confirmed it can be overwritten |
 
 PostgreSQL 13 is fine here. The schema and the migration toolkit need `SERIAL`,
 `gen_random_uuid()` (native from 13), `JSONB`, `pg_get_serial_sequence` and `information_schema`,
@@ -76,6 +79,32 @@ that must cross between accounts, the Books stock snapshot, is copied over by ro
 Two bash details this document now avoids deliberately: `--opt=~/path` does **not** expand the
 tilde (bash only does that in assignments), and `psql` without `-w` will sit forever on a
 password prompt instead of failing. Absolute paths and `-w` throughout.
+
+### Two things verified in the code before any of this is allowed to touch production
+
+**Deploying Books is genuinely a no-op until you flip the flag.** Books' production `.env` has
+no `INVENTORY_MODE` key at all today. `InventoryBridgeService::mode()` reads
+`getenv('INVENTORY_MODE') ?: 'legacy'` and then returns `live` only on an exact match, so
+absent, empty, or misspelled all resolve to `legacy`. There is no value of that variable, or
+absence of it, that silently turns the new path on.
+
+**Books migration 150 is safe to run against the live database with users online.** It adds
+`vch_uuid` as `UUID NULL` with no default, which is a metadata-only change on PostgreSQL 11+
+rather than a table rewrite. Its unique index is partial on `vch_uuid IS NOT NULL`, and at the
+moment it is created every row is still NULL, so it builds over zero rows however large
+`books_voucher_headers` is. Everything else is `CREATE TABLE IF NOT EXISTS`. All statements are
+idempotent.
+
+**Why the backup is taken before the UUID backfill, and why that does not weaken the rehearsal.**
+B3 backs up before B5 writes `vch_uuid` to every voucher, which keeps the safety net ahead of
+the first write. That means `books_verify` carries NULL UUIDs while production will carry real
+ones by migrate time — and it does not matter, because the migrator never reads Books'
+`vch_uuid`. It derives the same id itself from `books_voucher_headers:<vch_txn_id>`
+(`Migrator::deterministicUuid`), and the Books backfill independently reproduces exactly that
+value (`VoucherUuid::deterministic`). Verified: both produce
+`84f61b71-3067-5d1e-9f31-0eab056e4ee1` for voucher 12345. The rehearsal therefore builds
+identical Inventory documents to the real run. Do not "fix" this ordering by moving the backup
+after the backfill.
 
 ---
 
@@ -224,10 +253,10 @@ Fill in the host/port/database/user from the Books `.env` values A1 asked for. R
 ```bash
 mkdir -p /root/inv_migration_backups
 touch /root/.pgpass && chmod 600 /root/.pgpass
-echo "<db host>:<db port>:*:<books db user>:<books db password>" >> /root/.pgpass
-echo "<db host>:<db port>:*:<inventory db user>:<inventory db password>" >> /root/.pgpass
-export PGHOST=<db host> PGPORT=<db port>
-psql -w -U <books db user> -d <books db name> -c "SELECT current_user, now();"
+echo "127.0.0.200:5432:*:booksaicountly_smartbooksaic_user:<books db password>" >> /root/.pgpass
+echo "127.0.0.200:5432:*:<inventory db user>:<inventory db password>" >> /root/.pgpass
+export PGHOST=127.0.0.200 PGPORT=5432
+psql -w -U booksaicountly_smartbooksaic_user -d booksaicountly_smartbooksaic -c "SELECT current_user, now();"
 ```
 Paste back that `SELECT`. Connecting without a password prompt means `.pgpass` is working. The
 `-w` flag makes `psql` fail fast rather than hang if it isn't.
@@ -238,15 +267,15 @@ migration is a point-in-time copy, and anything posted during the freeze would b
 
 ### B3. Back up Books, and prove the backup is real (root)
 ```bash
-pg_dump -Fc -Z6 --no-owner --no-acl -w -U <books db user> -d <books db name> \
+pg_dump -Fc -Z6 --no-owner --no-acl -w -U booksaicountly_smartbooksaic_user -d booksaicountly_smartbooksaic \
   -f /root/inv_migration_backups/books_pre_inventory_$(date +%Y%m%d_%H%M).dump
-pg_dump -Fc -w -U <books db user> -d <books db name> --schema-only \
+pg_dump -Fc -w -U booksaicountly_smartbooksaic_user -d booksaicountly_smartbooksaic --schema-only \
   -f /root/inv_migration_backups/books_globals_$(date +%Y%m%d).dump
 pg_restore --list /root/inv_migration_backups/books_pre_inventory_*.dump | wc -l
-createdb -w -U <books db user> books_verify
-pg_restore --no-owner --no-acl -w -U <books db user> -d books_verify \
+createdb -w -U booksaicountly_smartbooksaic_user books_verify
+pg_restore --no-owner --no-acl -w -U booksaicountly_smartbooksaic_user -d books_verify \
   /root/inv_migration_backups/books_pre_inventory_*.dump
-psql -w -U <books db user> -d books_verify -c "SELECT count(*) FROM books_voucher_headers;"
+psql -w -U booksaicountly_smartbooksaic_user -d books_verify -c "SELECT count(*) FROM books_voucher_headers;"
 ```
 Paste back the `pg_restore --list | wc -l` count and the voucher count from `books_verify`. A
 backup nobody has restored is not yet a backup.
@@ -329,7 +358,7 @@ exit
 As root:
 ```bash
 dropdb -w -U <inventory db user> inventory_verify
-dropdb -w -U <books db user> books_verify
+dropdb -w -U booksaicountly_smartbooksaic_user books_verify
 ```
 
 ---
