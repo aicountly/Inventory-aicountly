@@ -62,9 +62,10 @@ php spark inventory:migrate-books --stage=cutover --run-id=$RUN      # validate 
 ```
 Then, in this order:
 1. Books `.env`: `INVENTORY_MODE = live`. Restart PHP-FPM / clear opcache (`cpanel-post-deploy-api.sh` does it).
-2. Inventory: `php spark inventory:resync-masters` (sends the item/unit/warehouse mirror events once; Books' mirror is already identical, this proves the channel works).
-3. Smoke test with one real company: post a purchase with items and a sales invoice, cancel a test invoice, print a historical invoice, open Inventory and check the stock ledger of the item. `GET books/api/integration/inventory/health` with the service key must return `mode: live`.
-4. Lift maintenance mode. Deploy the new Books web and mobile builds (they only need the API URLs).
+2. Inventory: `php spark inventory:resync-masters --all` (sends the item/unit/warehouse mirror events once; Books' mirror is already identical, this proves the channel works).
+3. Books: `GET /api/reports/inventory-status?as_on=<today>` must answer with `"source": "inventory"` and the same closing quantities as `GET /v1/reports/warehouse-stock` here — the proof that Books now reads stock from Inventory.
+4. Smoke test with one real company: post a purchase with items and a sales invoice, cancel a test invoice, print a historical invoice, open Inventory and check the stock ledger of the item. `GET books/api/integration/inventory/health` with the service key must return `mode: live`.
+5. Lift maintenance mode. Deploy the new Books web and mobile builds (they only need the API URLs).
 
 ## 6. Post-check (T0 + 1 h, + 1 day)
 ```bash

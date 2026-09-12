@@ -59,6 +59,15 @@ Books → Inventory events (`POST /v1/integration/events`): `books.voucher.cance
 * Create or edit items, units, warehouses, item groups, stock categories, BOM (HTTP 410 → Inventory app; the mirror stays readable).
 * Compute the Items module of the year-end carry-forward (it calls `POST /v1/valuation/carry-forward`).
 
+## What Books itself does differently once live
+See `docs/INVENTORY_SPLIT.md` in the Books repository for the full table. In short: writes to
+inventory-owned masters answer 410 (reads keep using the mirror); the master import creates units,
+groups and items through this API and mirrors them at once; the inventory summary / status /
+item-ledger / stock-valuation endpoints and the inventory dashboard are served from this API in
+their legacy row shapes (`source: "inventory"` in the response); the Trading Account closing stock
+reads `GET /v1/valuation`; the year-end Items module previews and writes through
+`/v1/valuation/carry-forward`.
+
 ## Reconciliation
 Inventory's `POST /v1/reconciliation/run` compares its closing stock value with Books' Stock-in-Hand ledger balance (`GET integration/inventory/stock-ledger-balance`) and explains the difference by bucket (opening, pending postings, failed postings, reversed documents, unacknowledged revisions, revaluations, manual journals, missing sources). See `INVENTORY_RECONCILIATION.md`.
 
