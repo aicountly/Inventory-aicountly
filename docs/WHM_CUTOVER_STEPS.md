@@ -431,6 +431,36 @@ psql -w -U booksaicountly_smartbooksaic_user -d books_verify -c "SELECT count(*)
 Paste back the `pg_restore --list | wc -l` count and the voucher count from `books_verify`. A
 backup nobody has restored is not yet a backup.
 
+**Keep this dump for 180 days, and lock it down.** It is not only a disaster-recovery artefact.
+It is the frozen record of exactly what Books held at the instant of cutover, which is what you
+compare against when a user disputes a figure months from now. Nothing else reproduces that
+moment once live data has moved on.
+
+```bash
+chmod 600 /root/inv_migration_backups/*.dump
+ls -lh /root/inv_migration_backups/
+```
+Paste the sizes back so we can confirm the disk has room and the files are not world-readable —
+this is the whole company's financial history in one file.
+
+**Answering a complaint from it later.** A `-Fc` dump is not queryable on its own; it has to be
+restored first. Do that into a scratch database, never over anything live:
+```bash
+createdb -w -U booksaicountly_smartbooksaic_user books_asof_cutover
+pg_restore --no-owner --no-acl -w -U booksaicountly_smartbooksaic_user \
+  -d books_asof_cutover /root/inv_migration_backups/books_pre_inventory_<stamp>.dump
+psql -w -U booksaicountly_smartbooksaic_user -d books_asof_cutover \
+  -c "SELECT * FROM books_voucher_headers WHERE cmp_id = <id> AND vch_number = '<no>';"
+dropdb -w -U booksaicountly_smartbooksaic_user books_asof_cutover   # when finished
+```
+
+**Check the frozen tables first, though.** The cutover does not drop Books' own inventory
+tables — `books_inventory_cost_layers`, `books_inventory_wac_state`, the buckets and pending
+rows all stay in the live database, untouched from the cutover onward. For most "what did this
+item cost before the switch" questions those answer it directly, with no restore at all. Reach
+for the dump when the dispute is about something the migration did not freeze, such as a voucher
+edited after cutover.
+
 ### B4. Export Books' stock snapshot, then hand it to the Inventory account
 First as the **Books** account user:
 ```bash
