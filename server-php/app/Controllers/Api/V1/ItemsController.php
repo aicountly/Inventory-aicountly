@@ -142,7 +142,7 @@ class ItemsController extends BaseController
         $out = [];
         $db = \Config\Database::connect();
         foreach (array_chunk($ids, 500) as $chunk) {
-            $rows = $db->table('inv_items i')->select('i.item_id, i.item_uuid, i.item_name, i.item_alias, i.print_name, i.item_sku, i.item_upc, i.hsn_sac, i.unit_id, u.unit_symbol, u.uqc_gst, i.books_tax_cat_id, i.books_sales_acc_id, i.books_purchase_acc_id, i.valuation_method, i.is_active, i.deleted_at')
+            $rows = $db->table('inv_items i')->select('i.item_id, i.item_uuid, i.item_name, i.item_alias, i.print_name, i.item_sku, i.item_upc, i.hsn_sac, i.unit_id, u.unit_symbol, u.uqc_gst, i.books_tax_cat_id, i.books_sales_acc_id, i.books_purchase_acc_id, i.valuation_method, i.track_batch, i.track_serial, i.default_warehouse_id, i.is_active, i.deleted_at')
                 ->join('inv_uom u', 'u.unit_id = i.unit_id', 'left')->where('i.cmp_id', $cmpId)->whereIn('i.item_id', $chunk)->get()->getResultArray();
             foreach ($rows as $r) {
                 $out[] = $r;

@@ -377,6 +377,21 @@ class ReconciliationService
         return ['value' => round($opening + $in - $out, 4), 'in' => $in, 'out' => $out, 'unvalued' => (int) ($r['unvalued'] ?? 0)];
     }
 
+    /** @param array<string, mixed> $doc */
+    private function hasLiveReplacement(int $cmpId, array $doc): bool
+    {
+        static $cache = [];
+        $key = $cmpId . '|' . $doc['source_app'] . '|' . $doc['source_document_type'] . '|' . $doc['source_document_id'];
+        if (!array_key_exists($key, $cache)) {
+            $cache[$key] = \Config\Database::connect()->table('inv_documents')
+                ->where('cmp_id', $cmpId)->where('source_app', (string) $doc['source_app'])->where('source_document_type', (string) $doc['source_document_type'])
+                ->where('source_document_id', (int) $doc['source_document_id'])->whereIn('status', ['POSTED', 'COMPLETED', 'PARTIALLY_FULFILLED'])
+                ->countAllResults() > 0;
+        }
+
+        return $cache[$key];
+    }
+
     /** @return array{amount: float, count: int, documents: list<array<string, mixed>>} */
     private function transferValuationGap(int $cmpId, int $fyId, int $boId, string $asOf): array
     {
@@ -437,6 +452,11 @@ class ReconciliationService
             $effect = !empty($spec['valuation']) ? round((float) $r['stock_effect'], 4) : 0.0;
             if ((string) $r['status'] === 'REVERSED' && (string) $r['source_app'] === 'books'
                 && (isset($cancelledInBooks['id:' . (int) $r['source_document_id']]) || isset($cancelledInBooks['uuid:' . strtolower((string) $r['source_document_uuid'])]))) {
+                $effect = 0.0;
+            }
+            // A reversed document that was replaced by a live one for the same source (edit /
+            // resync) is fully compensated by its replacement: nothing to explain.
+            if ((string) $r['status'] === 'REVERSED' && $r['source_document_id'] !== null && $this->hasLiveReplacement($cmpId, $r)) {
                 $effect = 0.0;
             }
             $sum += $effect;

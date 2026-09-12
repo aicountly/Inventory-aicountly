@@ -168,6 +168,41 @@ class BomController extends BaseController
         return $this->respondDeleted(['data' => ['bom_id' => (int) $id]]);
     }
 
+    /**
+     * POST bill-of-materials/{id}/explode {production_qty, warehouse_id?, finished_rate?, document_date?, narration?, document_no?}
+     * -> the PRODUCTION create payload (BomService::productionPayload): component OUT lines, by-product IN lines,
+     * finished IN line and metadata {bom_id, production_qty, finished_rate, warehouse_id}. Nothing is saved.
+     */
+    public function explode($id = null)
+    {
+        $a = $this->authorizeAny([self::PERM . '.read', 'documents.production.create', 'documents.create']);
+        if (isset($a['response'])) {
+            return $a['response'];
+        }
+        $cmpId = (int) $a['ctx']['cmp_id'];
+        $body = $this->request->getJSON(true) ?? [];
+        $header = [];
+        foreach (['document_date', 'document_no', 'narration', 'metadata'] as $k) {
+            if (array_key_exists($k, $body)) {
+                $header[$k] = $body[$k];
+            }
+        }
+        try {
+            $payload = (new BomService())->productionPayload(
+                $cmpId,
+                (int) $id,
+                (float) ($body['production_qty'] ?? 0),
+                isset($body['warehouse_id']) && (int) $body['warehouse_id'] > 0 ? (int) $body['warehouse_id'] : null,
+                (float) ($body['finished_rate'] ?? 0),
+                $header,
+            );
+
+            return $this->respond(['data' => $payload]);
+        } catch (\Throwable $e) {
+            return $this->failFromException($e);
+        }
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private function baseQuery(int $cmpId)

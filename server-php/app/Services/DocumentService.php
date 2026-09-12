@@ -214,6 +214,12 @@ class DocumentService
         $doc['accounting_effects'] = json_decode((string) ($doc['accounting_effects_json'] ?? ''), true) ?: [];
         unset($doc['metadata_json'], $doc['accounting_effects_json']);
         $doc['lines'] = $lines;
+        $doc['approvals'] = $db->table('inv_document_approvals')->select('approval_id, action, actor_uuid, notes, created_at')
+            ->where('document_id', (int) $doc['document_id'])->orderBy('created_at', 'ASC')->orderBy('approval_id', 'ASC')->get()->getResultArray();
+        foreach ($doc['approvals'] as &$approval) {
+            $approval['approval_id'] = (int) $approval['approval_id'];
+        }
+        unset($approval);
         $spec = DocumentTypeRegistry::get((string) $doc['document_type']);
         $doc['document_type_label'] = $spec['label'] ?? $doc['document_type'];
 

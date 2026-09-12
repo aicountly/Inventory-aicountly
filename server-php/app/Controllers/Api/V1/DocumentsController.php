@@ -65,6 +65,14 @@ class DocumentsController extends BaseController
         if ($itemId = (int) $this->request->getGet('item_id')) {
             $b->whereIn('d.document_id', static fn ($s) => $s->select('document_id')->from('inv_document_lines')->where('item_id', $itemId));
         }
+        // warehouse_id: any line posting to / from the warehouse, or a transfer header naming it.
+        if ($warehouseId = (int) $this->request->getGet('warehouse_id')) {
+            $b->groupStart()
+                ->where('d.from_warehouse_id', $warehouseId)
+                ->orWhere('d.to_warehouse_id', $warehouseId)
+                ->orWhereIn('d.document_id', static fn ($s) => $s->select('document_id')->from('inv_document_lines')->groupStart()->where('warehouse_id', $warehouseId)->orWhere('dest_warehouse_id', $warehouseId)->groupEnd())
+                ->groupEnd();
+        }
         $total = (clone $b)->countAllResults(false);
         $sort = in_array($p['sort'], ['document_date', 'document_no', 'document_type', 'status', 'created_at', 'document_id'], true) ? $p['sort'] : 'document_date';
         $rows = $b->select('d.document_id, d.document_uuid, d.document_type, d.document_no, d.document_date, d.status, d.source_app, d.source_document_type, d.source_document_id, d.source_document_uuid, d.source_document_no, d.party_ref, d.party_name, d.from_warehouse_id, d.to_warehouse_id, d.narration, d.posted_at, d.created_at, d.fy_id, d.bo_id, (SELECT COUNT(*) FROM inv_document_lines l WHERE l.document_id = d.document_id) AS line_count, (SELECT COALESCE(SUM(l.valuation_amount),0) FROM inv_document_lines l WHERE l.document_id = d.document_id) AS valuation_total', false)
