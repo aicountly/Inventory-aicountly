@@ -18,7 +18,7 @@ Roles: DBA (PostgreSQL), release engineer (deploys, env), accountant/owner (sign
 
 ## 1. Freeze and back up Books (T0)
 1. Announce maintenance; put Books in maintenance mode (no vouchers may post while the copy runs — the migration is a point-in-time copy).
-2. Backup, keep it until sign-off + 30 days:
+2. Backup. **Keep it 180 days**, not until sign-off: it is the reference copy for answering a user complaint months later (see `WHM_CUTOVER_STEPS.md` B3), not just a disaster-recovery artefact.
    ```bash
    pg_dump -Fc -Z6 --no-owner --no-acl -h $BOOKS_HOST -U $BOOKS_ADMIN -d books \
      -f /backups/books_pre_inventory_$(date +%Y%m%d_%H%M).dump

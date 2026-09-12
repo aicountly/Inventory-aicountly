@@ -347,17 +347,18 @@ curl -s https://inventory.aicountly.com/api/health
 Then check ownership of what the migration just created. The cutover's sequence reset calls
 `setval()` on every `inv_*` sequence, which requires ownership, so a wrong owner here surfaces
 as a failure at the worst possible moment rather than now:
+Use a separate `-c` per statement. A single `-c` holding several statements prints only the
+**last** result, so the earlier checks run but their answers are silently thrown away — which
+would quietly skip the ownership check this step exists for:
 ```bash
-psql -h 127.0.0.200 -p 5432 -U inventoryaic_inventory_user -d inventoryaic_inventory -tAc "
-SELECT 'tables not owned by the .env user: ' || count(*)
-  FROM pg_tables WHERE schemaname='public' AND tableowner <> 'inventoryaic_inventory_user';
-SELECT 'sequences not owned by the .env user: ' || count(*)
-  FROM pg_sequences WHERE schemaname='public' AND sequenceowner <> 'inventoryaic_inventory_user';
-SELECT 'inv_ tables created: ' || count(*)
-  FROM pg_tables WHERE schemaname='public' AND tablename LIKE 'inv\\_%';"
+psql -h 127.0.0.200 -p 5432 -U inventoryaic_inventory_user -d inventoryaic_inventory -tA \
+  -c "SELECT 'tables_not_owned=' || count(*) FROM pg_tables WHERE schemaname='public' AND tableowner <> 'inventoryaic_inventory_user';" \
+  -c "SELECT 'sequences_not_owned=' || count(*) FROM pg_sequences WHERE schemaname='public' AND sequenceowner <> 'inventoryaic_inventory_user';" \
+  -c "SELECT 'inv_tables=' || count(*) FROM pg_tables WHERE schemaname='public' AND tablename LIKE 'inv\\_%';" \
+  -c "SELECT 'inv_sequences=' || count(*) FROM pg_sequences WHERE schemaname='public';"
 ```
-Paste back the health JSON and these three counts. The first two must be `0`; the third must be
-a healthy count of `inv_*` tables, not zero.
+Paste back the health JSON and all four counts. The two `not_owned` counts must be `0`, and both
+totals must be non-zero.
 
 ### A7. Inventory's cron (cPanel → Cron Jobs, or `crontab -e` in this terminal)
 ```
@@ -417,6 +418,18 @@ Put Books in maintenance mode. No voucher may post from this point until cutover
 migration is a point-in-time copy, and anything posted during the freeze would be missed by it.
 
 ### B3. Back up Books, and prove the backup is real (root)
+Check there is room first. A dump that dies halfway on a full disk, during the freeze, with
+users locked out, is the worst way to discover this. Books holds ~69,700 vouchers, so expect a
+compressed dump in the hundreds of megabytes, and the verify restore in B3 needs roughly the
+uncompressed size again on the database volume:
+```bash
+df -h /root /var/lib/pgsql 2>/dev/null || df -h /root
+psql -w -U booksaicountly_smartbooksaic_user -d booksaicountly_smartbooksaic \
+  -tAc "SELECT pg_size_pretty(pg_database_size('booksaicountly_smartbooksaic'));"
+```
+**Paste both back before running the dump.** If free space is not comfortably more than twice the
+reported database size, stop and tell me rather than starting the dump.
+
 ```bash
 pg_dump -Fc -Z6 --no-owner --no-acl -w -U booksaicountly_smartbooksaic_user -d booksaicountly_smartbooksaic \
   -f /root/inv_migration_backups/books_pre_inventory_$(date +%Y%m%d_%H%M).dump
@@ -430,6 +443,36 @@ psql -w -U booksaicountly_smartbooksaic_user -d books_verify -c "SELECT count(*)
 ```
 Paste back the `pg_restore --list | wc -l` count and the voucher count from `books_verify`. A
 backup nobody has restored is not yet a backup.
+
+**Keep this dump for 180 days, and lock it down.** It is not only a disaster-recovery artefact.
+It is the frozen record of exactly what Books held at the instant of cutover, which is what you
+compare against when a user disputes a figure months from now. Nothing else reproduces that
+moment once live data has moved on.
+
+```bash
+chmod 600 /root/inv_migration_backups/*.dump
+ls -lh /root/inv_migration_backups/
+```
+Paste the sizes back so we can confirm the disk has room and the files are not world-readable —
+this is the whole company's financial history in one file.
+
+**Answering a complaint from it later.** A `-Fc` dump is not queryable on its own; it has to be
+restored first. Do that into a scratch database, never over anything live:
+```bash
+createdb -w -U booksaicountly_smartbooksaic_user books_asof_cutover
+pg_restore --no-owner --no-acl -w -U booksaicountly_smartbooksaic_user \
+  -d books_asof_cutover /root/inv_migration_backups/books_pre_inventory_<stamp>.dump
+psql -w -U booksaicountly_smartbooksaic_user -d books_asof_cutover \
+  -c "SELECT * FROM books_voucher_headers WHERE cmp_id = <id> AND vch_number = '<no>';"
+dropdb -w -U booksaicountly_smartbooksaic_user books_asof_cutover   # when finished
+```
+
+**Check the frozen tables first, though.** The cutover does not drop Books' own inventory
+tables — `books_inventory_cost_layers`, `books_inventory_wac_state`, the buckets and pending
+rows all stay in the live database, untouched from the cutover onward. For most "what did this
+item cost before the switch" questions those answer it directly, with no restore at all. Reach
+for the dump when the dispute is about something the migration did not freeze, such as a voucher
+edited after cutover.
 
 ### B4. Export Books' stock snapshot, then hand it to the Inventory account
 First as the **Books** account user:

@@ -7,6 +7,10 @@
 #
 # .env.example IS deployed from git on every release.
 
+# .env.example must survive the workflow's --exclude='.env.*', which otherwise strips it and
+# leaves a first deploy with nothing to bootstrap .env from. Merge-file rules are evaluated
+# before the command-line excludes, so this include wins.
++ .env.example
 P .env
 - .env
 P writable/logs/**
