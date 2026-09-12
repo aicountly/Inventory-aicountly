@@ -30,6 +30,44 @@ the app exchanges it for a short-lived session key. Trusted backends (Books, POS
 call the API with a service key instead. See
 [docs/auth/AICOUNTLY_AUTH_WORKFLOW.md](docs/auth/AICOUNTLY_AUTH_WORKFLOW.md).
 
+### The web app
+
+After sign-in the app mounts a left navigation and a header with
+**company / financial year / branch** selectors. Every API call carries that
+selection (`cmp_id`, `fy_id`, `bo_id`; branch 0 = all branches) and it is
+remembered per browser. Companies, branches and financial years come from
+Manage through the API's read-only relay (`/api/manage/...`).
+
+- **Dashboard** — counters from `GET /v1/dashboard`: masters, documents by
+  status, stock health, Books integration, last reconciliation.
+- **Items** — list with search, filters, sort and paging; create / edit with
+  alternate units and conversions, tracking flags, stock levels and opening
+  stock per warehouse (`/v1/items/{id}/openings`); soft delete.
+- **Masters** — item groups (tree), stock categories, brands, units of measure,
+  warehouse groups (tree), warehouses, locations, bills of materials
+  (components, by-products, scrap), batches and serial numbers (single and
+  bulk registration).
+
+Actions the user is not permitted to take (`GET /v1/access/me`) are hidden;
+the API still enforces every permission.
+
+```
+web/src/
+  services/api.ts   typed fetch wrapper: bearer session, company-scope injection,
+                    {data, meta} lists, {error:{code,message,details}} → ApiError
+  services/*.ts     one module per API area (manage relay, access, items, masters…)
+  company/          CompanyProvider — the selected company / FY / branch (API scope)
+  access/           AccessProvider — permissions from /v1/access/me, `can(key)`
+  layout/           app shell: sidebar, header, context selectors
+  masters/          config-driven master screens (MasterPage + MasterConfig)
+  pages/            routed screens; router.tsx is the route table
+  components/       table, pagination, modal, form field, item typeahead…
+```
+
+Unit tests (`npm test`, Vitest) cover the pure helpers: the API client's query
+and pagination helpers, Manage payload normalisers, tree building, form
+value ↔ payload mapping, and the item / BOM / serial form helpers.
+
 ## Layout
 
 ```
