@@ -15,6 +15,21 @@ judgement about your account's actual paths; wherever a value is genuinely accou
 (document root, DB host) the first steps below have you confirm it from what Books already runs
 in production, rather than guessing.
 
+### Never paste secrets back
+
+No step in this document needs a password, service key, or private key sent to anyone. If a
+command's output would contain one, redact it or run the narrower version instead. Specifically:
+
+* `.env` greps here are always restricted to non-secret keys (`hostname`, `port`, `database`,
+  `CI_ENVIRONMENT`, `app.baseURL`, `INVENTORY_MODE`). Never `grep` the whole file and paste it.
+* `/var/cpanel/databases/grants_*.yaml` and `*.json` contain credentials. Extract names only.
+* The two health checks read the service key inline with `$(grep … .env | cut -d= -f2-)` so the
+  key is substituted by your shell and never appears in what you copy or in what comes back.
+* `~/.pgpass` holds passwords by design. You type into it; you never read it back out.
+
+If you are ever unsure whether an output is safe to share, describe it in words instead. "Yes,
+an inventory database already exists" carries every bit of information the next step needs.
+
 Non-negotiables carried through this whole document: Books' data is only ever read, never
 written, until cutover flips one flag; every stage keeps the same `--run-id`; a rehearsal against
 a restored copy of your real production backup runs before anything touches the real databases;
