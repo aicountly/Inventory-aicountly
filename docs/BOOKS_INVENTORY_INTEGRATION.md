@@ -63,5 +63,5 @@ Books → Inventory events (`POST /v1/integration/events`): `books.voucher.cance
 Inventory's `POST /v1/reconciliation/run` compares its closing stock value with Books' Stock-in-Hand ledger balance (`GET integration/inventory/stock-ledger-balance`) and explains the difference by bucket (opening, pending postings, failed postings, reversed documents, unacknowledged revisions, revaluations, manual journals, missing sources). See `INVENTORY_RECONCILIATION.md`.
 
 ## Cron
-* Inventory: `php spark inventory:outbox-dispatch` (every minute), `php spark inventory:recalc-worker` (every minute), `php spark inventory:rebuild-balances` (nightly, optional).
+* Inventory: `php spark inventory:outbox-dispatch` (every minute), `php spark inventory:recalc-worker` (every minute), `php spark inventory:expire-reservations` (every five minutes), `php spark inventory:rebuild-balances` (nightly, optional).
 * Books: `php spark books:inventory-retry` (every minute; a no-op unless something is queued).

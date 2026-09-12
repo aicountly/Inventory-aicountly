@@ -166,4 +166,5 @@ Cron (cPanel → Cron Jobs), every minute:
 cd /home/<user>/public_html/<host>/api && php spark inventory:outbox-dispatch >/dev/null 2>&1
 cd /home/<user>/public_html/<host>/api && php spark inventory:recalc-worker  >/dev/null 2>&1
 ```
-and nightly `php spark inventory:reconcile --all`.
+every five minutes `php spark inventory:expire-reservations` (releases reservations whose
+`expires_at` has passed), and nightly `php spark inventory:reconcile --all`.
