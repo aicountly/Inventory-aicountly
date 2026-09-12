@@ -1,0 +1,12 @@
+vendor/
+.env
+writable/cache/*
+writable/logs/*
+writable/session/*
+writable/debugbar/*
+writable/tmp/
+writable/migration/*
+!writable/**/.gitkeep
+build/
+REVISION
+.phpunit.result.cache

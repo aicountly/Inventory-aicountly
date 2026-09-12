@@ -1,0 +1,26 @@
+# cPanel api/ rsync filters (use: rsync --filter='merge scripts/cpanel-rsync-api.filters')
+#
+# P .env       never delete the server's .env when using --delete
+# - .env       never copy a .env from the CI checkout (secrets live only on the server)
+# - writable   runtime state (logs, cache, migration run logs) belongs to the server
+# - tests      not needed at runtime
+#
+# .env.example IS deployed from git on every release.
+
+P .env
+- .env
+P writable/logs/**
+P writable/cache/**
+P writable/session/**
+P writable/debugbar/**
+P writable/migration/**
+- writable/logs/**
+- writable/cache/**
+- writable/session/**
+- writable/debugbar/**
+- writable/migration/**
+- tests/
+- .phpunit.result.cache
+- phpunit.xml
+- phpunit-integration.xml
+- .gitignore

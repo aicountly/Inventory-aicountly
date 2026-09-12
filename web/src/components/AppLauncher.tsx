@@ -12,7 +12,8 @@ import type { LauncherTile } from '../services/appLauncher'
 import { useLauncherTileIcon } from '../services/useLauncherTileIcon'
 
 const S: Record<string, CSSProperties> = {
-  wrap: { position: 'fixed', top: 16, left: 16, zIndex: 1000, display: 'inline-block' },
+  // Positioned by its host (the app header) rather than pinned to the viewport.
+  wrap: { position: 'relative', zIndex: 1000, display: 'inline-block' },
   trigger: {
     display: 'inline-flex',
     alignItems: 'center',
