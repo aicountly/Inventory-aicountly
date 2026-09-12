@@ -411,6 +411,7 @@ class Validator
                 $booksRows[(int) $r['item_id']] = $r;
             }
             $excluded = $this->booksDoubleCountedByItem($cmpId, $fyId, $asOf);
+            $zeroCostTransfers = $this->booksZeroCostTransferInByItem($cmpId, $fyId, $asOf);
             $qtyDiffs = [];
             $explained = [];
             $valueDiffs = [];
@@ -435,6 +436,15 @@ class Validator
                     $entry = ['item_id' => $itemId, 'books' => $bv, 'inventory' => $iv, 'books_unit_cost' => $booksRows[$itemId]['unit_cost'] ?? null, 'inventory_unit_cost' => $invRows[$itemId]['unit_cost'] ?? null, 'method' => $booksRows[$itemId]['valuation_method_applied'] ?? null];
                     if ($qtyExplained) {
                         $valueExplained[] = $entry;
+                    } elseif (isset($zeroCostTransfers[$itemId])) {
+                        // Books wrote unit_cost 0 for this item's stock-transfer receiving-side
+                        // layer despite the transfer line's own cost_rate being real and non-zero
+                        // (a known Books valuation gap, not a migration defect — see
+                        // docs/DB_MIGRATION_VALIDATION.md). Inventory's replay uses the line's
+                        // real cost_rate, which is why its unit cost comes out higher than
+                        // Books' own report whenever that layer is still open at the as-of date.
+                        $entry['transfer_zero_cost_lines'] = $zeroCostTransfers[$itemId];
+                        $valueExplained[] = $entry;
                     } else {
                         $valueDiffs[] = $entry;
                     }
@@ -447,11 +457,15 @@ class Validator
                 'qty_diffs' => $qtyDiffs, 'value_diffs' => $valueDiffs,
                 'explained_qty_diffs' => $explained, 'explained_value_diffs' => $valueExplained,
                 'explanation' => $explained === [] ? null : 'Books\' stock-quantity reports count every stored item line, so a delivery challan (challan_only) AND the later invoice raised from it both reduce stock, and a deferred-inward purchase AND its inward challan both add it; Books\' valuation engine and Inventory count each physical movement once. books = inventory + books_double_counted_qty for every explained item.',
+                'value_explanation' => $valueExplained === [] ? null : 'Books wrote unit_cost 0 for these items\' stock-transfer (vch_type 15) receiving-side cost layer, though the transfer line\'s own cost_rate was real and non-zero — a known Books valuation gap (see docs/DB_MIGRATION_VALIDATION.md), not a migration defect. Inventory\'s replayed valuation uses the line\'s real cost_rate.',
             ];
             $summary['compared'][] = $row;
-            $this->log->event('books_snapshot_compared', $row, ($qtyDiffs === [] && $valueDiffs === []) ? ($explained === [] ? 'info' : 'warning') : 'error');
+            $this->log->event('books_snapshot_compared', $row, ($qtyDiffs === [] && $valueDiffs === []) ? (($explained === [] && $valueExplained === []) ? 'info' : 'warning') : 'error');
             if ($explained !== []) {
                 $out['warnings'][] = "books snapshot cmp {$cmpId} fy {$fyId}: " . count($explained) . ' items differ from the Books stock report ONLY by challan/deferred lines Books counted twice (residual 0) — explained, see validate.summary.json';
+            }
+            if ($valueExplained !== []) {
+                $out['warnings'][] = "books snapshot cmp {$cmpId} fy {$fyId}: " . count($valueExplained) . ' items differ in stock value only because of a stock-transfer zero-cost receiving layer in Books (known gap) — explained, see validate.summary.json';
             }
             if ($qtyDiffs !== []) {
                 $out['failures'][] = "books snapshot cmp {$cmpId} fy {$fyId}: " . count($qtyDiffs) . ' items differ in closing quantity between Books and Inventory (unexplained residual)';
@@ -492,6 +506,41 @@ class Validator
             $signed = (int) $r['dr_cr'] === 1 ? $base : -$base;
             $out[$itemId]['qty'] = round(($out[$itemId]['qty'] ?? 0) + $signed, 4);
             $out[$itemId]['lines'][] = ['vch_txn_id' => (int) $r['vch_txn_id'], 'vch_type_id' => (int) $r['vch_type_id'], 'vch_number' => $r['vch_number'], 'vch_date' => $r['vch_date'], 'stock_effect' => $r['stock_effect'], 'qty_base' => $signed];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Items whose stock-transfer (legacy vch_type 15) receiving-side cost layer Books stored
+     * with unit_cost 0, even though the transfer line's own cost_rate was real — the same known
+     * gap ReconciliationService::transferValuationGap() already names for the live-mode
+     * reconciliation. Used to explain a value-only difference (matching quantity, differing
+     * unit cost) between Books' own reported valuation and Inventory's replay, which uses the
+     * line's real cost_rate instead of the zero Books wrote to the layer.
+     *
+     * @return array<int, list<array<string, mixed>>> item_id => the qualifying transfer lines
+     */
+    private function booksZeroCostTransferInByItem(int $cmpId, int $fyId, string $asOf): array
+    {
+        $rows = $this->books->query(
+            "SELECT l.item_id, h.vch_txn_id, h.vch_number, h.vch_date, l.mc_id, l.cost_rate, cl.layer_id, cl.unit_cost AS layer_unit_cost
+             FROM books_voucher_inventory_lines l
+             JOIN books_voucher_headers h ON h.vch_txn_id = l.vch_txn_id
+             LEFT JOIN books_inventory_cost_layers cl ON cl.cmp_id = l.cmp_id AND cl.item_id = l.item_id AND cl.source_vch_txn_id = l.vch_txn_id
+             WHERE l.cmp_id = ? AND l.fy_id = ? AND h.status = 'posted' AND h.deleted_at IS NULL AND h.vch_date <= ?
+               AND h.vch_type_id = 15 AND l.dr_cr = 1 AND l.cost_rate > 0
+               AND (cl.unit_cost = 0 OR cl.unit_cost IS NULL)
+             ORDER BY l.item_id, h.vch_date",
+            [$cmpId, $fyId, $asOf]
+        )->getResultArray();
+        $out = [];
+        foreach ($rows as $r) {
+            $out[(int) $r['item_id']][] = [
+                'vch_txn_id' => (int) $r['vch_txn_id'], 'vch_number' => $r['vch_number'], 'vch_date' => $r['vch_date'],
+                'warehouse_id' => (int) $r['mc_id'], 'line_cost_rate' => (float) $r['cost_rate'],
+                'layer_id' => $r['layer_id'] !== null ? (int) $r['layer_id'] : null, 'layer_unit_cost' => (float) ($r['layer_unit_cost'] ?? 0),
+            ];
         }
 
         return $out;

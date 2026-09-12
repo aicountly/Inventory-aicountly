@@ -11,6 +11,24 @@ use CodeIgniter\Database\BaseConnection;
  */
 class SequenceResetter
 {
+    /**
+     * (table, column) pairs whose PK mixes organic, sequence-generated ids with a permanently
+     * reserved synthetic range — TableMap::LINE_ID_OFFSET_PACKING / LINE_ID_OFFSET_JOB_WORK on
+     * inv_document_lines.line_id, TableMap::OPENING_ID_OFFSET_INCEPTION on
+     * inv_item_openings.opening_id. Naively resetting the sequence to MAX(column) picks up the
+     * synthetic offset instead of the true organic high-water mark, so every document line (or
+     * opening) created after cutover would allocate ids inside the space reserved for migrated
+     * packing / job-work lines (or inception openings) — silently colliding with a later
+     * migration batch that legitimately needs that same offset range for a different company.
+     * The reset must only ever consider ids below the lowest reserved offset.
+     *
+     * @var array<string, array<string, int>>
+     */
+    private const ORGANIC_ID_CEILING = [
+        'inv_document_lines' => ['line_id' => TableMap::LINE_ID_OFFSET_PACKING],
+        'inv_item_openings'  => ['opening_id' => TableMap::OPENING_ID_OFFSET_INCEPTION],
+    ];
+
     public function __construct(private BaseConnection $db)
     {
     }
@@ -28,7 +46,9 @@ class SequenceResetter
         )->getResultArray();
         $out = [];
         foreach ($rows as $r) {
-            $max = (int) ($this->db->query('SELECT COALESCE(MAX(' . $r['col'] . '),0) m FROM ' . $r['tbl'])->getRowArray()['m'] ?? 0);
+            $ceiling = self::ORGANIC_ID_CEILING[$r['tbl']][$r['col']] ?? null;
+            $sql = 'SELECT COALESCE(MAX(' . $r['col'] . '),0) m FROM ' . $r['tbl'];
+            $max = (int) ($this->db->query($ceiling !== null ? $sql . ' WHERE ' . $r['col'] . ' < ?' : $sql, $ceiling !== null ? [$ceiling] : [])->getRowArray()['m'] ?? 0);
             $cur = $this->db->query('SELECT last_value, is_called FROM ' . $r['seq'])->getRowArray();
             $before = (int) ($cur['last_value'] ?? 0);
             $target = max($max, 1);
