@@ -6,6 +6,8 @@ Two different situations, two different rollbacks. In both, **Books' data is nev
 Nothing has changed for users. Options, from cheapest:
 1. Fix the cause in Books (orphans, duplicates) or in the migration, then `migrate --company=<id> --replace` for the affected company and `validate` again.
 2. Drop the run entirely: `php spark inventory:migrate-books --stage=rollback --run-id=<id> --yes` deletes every row the run wrote (via `inv_legacy_id_map`), materialised balances for those companies, and resets sequences. Or simply `dropdb inventory && createdb inventory && php spark inventory:sql-migrate`.
+
+   **Use the exact `<id>` the `migrate` stage itself was given (or printed) — never omit `--run-id` and never reuse a different stage's own value.** Omitting it does not reuse the last one you typed; the command silently invents a fresh timestamp-based id, matches zero rows in `inv_legacy_id_map`, and still prints `ROLLBACK complete` having deleted nothing. A rehearsal on this branch hit exactly this. After any rollback, **verify before trusting the message**: `SELECT count(*) FROM inv_legacy_id_map WHERE migration_run_id = '<id>'` (expect 0) and re-check the tables' row counts directly — do not rely on the exit message alone.
 3. Postpone the window; Books keeps running in `legacy` mode.
 
 ## B. After `INVENTORY_MODE=live` (cutover done, problem found in production)

@@ -38,8 +38,12 @@ Roles: DBA (PostgreSQL), release engineer (deploys, env), accountant/owner (sign
 ```bash
 createdb -O inventory_app inventory           # empty database, PostgreSQL 16
 cd inventory/api && php spark inventory:sql-migrate    # creates every inv_* table
-php spark inventory:migrate-books --stage=precheck --run-id=$RUN   # RUN=prod-YYYYMMDD
+export RUN=prod-$(date +%Y%m%d)                # set ONCE for the whole batch, see warning below
+echo "$RUN" | tee /root/inv_migration_run_id_$(date +%Y%m%d).txt   # persisted in case the shell session is lost
+php spark inventory:migrate-books --stage=precheck --run-id=$RUN
 ```
+**`--run-id` safety.** The command silently defaults to the current timestamp (`date('Ymd-His')`) whenever `--run-id` is omitted — it does not error and does not warn. Passing it on `precheck` but forgetting it on a later stage does not reuse `$RUN`; it invents a *different* run-id for that stage, and every table lookup keyed on `migration_run_id` (validate's own bookkeeping, and especially `rollback`) then silently operates on an empty or wrong run. A rehearsal of a second batch on this branch hit exactly this: `rollback` printed `ROLLBACK complete` for a run-id that matched zero rows, while the real migrated rows were untouched. **Export `$RUN` once here, persist it to a file as shown, and pass `--run-id="$RUN"` explicitly on every single `validate` / `cutover` / `postcheck` / `rollback` invocation for this batch — never rely on shell history or "the last one I typed."** If a new terminal session is opened mid-cutover, re-load it with `RUN=$(cat /root/inv_migration_run_id_*.txt)` before continuing, and echo it back to confirm before running anything.
+
 Precheck must print `PRECHECK ok`. Blocking findings (orphan lines, items without company) are fixed in Books **before** continuing, or documented and approved in writing. Warnings (duplicate names, `dr_cr` contradictions, missing units) are reviewed: they tell you where Books' reports and Books' valuation disagree today.
 
 ## 3. Migrate
