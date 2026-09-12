@@ -183,37 +183,86 @@ This deploys `web/dist/` and `server-php/` and runs `cpanel-post-deploy-api.sh`,
 Composer, applies `inventory:sql-migrate`, and probes `status.php` — but there's no `api/.env`
 yet, so the health probe will warn. That's expected on a first deploy; continue to A5.
 
-### A5. Create Inventory's `api/.env` by hand (this is the one file the deploy never touches)
+### A5 part 1. Create the two database roles in cPanel (before the deploy, any time)
+
+**The Inventory database.** In cPanel for the **`inventoryaic`** account, PostgreSQL Databases:
+create database `inventory`, create user `inventory_user`, then add that user to that database
+with **ALL PRIVILEGES**. cPanel prefixes both with the account name, giving:
+
+| | |
+|---|---|
+| database | `inventoryaic_inventory` |
+| user | `inventoryaic_inventory_user` |
+| host / port | `127.0.0.200` / `5432` (same server Books uses) |
+
+That matches Books (`booksaicountly_smartbooksaic` / `..._user`) and the sandbox naming in
+`server-php/.env.example`. Create it through the cPanel UI, not raw SQL, so cPanel registers the
+ownership and grants in its own bookkeeping — that registration is what makes the database show
+up and be manageable in phpPgAdmin for the account.
+
+On PostgreSQL 13 the `public` schema still grants `CREATE` to `PUBLIC` by default (this changed
+in 15), so `inventoryaic_inventory_user` can create the `inv_*` tables via
+`inventory:sql-migrate` with no extra grant needed.
+
+**The Books read-only role.** The migration reads Books from the Inventory app, and it must be
+incapable of writing there. Create this one under the **`booksaicountly`** account, PostgreSQL
+Databases: create user `invread` (becomes `booksaicountly_invread`) and add it to
+`booksaicountly_smartbooksaic`.
+
+cPanel's PostgreSQL screen does not offer a read-only privilege level the way its MySQL screen
+does, so tighten it yourself. Connect as the Books database owner, which can grant on its own
+tables without any superuser access:
+```bash
+psql -w -h 127.0.0.200 -p 5432 -U booksaicountly_smartbooksaic_user -d booksaicountly_smartbooksaic
+```
+then:
+```sql
+GRANT USAGE ON SCHEMA public TO booksaicountly_invread;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO booksaicountly_invread;
+GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO booksaicountly_invread;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO booksaicountly_invread;
+ALTER ROLE booksaicountly_invread SET default_transaction_read_only = on;
+\q
+```
+The last line is the belt-and-braces one: every session that role opens starts read-only, so a
+write fails even if some grant slips through later.
+
+**Prove it before trusting it.** Connect as the read-only role and confirm both halves:
+```bash
+psql -w -h 127.0.0.200 -p 5432 -U booksaicountly_invread -d booksaicountly_smartbooksaic \
+  -c "SELECT count(*) FROM books_voucher_headers;" \
+  -c "CREATE TABLE should_not_work (x int);"
+```
+**Paste back both results.** The `SELECT` must return a count and the `CREATE TABLE` must fail
+with a read-only transaction error. If the `CREATE TABLE` succeeds, stop and tell me — we do not
+run a migration with a role that can write to Books.
+
+### A5 part 2. Write Inventory's `api/.env` (the one file the deploy never touches)
+Do this after the first deploy in A4, since `.env.example` arrives with it.
 ```bash
 cd /home/inventoryaic/public_html/api
 cp .env.example .env
 ```
-Edit `.env` (via terminal `nano .env`/`vi .env`, or cPanel File Manager) and set, at minimum:
+Edit `.env` (terminal `nano .env`, or cPanel File Manager) and set:
 - `CI_ENVIRONMENT = production`
 - `app.baseURL = 'https://inventory.aicountly.com/api/'`
 - `INVENTORY_APP_URL = https://inventory.aicountly.com/`
-- `database.default.hostname/port` — same values you just read from Books' `.env` in A1
-- `database.default.database` / `.username` / `.password` — a **new** database for Inventory.
-  Create it in **cPanel → PostgreSQL Databases**: create the database (cPanel prefixes it with
-  the account name, so naming it `inventory` gives `<cpaneluser>_inventory`), create a user the
-  same way (gives `<cpaneluser>_inventory_user`), then add that user to that database with **ALL
-  PRIVILEGES**. Use the full prefixed names in `.env`. (If your account's Postgres role can run
-  raw DDL instead, the equivalent is `CREATE DATABASE`/`CREATE ROLE`/`GRANT ALL PRIVILEGES ON
-  DATABASE … TO …` — but the cPanel UI is the documented path for this hosting setup and prefixes
-  names correctly on its own.)
-- `INVENTORY_SERVICE_KEYS = books:<generate a strong random key>` and
-  `BOOKS_SERVICE_KEY = <generate a different strong random key>` — you'll paste the same two
-  keys into Books' `.env` in A8, in the matching direction.
-- `BOOKS_DB_HOST/PORT/NAME/USER/PASSWORD` — a **read-only** role for the migration to read Books
-  through. Same idea in **cPanel → PostgreSQL Databases**: create a user (e.g. `books_readonly`),
-  add it to the existing Books database, and set its **privilege level to read-only** in the
-  "Manage User Privileges" screen (cPanel's Postgres UI offers a read-only grant directly — it is
-  the same as `GRANT SELECT ON ALL TABLES/SEQUENCES IN SCHEMA public`, without write access).
-Leave `INVENTORY_ACCESS_BYPASS=0`.
+- `database.default.hostname = 127.0.0.200`, `database.default.port = 5432`
+- `database.default.database = inventoryaic_inventory`
+- `database.default.username = inventoryaic_inventory_user`, and its password
+- `INVENTORY_SERVICE_KEYS = books:<strong random key>` and `BOOKS_SERVICE_KEY = <a different
+  strong random key>`. The same two values go into Books' `.env` in A8, in the matching
+  direction. Generate them with `openssl rand -hex 32`.
+- `BOOKS_DB_HOST = 127.0.0.200`, `BOOKS_DB_PORT = 5432`,
+  `BOOKS_DB_NAME = booksaicountly_smartbooksaic`,
+  `BOOKS_DB_USER = booksaicountly_invread` and its password
+- Leave `INVENTORY_ACCESS_BYPASS=0`
 
-**Paste back**: the output of
-`grep -E "^(CI_ENVIRONMENT|app\.baseURL|database\.default\.(hostname|port|database)) " .env`
-(values only, never paste passwords/keys to me) so I can sanity-check before you continue.
+**Paste back** only:
+```bash
+grep -E "^(CI_ENVIRONMENT|app\.baseURL|database\.default\.(hostname|port|database)|BOOKS_DB_(HOST|PORT|NAME|USER)) " .env
+```
+That pattern excludes every password and key by construction.
 
 ### A6. Confirm Inventory is healthy
 Re-run **Deploy to cPanel Production** for Inventory (picks up the new `.env`, re-applies
