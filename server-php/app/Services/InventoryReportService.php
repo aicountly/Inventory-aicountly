@@ -210,7 +210,7 @@ class InventoryReportService
         $seq = 'm.movement_date ASC, m.sequence_no ASC, m.document_id ASC, m.line_id ASC, m.movement_id ASC';
         $dir = strtoupper($order) === 'DESC' ? 'DESC' : 'ASC';
         $sql = 'SELECT m.movement_id, m.movement_uuid, m.movement_date, m.sequence_no, m.document_id, m.line_id, m.document_type, m.warehouse_id, m.location_id, m.batch_id, m.direction, m.qty, m.unit_cost, m.value, m.movement_kind, m.reversal_of_movement_id, m.created_at,'
-            . ' d.document_no, d.status AS document_status, d.party_ref, d.party_name, d.source_app, d.source_document_type, d.source_document_no, d.narration,'
+            . ' d.document_no, d.status AS document_status, d.party_ref, d.party_name, d.source_app, d.source_document_type, d.source_document_id, d.source_document_no, d.narration,'
             . ' w.warehouse_name, bt.batch_no, l.qty AS line_qty, l.unit_id AS line_unit_id, u.unit_symbol AS line_unit_symbol, l.description AS line_description,'
             . ' SUM(m.qty) OVER (ORDER BY ' . $seq . ' ROWS UNBOUNDED PRECEDING) AS running_qty,'
             . ' SUM(COALESCE(m.value,0)) OVER (ORDER BY ' . $seq . ' ROWS UNBOUNDED PRECEDING) AS running_value'
@@ -238,7 +238,7 @@ class InventoryReportService
                 'document_status'    => $r['document_status'],
                 'source_app'         => $r['source_app'],
                 'source_document_type' => $r['source_document_type'],
-                'source_document_no' => $r['source_document_no'],
+                'source_document_id' => isset($r['source_document_id']) ? (int) $r['source_document_id'] : null, 'source_document_no' => $r['source_document_no'],
                 'party_ref'          => isset($r['party_ref']) ? (int) $r['party_ref'] : null,
                 'party_name'         => $r['party_name'],
                 'narration'          => $r['narration'],
