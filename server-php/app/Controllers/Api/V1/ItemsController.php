@@ -32,7 +32,17 @@ class ItemsController extends BaseController
         }
         $cmpId = (int) $a['ctx']['cmp_id'];
         $db = \Config\Database::connect();
-        $live = static fn ($t) => $db->table($t)->where('cmp_id', $cmpId)->where('deleted_at', null)->where('is_active', 1);
+        // A group, category or unit deactivated after items were already assigned to it must
+        // stay selectable as a filter, or those items become unreachable in the master list.
+        $includeInactive = (int) ($this->request->getGet('include_inactive') ?? 0) === 1;
+        $live = static function ($t) use ($db, $cmpId, $includeInactive) {
+            $b = $db->table($t)->where('cmp_id', $cmpId)->where('deleted_at', null);
+            if (!$includeInactive) {
+                $b->where('is_active', 1);
+            }
+
+            return $b;
+        };
 
         return $this->respond(['data' => [
             'item_groups'      => $live('inv_item_groups')->select('item_grp_id, grp_name, grp_alias, is_primary, parent_grp_id')->orderBy('grp_name')->get()->getResultArray(),
@@ -65,6 +75,11 @@ class ItemsController extends BaseController
             if ($v = (int) $this->request->getGet($f)) {
                 $b->where('i.' . $f, $v);
             }
+        }
+        // The tax category belongs to Books and is held here as an opaque id, so the column is
+        // books_tax_cat_id while Books' own item-master filter sends it as tax_cat_id.
+        if ($taxCat = (int) ($this->request->getGet('books_tax_cat_id') ?? $this->request->getGet('tax_cat_id'))) {
+            $b->where('i.books_tax_cat_id', $taxCat);
         }
         if ($t = $this->request->getGet('item_type')) {
             $b->where('i.item_type', $t);
