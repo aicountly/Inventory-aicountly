@@ -347,17 +347,18 @@ curl -s https://inventory.aicountly.com/api/health
 Then check ownership of what the migration just created. The cutover's sequence reset calls
 `setval()` on every `inv_*` sequence, which requires ownership, so a wrong owner here surfaces
 as a failure at the worst possible moment rather than now:
+Use a separate `-c` per statement. A single `-c` holding several statements prints only the
+**last** result, so the earlier checks run but their answers are silently thrown away — which
+would quietly skip the ownership check this step exists for:
 ```bash
-psql -h 127.0.0.200 -p 5432 -U inventoryaic_inventory_user -d inventoryaic_inventory -tAc "
-SELECT 'tables not owned by the .env user: ' || count(*)
-  FROM pg_tables WHERE schemaname='public' AND tableowner <> 'inventoryaic_inventory_user';
-SELECT 'sequences not owned by the .env user: ' || count(*)
-  FROM pg_sequences WHERE schemaname='public' AND sequenceowner <> 'inventoryaic_inventory_user';
-SELECT 'inv_ tables created: ' || count(*)
-  FROM pg_tables WHERE schemaname='public' AND tablename LIKE 'inv\\_%';"
+psql -h 127.0.0.200 -p 5432 -U inventoryaic_inventory_user -d inventoryaic_inventory -tA \
+  -c "SELECT 'tables_not_owned=' || count(*) FROM pg_tables WHERE schemaname='public' AND tableowner <> 'inventoryaic_inventory_user';" \
+  -c "SELECT 'sequences_not_owned=' || count(*) FROM pg_sequences WHERE schemaname='public' AND sequenceowner <> 'inventoryaic_inventory_user';" \
+  -c "SELECT 'inv_tables=' || count(*) FROM pg_tables WHERE schemaname='public' AND tablename LIKE 'inv\\_%';" \
+  -c "SELECT 'inv_sequences=' || count(*) FROM pg_sequences WHERE schemaname='public';"
 ```
-Paste back the health JSON and these three counts. The first two must be `0`; the third must be
-a healthy count of `inv_*` tables, not zero.
+Paste back the health JSON and all four counts. The two `not_owned` counts must be `0`, and both
+totals must be non-zero.
 
 ### A7. Inventory's cron (cPanel → Cron Jobs, or `crontab -e` in this terminal)
 ```
