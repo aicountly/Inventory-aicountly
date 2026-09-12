@@ -79,7 +79,11 @@ if [[ -n "$SITE_HOST" && "$SITE_HOST" == *.* && -f .env ]]; then
   rm -f .env.bak
   echo "Ensured app.baseURL=https://${SITE_HOST}/api/ and INVENTORY_APP_URL=https://${SITE_HOST}/"
 else
-  echo "NOTE: could not resolve the site host (set INVENTORY_SITE_HOST) — app.baseURL left unchanged"
+  if [ ! -f .env ]; then
+    echo "NOTE: no .env on the server yet — app.baseURL/INVENTORY_APP_URL will be pinned on the next deploy, once .env exists"
+  else
+    echo "NOTE: could not resolve the site host (set INVENTORY_SITE_HOST) — app.baseURL left unchanged"
+  fi
 fi
 
 mkdir -p writable/cache writable/session writable/debugbar writable/logs writable/migration
