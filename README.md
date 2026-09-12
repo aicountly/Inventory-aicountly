@@ -48,6 +48,25 @@ Manage through the API's read-only relay (`/api/manage/...`).
   (components, by-products, scrap), batches and serial numbers (single and
   bulk registration).
 
+- **Documents** — list, detail (lines with valuation, accounting effects,
+  approvals, print snapshot) and create / edit forms for every native type;
+  packing lists, pending quantities and reservations.
+- **Stock** — balances by item × warehouse × batch with every bucket, the
+  stock ledger of an item with running quantity and value, and the movement
+  list.
+- **Valuation** — the valuation snapshot at any method, cost layers with the
+  issues that consumed them, back-dated recalculation jobs (dry run or live)
+  and the COGS revisions Books acknowledges.
+- **Reports** — stock summary, warehouse stock, batch stock, serial numbers,
+  stock ageing, movement analysis, near expiry and replenishment, each with
+  URL-persisted filters and CSV export (`src/reports/configs`).
+- **Reconciliation** — runs against the Books Stock-in-Hand ledger with the
+  bucket breakdown, the per-voucher posting status, and the outbox events
+  with replay.
+- **Settings** — company costing defaults, period locks, access profiles and
+  members, the document-type catalogue. **Audit** — append-only log with
+  before / after snapshots.
+
 Actions the user is not permitted to take (`GET /v1/access/me`) are hidden;
 the API still enforces every permission.
 

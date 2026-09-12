@@ -2,7 +2,6 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { AppLayout } from './layout/AppLayout'
 import Dashboard from './pages/Dashboard'
 import { renderDocumentRoutes } from './documents/routes'
-import { ModulePlaceholder } from './pages/ModulePlaceholder'
 import NotFound from './pages/NotFound'
 import { ItemFormPage } from './pages/items/ItemFormPage'
 import { ItemsListPage } from './pages/items/ItemsListPage'
@@ -12,7 +11,28 @@ import { MastersIndex } from './pages/masters/MastersIndex'
 import { MastersLayout } from './pages/masters/MastersLayout'
 import { SerialsPage } from './pages/masters/SerialsPage'
 import { BatchesPage, BrandsPage, ItemGroupsPage, LocationsPage, StockCategoriesPage, UomPage, WarehouseGroupsPage, WarehousesPage } from './pages/masters/SimpleMasterPages'
-import { P } from './services/access'
+import { AuditLogPage } from './pages/audit/AuditLogPage'
+import { OutboxPage } from './pages/integration/OutboxPage'
+import { PostingStatusPage } from './pages/reconciliation/PostingStatusPage'
+import { ReconciliationLayout } from './pages/reconciliation/ReconciliationLayout'
+import { ReconciliationRunPage } from './pages/reconciliation/ReconciliationRunPage'
+import { ReconciliationRunsPage } from './pages/reconciliation/ReconciliationRunsPage'
+import { ReportRoutePage } from './pages/reports/ReportRoutePage'
+import { ReportsIndexPage } from './pages/reports/ReportsIndexPage'
+import { AccessPage } from './pages/settings/AccessPage'
+import { CompanySettingsPage } from './pages/settings/CompanySettingsPage'
+import { DocumentTypesPage } from './pages/settings/DocumentTypesPage'
+import { PeriodLocksPage } from './pages/settings/PeriodLocksPage'
+import { SettingsLayout } from './pages/settings/SettingsLayout'
+import { StockBalancesPage } from './pages/stock/StockBalancesPage'
+import { StockLayout } from './pages/stock/StockLayout'
+import { StockLedgerPage } from './pages/stock/StockLedgerPage'
+import { StockMovementsPage } from './pages/stock/StockMovementsPage'
+import { CostLayersPage } from './pages/valuation/CostLayersPage'
+import { RecalculationsPage } from './pages/valuation/RecalculationsPage'
+import { RevisionsPage } from './pages/valuation/RevisionsPage'
+import { ValuationLayout } from './pages/valuation/ValuationLayout'
+import { ValuationSnapshotPage } from './pages/valuation/ValuationSnapshotPage'
 
 /**
  * Authenticated route table. The portal callback (`/auth/callback`) is consumed
@@ -47,12 +67,32 @@ export function AppRoutes() {
         </Route>
 
         {renderDocumentRoutes()}
-        <Route path="stock" element={<ModulePlaceholder title="Stock" description="Availability, balances by warehouse, batch and serial, reservations and the stock ledger." permission={[P.report('stock_summary'), P.report('warehouse_stock'), P.report('stock_ledger')]} />} />
-        <Route path="valuation" element={<ModulePlaceholder title="Valuation" description="Unit costs, cost layers, revaluation and backdated recalculation jobs." permission={P.report('valuation')} />} />
-        <Route path="reports" element={<ModulePlaceholder title="Reports" description="Stock summary, ledger, ageing, movement analysis, near-expiry and replenishment reports." permission={[P.report('stock_summary'), P.report('stock_ageing'), P.report('movement_analysis'), P.report('near_expiry'), P.report('replenishment')]} />} />
-        <Route path="reconciliation" element={<ModulePlaceholder title="Reconciliation" description="Inventory versus Books stock ledger, posting status and replay of integration events." permission={P.reconciliationRead} />} />
-        <Route path="settings" element={<ModulePlaceholder title="Settings" description="Company inventory settings, period locks, access profiles and team members." permission={P.settingsRead} />} />
-        <Route path="audit" element={<ModulePlaceholder title="Audit" description="Who changed what, when — across masters, documents and access." permission={P.auditRead} />} />
+        <Route path="stock" element={<StockLayout />}>
+          <Route index element={<StockBalancesPage />} />
+          <Route path="ledger" element={<StockLedgerPage />} />
+          <Route path="movements" element={<StockMovementsPage />} />
+        </Route>
+        <Route path="valuation" element={<ValuationLayout />}>
+          <Route index element={<ValuationSnapshotPage />} />
+          <Route path="cost-layers" element={<CostLayersPage />} />
+          <Route path="recalculations" element={<RecalculationsPage />} />
+          <Route path="revisions" element={<RevisionsPage />} />
+        </Route>
+        <Route path="reports" element={<ReportsIndexPage />} />
+        <Route path="reports/:path" element={<ReportRoutePage />} />
+        <Route path="reconciliation" element={<ReconciliationLayout />}>
+          <Route index element={<ReconciliationRunsPage />} />
+          <Route path="posting-status" element={<PostingStatusPage />} />
+          <Route path=":id" element={<ReconciliationRunPage />} />
+        </Route>
+        <Route path="integration/outbox" element={<OutboxPage />} />
+        <Route path="settings" element={<SettingsLayout />}>
+          <Route index element={<CompanySettingsPage />} />
+          <Route path="period-locks" element={<PeriodLocksPage />} />
+          <Route path="access" element={<AccessPage />} />
+          <Route path="document-types" element={<DocumentTypesPage />} />
+        </Route>
+        <Route path="audit" element={<AuditLogPage />} />
 
         <Route path="*" element={<NotFound />} />
       </Route>
