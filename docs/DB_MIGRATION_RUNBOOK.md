@@ -1,6 +1,6 @@
 # Cutover runbook — backup Books, stand up Inventory, migrate, compare
 
-Roles: DBA (PostgreSQL), release engineer (deploys, env), accountant/owner (sign-off). Everything below was rehearsed on a local PostgreSQL 16 with 4 seeded companies; run the rehearsal on a **restored production backup** first, then the real thing.
+Roles: DBA (PostgreSQL), release engineer (deploys, env), accountant/owner (sign-off). Everything below was rehearsed on a local PostgreSQL 16 with 4 seeded companies; run the rehearsal on a **restored production backup** first, then the real thing. PostgreSQL **13 or newer** is what the schema and the migration toolkit actually require (`SERIAL`, `gen_random_uuid()` — native from 13 — `JSONB`, `pg_get_serial_sequence`, `information_schema`); 16 was the rehearsal box, not a floor.
 
 ## 0. Before the window
 1. Deploy Books (branch `claude/inventory-migration-books-refactor-i10man`) with `INVENTORY_MODE=legacy`. It behaves exactly as before. Apply its SQL migration (`php spark books:sql-migrate` runs in the post-deploy hook; migration 150 adds `vch_uuid`, `books_inventory_postings`, `books_inventory_events`, `books_inventory_cogs_revisions`).
@@ -36,7 +36,7 @@ Roles: DBA (PostgreSQL), release engineer (deploys, env), accountant/owner (sign
 
 ## 2. New Inventory database
 ```bash
-createdb -O inventory_app inventory           # empty database, PostgreSQL 16
+createdb -O inventory_app inventory           # empty database, PostgreSQL 13 or newer
 cd inventory/api && php spark inventory:sql-migrate    # creates every inv_* table
 export RUN=prod-$(date +%Y%m%d)                # set ONCE for the whole batch, see warning below
 echo "$RUN" | tee /root/inv_migration_run_id_$(date +%Y%m%d).txt   # persisted in case the shell session is lost

@@ -91,7 +91,7 @@ value ↔ payload mapping, and the item / BOM / serial form helpers.
 
 ```
 web/          React + TypeScript app (Vite). Builds to web/dist, deployed to the document root.
-server-php/   CodeIgniter 4 API (PostgreSQL 16). Deployed to the api/ folder inside the document root.
+server-php/   CodeIgniter 4 API (PostgreSQL 13+). Deployed to the api/ folder inside the document root.
   app/        controllers (Api/V1), services (posting engine, valuation, migration), commands
   database/migrations/   SQL migrations applied by `php spark inventory:sql-migrate`
   tests/      unit + PostgreSQL integration suites
@@ -100,7 +100,7 @@ docs/         ownership, API contract, integration, migration plan/runbook/valid
 
 ## Getting started
 
-Requires Node.js 22+, PHP 8.1+ with pgsql, Composer, PostgreSQL 16.
+Requires Node.js 22+, PHP 8.1+ with pgsql, Composer, PostgreSQL 13 or newer.
 
 ```bash
 # API

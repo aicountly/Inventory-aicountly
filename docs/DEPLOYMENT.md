@@ -155,7 +155,7 @@ runs `cpanel-post-deploy-api.sh <api dir>` over SSH, which:
 4. applies pending SQL migrations: `php spark inventory:sql-migrate` (tracked in `inv_sql_migrations`);
 5. probes `public/status.php` and resets the CLI OPcache.
 
-Settings that must exist in `api/.env` (see `server-php/.env.example`): `database.default.*` (PostgreSQL 16),
+Settings that must exist in `api/.env` (see `server-php/.env.example`): `database.default.*` (PostgreSQL 13 or newer),
 `INVENTORY_SERVICE_KEYS` (`books:<key>,pos:<key>`), `BOOKS_SERVICE_KEY`, `BOOKS_API_BASE`,
 `MANAGE_API_BASE`, `PORTAL_AUTH_BASE`, `CORS_ALLOWED_ORIGINS`, and for the one-time migration the
 read-only Books connection `BOOKS_DB_*`.

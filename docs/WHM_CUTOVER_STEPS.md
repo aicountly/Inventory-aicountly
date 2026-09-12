@@ -50,6 +50,35 @@ one shared readable path before Phase B starts rather than discovering the probl
 
 ---
 
+## Confirmed environment (checked on the live server, 2026-09-12)
+
+| | |
+|---|---|
+| Server | `server1`, RHEL 9 family, WHM root available |
+| Books account | `booksaicountly`, app at `/home/booksaicountly/public_html/api` |
+| Inventory account | `inventoryaic`, app at `/home/inventoryaic/public_html/api` |
+| Manage account | `manageaicountly` (unchanged by this cutover) |
+| PHP | 8.2.33 at root and in both accounts, above the 8.1 floor |
+| PostgreSQL | server **13.23**, client **13.23**, distribution packages, no `/usr/pgsql-*` side-by-side install |
+
+PostgreSQL 13 is fine here. The schema and the migration toolkit need `SERIAL`,
+`gen_random_uuid()` (native from 13), `JSONB`, `pg_get_serial_sequence` and `information_schema`,
+and nothing newer. The "PostgreSQL 16" in the other documents described the rehearsal machine,
+not a floor, and has been corrected. Client and server being the same version also matters more
+than it sounds: a `pg_dump` older than its server refuses to run at all, which would have stopped
+B3 dead.
+
+**Books and Inventory are separate cPanel accounts, so `~` means a different directory in each.**
+Every path below is therefore absolute. All PostgreSQL CLI work runs as **root** (one `.pgpass`,
+dumps under `/root`), all `php spark` work runs as the **owning account user**, and the one file
+that must cross between accounts, the Books stock snapshot, is copied over by root in B4.
+
+Two bash details this document now avoids deliberately: `--opt=~/path` does **not** expand the
+tilde (bash only does that in assignments), and `psql` without `-w` will sit forever on a
+password prompt instead of failing. Absolute paths and `-w` throughout.
+
+---
+
 ## Phase A — Get the code live (do this ahead of the overnight window)
 
 Nothing here is time-critical and nothing is visible to your users yet: Inventory is a brand
@@ -112,7 +141,7 @@ yet, so the health probe will warn. That's expected on a first deploy; continue 
 
 ### A5. Create Inventory's `api/.env` by hand (this is the one file the deploy never touches)
 ```bash
-cd <inventory api path from PROD_SSH_REMOTE_ROOT>/api
+cd /home/inventoryaic/public_html/api
 cp .env.example .env
 ```
 Edit `.env` (via terminal `nano .env`/`vi .env`, or cPanel File Manager) and set, at minimum:
@@ -152,10 +181,10 @@ Paste the JSON response back.
 
 ### A7. Inventory's cron (cPanel → Cron Jobs, or `crontab -e` in this terminal)
 ```
-* * * * * cd <inventory api path>/api && php spark inventory:outbox-dispatch >/dev/null 2>&1
-* * * * * cd <inventory api path>/api && php spark inventory:recalc-worker  >/dev/null 2>&1
-*/5 * * * * cd <inventory api path>/api && php spark inventory:expire-reservations >/dev/null 2>&1
-0 2 * * * cd <inventory api path>/api && php spark inventory:reconcile --all >/dev/null 2>&1
+* * * * * cd /home/inventoryaic/public_html/api && php spark inventory:outbox-dispatch >/dev/null 2>&1
+* * * * * cd /home/inventoryaic/public_html/api && php spark inventory:recalc-worker  >/dev/null 2>&1
+*/5 * * * * cd /home/inventoryaic/public_html/api && php spark inventory:expire-reservations >/dev/null 2>&1
+0 2 * * * cd /home/inventoryaic/public_html/api && php spark inventory:reconcile --all >/dev/null 2>&1
 ```
 
 ### A8. Deploy Books (still `INVENTORY_MODE=legacy` — no user-visible change yet)
@@ -176,7 +205,7 @@ because it should be a no-op today.
 
 ### A9. Confirm Books' own retry cron is present
 ```
-* * * * * cd <books api path>/api && php spark books:inventory-retry >/dev/null 2>&1
+* * * * * cd /home/booksaicountly/public_html/api && php spark books:inventory-retry >/dev/null 2>&1
 ```
 
 **Phase A is done when**: Inventory's `/api/health` is green, Books' `/api/integration/inventory/health`
@@ -190,114 +219,147 @@ window starts.
 
 Start the real overnight window here.
 
-### B1. Set up the Postgres connection once (no passwords typed into any command below)
-Using the host/port you confirmed in A1, and the Books admin credentials you already have plus
-the Inventory admin credentials you set in A5:
+### B1. Set up the Postgres connection once, as root (no password typed into any command)
+Fill in the host/port/database/user from the Books `.env` values A1 asked for. Run as **root**:
 ```bash
-touch ~/.pgpass && chmod 600 ~/.pgpass
-echo "<books db host>:<books db port>:*:<books admin user>:<books admin password>" >> ~/.pgpass
-echo "<books db host>:<inventory db port>:*:<inventory admin user>:<inventory admin password>" >> ~/.pgpass
-export PGHOST=<books db host> PGPORT=<books db port>
-mkdir -p ~/inv_migration_backups
-psql -U <books admin user> -d <books db name> -c "SELECT current_user, now();"
+mkdir -p /root/inv_migration_backups
+touch /root/.pgpass && chmod 600 /root/.pgpass
+echo "<db host>:<db port>:*:<books db user>:<books db password>" >> /root/.pgpass
+echo "<db host>:<db port>:*:<inventory db user>:<inventory db password>" >> /root/.pgpass
+export PGHOST=<db host> PGPORT=<db port>
+psql -w -U <books db user> -d <books db name> -c "SELECT current_user, now();"
 ```
-Paste back the result of that last `SELECT` — if it connects without prompting for a password,
-`.pgpass` is working and nothing below needs a password typed into it. (If Inventory's database
-is on a different host/port than Books, add a second `export`/line pair and pass `-h`/`-p`
-explicitly on the Inventory-side commands further down — tell me if that's the case.)
+Paste back that `SELECT`. Connecting without a password prompt means `.pgpass` is working. The
+`-w` flag makes `psql` fail fast rather than hang if it isn't.
 
 ### B2. Announce and freeze
-Put Books in maintenance mode. No voucher may post from this point until cutover finishes —
-the migration is a point-in-time copy, and every voucher posted during the freeze would be
-missed by it.
+Put Books in maintenance mode. No voucher may post from this point until cutover finishes. The
+migration is a point-in-time copy, and anything posted during the freeze would be missed by it.
 
-### B3. Backup Books, and prove the backup is real
+### B3. Back up Books, and prove the backup is real (root)
 ```bash
-pg_dump -Fc -Z6 --no-owner --no-acl -U <books admin user> -d <books db name> \
-  -f ~/inv_migration_backups/books_pre_inventory_$(date +%Y%m%d_%H%M).dump
-pg_dump -Fc -U <books admin user> -d <books db name> \
-  -f ~/inv_migration_backups/books_globals_$(date +%Y%m%d).dump --schema-only
-pg_restore --list ~/inv_migration_backups/books_pre_inventory_*.dump | wc -l
-createdb -U <books admin user> books_verify
-pg_restore --no-owner --no-acl -U <books admin user> -d books_verify ~/inv_migration_backups/books_pre_inventory_*.dump
-psql -U <books admin user> -d books_verify -c "SELECT count(*) FROM books_voucher_headers;"
+pg_dump -Fc -Z6 --no-owner --no-acl -w -U <books db user> -d <books db name> \
+  -f /root/inv_migration_backups/books_pre_inventory_$(date +%Y%m%d_%H%M).dump
+pg_dump -Fc -w -U <books db user> -d <books db name> --schema-only \
+  -f /root/inv_migration_backups/books_globals_$(date +%Y%m%d).dump
+pg_restore --list /root/inv_migration_backups/books_pre_inventory_*.dump | wc -l
+createdb -w -U <books db user> books_verify
+pg_restore --no-owner --no-acl -w -U <books db user> -d books_verify \
+  /root/inv_migration_backups/books_pre_inventory_*.dump
+psql -w -U <books db user> -d books_verify -c "SELECT count(*) FROM books_voucher_headers;"
 ```
-Paste back the line count from `pg_restore --list | wc -l` and the voucher count from
-`books_verify` — a backup that hasn't been restored and checked isn't a backup yet.
+Paste back the `pg_restore --list | wc -l` count and the voucher count from `books_verify`. A
+backup nobody has restored is not yet a backup.
 
-### B4. Export Books' own stock snapshot
-Run as the **Books** account user. If Books and Inventory turned out to be separate cPanel
-accounts in A1, replace `~/inv_migration_backups` here with the shared path we agreed then —
-Inventory's validate in Phase D has to be able to read this directory, and it runs as a
-different user.
+### B4. Export Books' stock snapshot, then hand it to the Inventory account
+First as the **Books** account user:
 ```bash
-cd <books api path>/api
-php spark books:export-inventory-snapshot --out-dir ~/inv_migration_backups/books_snapshots_$(date +%Y%m%d) --company all
+su -s /bin/bash - booksaicountly
+cd /home/booksaicountly/public_html/api
+php spark books:export-inventory-snapshot \
+  --out-dir /home/booksaicountly/inv_migration_backups/books_snapshots_$(date +%Y%m%d) --company all
+ls -la /home/booksaicountly/inv_migration_backups/books_snapshots_$(date +%Y%m%d) | head
+exit
+```
+Then as **root**, copy it where the Inventory account can read it. Inventory's validate runs as
+`inventoryaic` and cannot see into another account's home:
+```bash
+mkdir -p /home/inventoryaic/inv_migration_backups
+cp -r /home/booksaicountly/inv_migration_backups/books_snapshots_$(date +%Y%m%d) \
+      /home/inventoryaic/inv_migration_backups/
+chown -R inventoryaic:inventoryaic /home/inventoryaic/inv_migration_backups
+ls -la /home/inventoryaic/inv_migration_backups/books_snapshots_$(date +%Y%m%d) | head
+```
+Paste back both listings. They must show the same files.
+
+### B5. Backfill voucher UUIDs (idempotent, Books account)
+```bash
+su -s /bin/bash - booksaicountly -c 'cd /home/booksaicountly/public_html/api && php spark books:backfill-vch-uuid'
 ```
 
-### B5. Backfill voucher UUIDs (idempotent)
-```bash
-php spark books:backfill-vch-uuid
-```
+### B6. MANDATORY — rehearse the whole cycle against `books_verify`, not the real databases
+This is what catches anything specific to *your* data before it can touch the real Inventory
+database. Do not skip it, even at 3am.
 
-### B6. MANDATORY — rehearse the full cycle against `books_verify`, not the real databases
-This is the step that catches anything specific to *your* real data before it can touch the
-real Inventory database. Do not skip it, even at 3am.
+As **root**, create the throwaway database:
 ```bash
-cd <inventory api path>
+createdb -w -U <inventory db user> inventory_verify
+```
+As the **Inventory** account user, make a throwaway copy of the app so the real `api/.env` is
+never touched:
+```bash
+su -s /bin/bash - inventoryaic
+cd /home/inventoryaic/public_html
 cp -r api api_verify
-createdb -U <inventory admin user> inventory_verify
-cd api_verify
 ```
-Edit `api_verify/.env` (a throwaway copy — the real `api/.env` is untouched): set
-`database.default.database` to `inventory_verify`, and `BOOKS_DB_NAME` to `books_verify`
-(the `books_verify` role/user can stay the same `<books admin user>` you used above — it's a
-throwaway database anyway).
+Edit `/home/inventoryaic/public_html/api_verify/.env` and set `database.default.database` to
+`inventory_verify` and `BOOKS_DB_NAME` to `books_verify`. Confirm before running anything:
 ```bash
+grep -E "^(database\.default\.database|BOOKS_DB_NAME) " /home/inventoryaic/public_html/api_verify/.env
+```
+**Paste that back** — it is the one check that proves the rehearsal cannot reach a real database.
+Then:
+```bash
+cd /home/inventoryaic/public_html/api_verify
 php spark inventory:sql-migrate
 export RUN=verify-$(date +%Y%m%d-%H%M)
-echo "$RUN" | tee ~/inv_migration_run_id_verify.txt
+echo "$RUN" | tee /home/inventoryaic/inv_migration_run_id_verify.txt
 php spark inventory:migrate-books --stage=precheck --run-id="$RUN"
 ```
-**Paste back** the precheck output — confirm the company list and row counts look like your real
-companies (they should: `books_verify` is a full restore), then:
+**Paste back** the precheck output. The company list and row counts should look like your real
+companies, because `books_verify` is a full restore. Then:
 ```bash
 php spark inventory:migrate-books --stage=migrate --run-id="$RUN" --dry-run
 php spark inventory:migrate-books --stage=migrate --run-id="$RUN"
 php spark inventory:migrate-books --stage=validate --run-id="$RUN" \
-    --books-snapshot=~/inv_migration_backups/books_snapshots_$(date +%Y%m%d)
+    --books-snapshot=/home/inventoryaic/inv_migration_backups/books_snapshots_$(date +%Y%m%d)
 ```
-**Paste back** the final line of each command and the `failures`/`warnings` counts from
-`writable/migration/$RUN/validate.summary.json`. Must be `VALIDATE ok` with no unexplained
-failures before you're clear to continue to Phase C. If anything fails here, stop — do not
-proceed to Phase C — and send me the summary so we fix it against the rehearsal copy, not
-production.
-
-Once validate is clean, discard the rehearsal (it already did its job):
+**Paste back** the last line of each, plus:
 ```bash
-cd <inventory api path>
-rm -rf api_verify
-dropdb -U <inventory admin user> inventory_verify
-dropdb -U <books admin user> books_verify
+grep -oE '"(failures|warnings)":\[[^]]*\]' writable/migration/$RUN/validate.summary.json | head
+```
+It must reach `VALIDATE ok` with no unexplained failures before Phase C. If anything fails here,
+stop and send me the summary. We fix it against the rehearsal copy, never against production.
+
+Once validate is clean, discard the rehearsal. As the Inventory user:
+```bash
+rm -rf /home/inventoryaic/public_html/api_verify
+exit
+```
+As root:
+```bash
+dropdb -w -U <inventory db user> inventory_verify
+dropdb -w -U <books db user> books_verify
 ```
 
 ---
 
 ## Phase C — Migrate (the real Inventory database)
 
-### C1. Confirm the real Inventory database is still empty
+### C1. Confirm the real Inventory database is still empty (root)
 ```bash
-cd <inventory api path>/api
-psql -U <inventory admin user> -d <inventory db name> -c "SELECT count(*) FROM inv_document_lines;"
+psql -w -U <inventory db user> -d <inventory db name> -c "SELECT count(*) FROM inv_document_lines;"
 ```
-Expect `0`. (It was created and schema-migrated in Phase A; this just confirms nothing test-ish
-ended up in it since.)
+Expect `0`. It was created and schema-migrated in Phase A; this confirms nothing test-shaped
+ended up in it since.
 
 ### C2. Precheck — capture the real run-id now, in a file, immediately
+Everything from here to the end of Phase F is `php spark`, so it runs as the **Inventory account
+user**, never as root:
 ```bash
+su -s /bin/bash - inventoryaic
+cd /home/inventoryaic/public_html/api
 export RUN=prod-$(date +%Y%m%d)
-echo "$RUN" | tee ~/inv_migration_run_id_$(date +%Y%m%d).txt
+echo "$RUN" | tee /home/inventoryaic/inv_migration_run_id_$(date +%Y%m%d).txt
 php spark inventory:migrate-books --stage=precheck --run-id="$RUN"
+```
+`$RUN` lives only in that shell. If you lose it — closed tab, timeout, `exit` — restore it
+before running anything else, and read the echo back to yourself:
+```bash
+su -s /bin/bash - inventoryaic
+cd /home/inventoryaic/public_html/api
+export RUN=$(cat /home/inventoryaic/inv_migration_run_id_$(date +%Y%m%d).txt)
+echo "$RUN"
 ```
 **Paste back** the full output. Must print `PRECHECK ok`. Any blocking finding gets fixed in
 Books (or explicitly approved by you in writing) before continuing — do not proceed past a
@@ -324,7 +386,7 @@ looked at the cause together; do not re-run the whole batch.
 
 ```bash
 php spark inventory:migrate-books --stage=validate --run-id="$RUN" \
-    --books-snapshot=~/inv_migration_backups/books_snapshots_$(date +%Y%m%d)
+    --books-snapshot=/home/inventoryaic/inv_migration_backups/books_snapshots_$(date +%Y%m%d)
 ```
 **Paste back** the final line plus:
 ```bash
@@ -348,9 +410,10 @@ php spark inventory:migrate-books --stage=cutover --run-id="$RUN"
 ```
 Paste back the output — validates once more, resets sequences, writes the cutover marker.
 
-### E2. Flip Books to live
+### E2. Flip Books to live (Books account user, so the file keeps its ownership)
 ```bash
-cd <books api path>/api
+su -s /bin/bash - booksaicountly
+cd /home/booksaicountly/public_html/api
 grep -n "^INVENTORY_MODE" .env
 ```
 Edit `.env`, change `INVENTORY_MODE = legacy` to `INVENTORY_MODE = live`. CodeIgniter reads
@@ -365,7 +428,7 @@ curl -s -H "X-Service-Key: $(grep '^INVENTORY_SERVICE_KEY' .env | cut -d= -f2- |
 
 ### E3. Resync masters (proves the channel works; Books' mirror should already match exactly)
 ```bash
-cd <inventory api path>/api
+cd /home/inventoryaic/public_html/api
 php spark inventory:resync-masters --all
 ```
 Paste back the output.
@@ -396,7 +459,7 @@ deploy, so there's no separate frontend deploy at this point.
 
 ### F1. Immediately after lifting maintenance
 ```bash
-cd <inventory api path>/api
+cd /home/inventoryaic/public_html/api
 php spark inventory:migrate-books --stage=postcheck --run-id="$RUN"
 php spark inventory:migrate-books --stage=sequences --run-id="$RUN" --dry-run
 ```
@@ -418,14 +481,14 @@ re-run the same two blocks and paste the output.
 
 Full detail in `ROLLBACK_PLAN.md`. The one thing worth repeating here because it bit us once
 during rehearsal: **rollback needs the exact `$RUN` value from Phase C2** (the file you wrote to
-`~/inv_migration_run_id_*.txt`), not whatever `validate`/`cutover` used — every stage
+`/home/inventoryaic/inv_migration_run_id_*.txt`), not whatever `validate`/`cutover` used — every stage
 silently invents its own fresh run-id if you forget `--run-id`, so pasting a rollback command
 without it looks like it works (`ROLLBACK complete`) while quietly touching zero rows.
 
 Before `INVENTORY_MODE=live` (Phase A–D): `php spark inventory:migrate-books --stage=rollback --run-id="$RUN" --yes`,
 then verify — don't trust the message:
 ```bash
-psql -U <inventory admin user> -d <inventory db name> -c "SELECT count(*) FROM inv_legacy_id_map WHERE migration_run_id = '$RUN';"
+psql -w -U <inventory db user> -d <inventory db name> -c "SELECT count(*) FROM inv_legacy_id_map WHERE migration_run_id = '$RUN';"
 ```
 Expect `0`.
 
