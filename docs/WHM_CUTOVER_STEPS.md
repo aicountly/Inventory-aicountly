@@ -65,6 +65,24 @@ one shared readable path before Phase B starts rather than discovering the probl
 
 ---
 
+## Where we are
+
+| Step | State |
+|---|---|
+| A1 environment discovery | done — see the table below |
+| A2 merge both branches to `main` | **next** |
+| A3 GitHub SSH secrets for Inventory | done (verified by an earlier test deploy) |
+| A4 first real Inventory deploy | after A2 |
+| A5 part 1, databases and roles | done — `inventoryaic_inventory` created; `booksaicountly_invread` created and **proven** read-only (`SELECT` works, `UPDATE` and `CREATE` both rejected) |
+| A5 part 2, Inventory `api/.env` | after A4 |
+| A6 onward | not started |
+
+Both branches were found behind `main` and have been merged up. Books' `main` carried 14 commits
+of GST and Item Master work that deploying the branch as-is would have reverted. Verified green on
+the merged tree: Books PHP 3294 tests 0 failing, Books mobile 315 suites / 4565 tests, Inventory
+59 unit and 34 integration, web lint and production build clean. `main` added no SQL migrations
+and touched nothing in the migration read path, so the rehearsal evidence still stands.
+
 ## Confirmed environment (checked on the live server, 2026-09-12)
 
 | | |
