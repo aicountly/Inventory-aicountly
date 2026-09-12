@@ -22,6 +22,34 @@ nothing is skipped because it's 2am.
 
 ---
 
+## Which terminal, and as which user — read this first
+
+Three different things run in three different places, and getting this wrong is the one
+mistake in this whole document that can quietly break the live app:
+
+| What | Where | As whom |
+|---|---|---|
+| `php spark inventory:*` | Inventory's `api/` directory | the cPanel account that owns **Inventory**, never root |
+| `php spark books:*` | Books' `api/` directory | the cPanel account that owns **Books**, never root |
+| `pg_dump`, `pg_restore`, `psql`, `createdb`, `dropdb` | anywhere | root or either account — whoever owns the `~/.pgpass` you set up in B1 |
+
+**Never run `php spark` as root.** CodeIgniter writes into `writable/` on every single run —
+logs, cache, and this migration's own `writable/migration/<run-id>/` evidence files. Run it as
+root and those land root-owned inside an account whose web server runs as the account user,
+which breaks the live app's logging afterwards and needs a `chown -R` to undo. This is not
+theoretical and it is easy to do by accident from a WHM root prompt.
+
+From a WHM root terminal, switch first — `su - <cpaneluser>`, then `cd` to the app's `api/`
+directory and run the spark command there. From a per-account cPanel Terminal you are already
+the right user and can run them directly.
+
+One consequence A1 settles: if Books and Inventory are **separate** cPanel accounts, then `~`
+means a different directory in each, so the Books snapshot exported in B4 is not somewhere
+Inventory's validate can read it in Phase D. A1 tells us which case you are in, and we agree
+one shared readable path before Phase B starts rather than discovering the problem mid-window.
+
+---
+
 ## Phase A — Get the code live (do this ahead of the overnight window)
 
 Nothing here is time-critical and nothing is visible to your users yet: Inventory is a brand
@@ -29,29 +57,38 @@ new, unused product until cutover, and Books keeps `INVENTORY_MODE=legacy` (toda
 all the way through Phase A. Do this whenever is convenient, then start Phase B when you're ready
 for the actual overnight window.
 
-### A1. Confirm the terminal, PHP version, and Books' current production values (read-only)
+### A1. Establish which accounts exist, and what tooling each one has (read-only)
+In your WHM root terminal:
 ```bash
+whoami
+ls -1 /var/cpanel/users 2>/dev/null || ls -1 /home
 php -v
 psql --version
 pg_dump --version
 ```
-PHP must report 8.1 or newer. If it doesn't, stop and tell me — every `php spark …` command
-below needs to use whatever path/alias gives you 8.1+ (commonly `/opt/cpanel/ea-php82/root/usr/bin/php`
-or similar; Books already runs CodeIgniter 4 in production today, so whatever PHP that account
-already uses for Books is the one to reuse for Inventory too).
+**Paste this back.** It tells me whether Books and Inventory are one cPanel account or two —
+which decides the shared-path question above — and what the root-level tooling is.
 
-Now find Books' actual deployed path and current settings:
+Then, in each account that owns one of the two apps (`su - <cpaneluser>` from root, or open
+that account's own cPanel Terminal):
 ```bash
-find ~ -maxdepth 4 -type d -iname "api" 2>/dev/null | grep -i books
+whoami
+php -v
+find ~ -maxdepth 4 -type d -iname "api" 2>/dev/null
 ```
-`cd` into whichever of those is the real one, then:
+PHP must report 8.1 or newer **in the account's own shell** — that is the one that matters, not
+root's. cPanel sets the PHP version per account (MultiPHP Manager), so root's `php -v` and an
+account's can legitimately differ. Books already runs CodeIgniter 4 in production, so its
+account's PHP is adequate by definition; Inventory's account needs the same or newer.
+
+Finally, in the Books account, from its `api/` directory:
 ```bash
 pwd
 grep -E "^(database\.default\.(hostname|port|database|username)|INVENTORY_MODE|CI_ENVIRONMENT|app\.baseURL) " .env
 ```
-**Paste this back before continuing.** I need the real Books `api/` path and its DB host/port —
-Inventory's database should live on the same PostgreSQL server unless you tell me otherwise, and
-I want to confirm `INVENTORY_MODE` really is `legacy` right now before we do anything else.
+I need the real Books `api/` path and its database host/port — Inventory's database should live
+on the same PostgreSQL server unless you tell me otherwise — plus confirmation that
+`INVENTORY_MODE` really is `legacy` right now, before anything else happens.
 
 ### A2. Merge the branch
 This is yours to do (I won't push to `main` or open PRs unless you ask me to). For each of
@@ -189,6 +226,10 @@ Paste back the line count from `pg_restore --list | wc -l` and the voucher count
 `books_verify` — a backup that hasn't been restored and checked isn't a backup yet.
 
 ### B4. Export Books' own stock snapshot
+Run as the **Books** account user. If Books and Inventory turned out to be separate cPanel
+accounts in A1, replace `~/inv_migration_backups` here with the shared path we agreed then —
+Inventory's validate in Phase D has to be able to read this directory, and it runs as a
+different user.
 ```bash
 cd <books api path>/api
 php spark books:export-inventory-snapshot --out-dir ~/inv_migration_backups/books_snapshots_$(date +%Y%m%d) --company all
