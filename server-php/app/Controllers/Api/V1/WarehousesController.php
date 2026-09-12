@@ -12,6 +12,7 @@ class WarehousesController extends MasterController
     protected string $permissionBase = 'masters.warehouses';
     protected string $label = 'Warehouse';
     protected string $entityType = 'warehouse';
+    protected ?string $mirrorKind = 'warehouse';
     protected array $columns = ['warehouse_code', 'warehouse_group_id', 'parent_warehouse_id', 'warehouse_type', 'is_default', 'allow_negative', 'address_json', 'contact_json', 'bo_id'];
     protected array $required = ['warehouse_name'];
     protected array $searchColumns = ['warehouse_code'];

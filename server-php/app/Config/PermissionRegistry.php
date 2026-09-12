@@ -88,6 +88,7 @@ class PermissionRegistry
             'stock.adjust',
             'stock.revalue',
             'valuation.recalculate',
+            'valuation.carry_forward',
             'reconciliation.read',
             'reconciliation.resolve',
             'audit.read',
@@ -151,6 +152,7 @@ class PermissionRegistry
         $add('stock', 'stock.adjust', 'Post stock adjustments', 'write');
         $add('stock', 'stock.revalue', 'Revalue stock', 'write');
         $add('stock', 'valuation.recalculate', 'Run backdated valuation recalculation', 'admin');
+        $add('stock', 'valuation.carry_forward', 'Run the year-end stock carry-forward', 'admin');
         $add('stock', 'periods.lock', 'Lock / unlock inventory periods', 'admin');
         $add('stock', 'warehouses.restrict', 'Restricted to assigned warehouses', 'restrict');
         foreach (self::REPORTS as $slug => $label) {
@@ -189,7 +191,7 @@ class PermissionRegistry
             'accountant' => array_values(array_unique(array_merge(
                 $baseline,
                 $reads,
-                ['reconciliation.resolve', 'valuation.recalculate', 'documents.read'],
+                ['reconciliation.resolve', 'valuation.recalculate', 'valuation.carry_forward', 'documents.read'],
             ))),
             'view_only' => $reads,
             default => ['inventory.enter'],

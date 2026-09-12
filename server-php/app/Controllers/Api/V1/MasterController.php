@@ -5,6 +5,7 @@ namespace App\Controllers\Api\V1;
 use App\Controllers\Api\BaseController;
 use App\Exceptions\InventoryException;
 use App\Services\AuditService;
+use App\Services\MasterMirrorService;
 
 /**
  * Shared CRUD for simple inventory masters. Subclasses declare the table, pk, name column,
@@ -28,6 +29,8 @@ abstract class MasterController extends BaseController
     protected ?string $parentColumn = null;
     protected bool $hasSoftDelete = true;
     protected string $entityType = 'master';
+    /** Master kind Books mirrors (uom | warehouse): every write enqueues an upsert event in the same transaction. null = not mirrored. */
+    protected ?string $mirrorKind = null;
 
     public function index()
     {
@@ -88,15 +91,23 @@ abstract class MasterController extends BaseController
             $now = date('Y-m-d H:i:s');
             $row += ['cmp_id' => $cmpId, 'is_active' => isset($body['is_active']) ? (!empty($body['is_active']) ? 1 : 0) : 1, 'created_by' => $a['session']['uuid'], 'created_at' => $now, 'updated_by' => $a['session']['uuid'], 'updated_at' => $now];
             $db = \Config\Database::connect();
+            $db->transStart();
             if (!$db->table($this->table)->insert($row)) {
                 throw new \RuntimeException('Could not create ' . $this->label . ': ' . (string) ($db->error()['message'] ?? 'database error'), 500);
             }
             $id = (int) $db->insertID();
             $this->afterSave($cmpId, $id, $body, $a['session']['uuid'], true);
+            $this->publishMirror($cmpId, $id);
+            $db->transComplete();
+            if ($db->transStatus() === false) {
+                throw new \RuntimeException('Could not create ' . $this->label . ': transaction failed', 500);
+            }
             (new AuditService())->log($cmpId, $this->entityType, $id, $this->entityType . '.create', $a['session']['uuid'], [], null, $row);
 
             return $this->respondCreated(['data' => $this->presentOne($cmpId, $this->find($cmpId, $id))]);
         } catch (\Throwable $e) {
+            \Config\Database::connect()->transRollback();
+
             return $this->failFromException($e);
         }
     }
@@ -122,14 +133,22 @@ abstract class MasterController extends BaseController
             $row['updated_by'] = $a['session']['uuid'];
             $row['updated_at'] = date('Y-m-d H:i:s');
             $db = \Config\Database::connect();
+            $db->transStart();
             if (!$db->table($this->table)->where($this->pk, (int) $id)->where('cmp_id', $cmpId)->update($row)) {
                 throw new \RuntimeException('Could not update ' . $this->label . ': ' . (string) ($db->error()['message'] ?? 'database error'), 500);
             }
             $this->afterSave($cmpId, (int) $id, $body, $a['session']['uuid'], false);
+            $this->publishMirror($cmpId, (int) $id);
+            $db->transComplete();
+            if ($db->transStatus() === false) {
+                throw new \RuntimeException('Could not update ' . $this->label . ': transaction failed', 500);
+            }
             (new AuditService())->log($cmpId, $this->entityType, (int) $id, $this->entityType . '.update', $a['session']['uuid'], [], $existing, $row);
 
             return $this->respond(['data' => $this->presentOne($cmpId, $this->find($cmpId, (int) $id))]);
         } catch (\Throwable $e) {
+            \Config\Database::connect()->transRollback();
+
             return $this->failFromException($e);
         }
     }
@@ -170,8 +189,22 @@ abstract class MasterController extends BaseController
         if ($db->fieldExists('updated_by', $this->table)) {
             $patch['updated_by'] = $a['session']['uuid'];
         }
+        $db->transStart();
         if (!$db->table($this->table)->where($this->pk, (int) $id)->where('cmp_id', $cmpId)->update($patch)) {
+            $db->transRollback();
+
             return $this->failStructured(500, 'internal_error', 'Could not delete ' . $this->label . ': ' . (string) ($db->error()['message'] ?? 'database error'));
+        }
+        try {
+            $this->publishMirror($cmpId, (int) $id);
+        } catch (\Throwable $e) {
+            $db->transRollback();
+
+            return $this->failFromException($e);
+        }
+        $db->transComplete();
+        if ($db->transStatus() === false) {
+            return $this->failStructured(500, 'internal_error', 'Could not delete ' . $this->label . ': transaction failed');
         }
         (new AuditService())->log($cmpId, $this->entityType, (int) $id, $this->entityType . '.delete', $a['session']['uuid'], [], $existing, null);
 
@@ -272,6 +305,14 @@ abstract class MasterController extends BaseController
 
     protected function afterSave(int $cmpId, int $id, array $body, ?string $actor, bool $isNew): void
     {
+    }
+
+    /** Enqueue the Books mirror upsert for a mirrored master (soft-deleted rows publish with deleted_at set). */
+    protected function publishMirror(int $cmpId, int $id): void
+    {
+        if ($this->mirrorKind !== null) {
+            (new MasterMirrorService())->publish($this->mirrorKind, $cmpId, $id);
+        }
     }
 
     /**

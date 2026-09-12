@@ -3,13 +3,17 @@
 namespace App\Controllers\Api\V1;
 
 use App\Controllers\Api\BaseController;
+use App\Services\FyCarryForwardService;
+use App\Services\FyCarryForwardStatus;
 use App\Services\InventorySettingsService;
+use App\Services\ManageContextService;
 use App\Services\RecalculationService;
 use App\Services\ValuationReplayService;
 
 /**
- * /api/v1/valuation — stock valuation snapshot, unit costs, cost layers, and the backdated
- * recalculation queue (jobs + the COGS revisions they publish to Books).
+ * /api/v1/valuation — stock valuation snapshot, unit costs, cost layers, the backdated
+ * recalculation queue (jobs + the COGS revisions they publish to Books) and the year-end
+ * carry-forward of the Items module.
  */
 class ValuationController extends BaseController
 {
@@ -442,7 +446,88 @@ class ValuationController extends BaseController
         ]]);
     }
 
+    /**
+     * GET /valuation/carry-forward?source_fy_id=&target_fy_id=&source_fy_end=
+     * Preview of the year-end carry-forward (same computation as POST, nothing written) plus the
+     * recorded status of that source → target run. source_fy_end defaults to the year's known end.
+     */
+    public function carryForwardPreview()
+    {
+        $a = $this->authorizeAny(['valuation.carry_forward', 'valuation.recalculate', 'reports.valuation.read'], true, false);
+        if (isset($a['response'])) {
+            return $a['response'];
+        }
+        $cmpId = (int) $a['ctx']['cmp_id'];
+        $boId = (int) $a['ctx']['bo_id'];
+        $sourceFyId = (int) ($this->request->getGet('source_fy_id') ?? 0);
+        $targetFyId = (int) ($this->request->getGet('target_fy_id') ?? 0);
+        if ($sourceFyId <= 0 || $targetFyId <= 0) {
+            return $this->failStructured(422, 'validation_failed', 'source_fy_id and target_fy_id are required', ['fields' => ['source_fy_id', 'target_fy_id']]);
+        }
+        if ($sourceFyId === $targetFyId) {
+            return $this->failStructured(422, 'validation_failed', 'source_fy_id and target_fy_id must differ');
+        }
+        $sourceFyEnd = $this->dateParam('source_fy_end');
+        if ($sourceFyEnd === null) {
+            $range = $this->manageContext()->fyDateRange($cmpId, $sourceFyId);
+            $sourceFyEnd = $range['fy_end'] ?? null;
+        }
+        if ($sourceFyEnd === null) {
+            return $this->failStructured(422, 'validation_failed', 'source_fy_end (YYYY-MM-DD) is required: the source year\'s dates are not known', ['fields' => ['source_fy_end']]);
+        }
+        try {
+            $service = new FyCarryForwardService();
+            $preview = $service->preview($cmpId, $sourceFyId, $targetFyId, $boId, $sourceFyEnd);
+            $preview['status'] = $service->status($cmpId, $sourceFyId, $targetFyId, $boId);
+            $preview['existing_target_rows'] = $service->existingTargetRows($cmpId, $targetFyId, $boId);
+            $preview['target_carried_forward'] = FyCarryForwardStatus::hasRunInto($cmpId, $targetFyId);
+        } catch (\Throwable $e) {
+            return $this->failFromException($e);
+        }
+
+        return $this->respond(['data' => $preview]);
+    }
+
+    /**
+     * POST /valuation/carry-forward
+     *   {source_fy_id, target_fy_id, source_fy_start, source_fy_end, target_fy_start, target_fy_end, bo_id?, overwrite?}
+     * Writes the target year's opening stock from the source year's closing (see FyCarryForwardService).
+     * Year dates missing from the body are filled from the known ranges (local cache, then Manage).
+     */
+    public function carryForward()
+    {
+        $a = $this->authorizeAny(['valuation.carry_forward', 'valuation.recalculate'], true, false);
+        if (isset($a['response'])) {
+            return $a['response'];
+        }
+        $cmpId = (int) $a['ctx']['cmp_id'];
+        $body = $this->request->getJSON(true) ?? [];
+        foreach (['source' => (int) ($body['source_fy_id'] ?? 0), 'target' => (int) ($body['target_fy_id'] ?? 0)] as $side => $fyId) {
+            if ($fyId <= 0 || (!empty($body[$side . '_fy_start']) && !empty($body[$side . '_fy_end']))) {
+                continue;
+            }
+            $range = $this->manageContext()->fyDateRange($cmpId, $fyId);
+            if ($range !== null) {
+                $body[$side . '_fy_start'] = $body[$side . '_fy_start'] ?? $range['fy_start'];
+                $body[$side . '_fy_end'] = $body[$side . '_fy_end'] ?? $range['fy_end'];
+            }
+        }
+        try {
+            $req = FyCarryForwardService::normaliseRequest($body, (int) $a['ctx']['bo_id']);
+            $result = (new FyCarryForwardService())->run($cmpId, $req, $a['session']['uuid']);
+        } catch (\Throwable $e) {
+            return $this->failFromException($e);
+        }
+
+        return $this->respond(['data' => $result]);
+    }
+
     // ------------------------------------------------------------------ helpers
+
+    private function manageContext(): ManageContextService
+    {
+        return (new ManageContextService())->withAuth($this->request->getHeaderLine('Authorization') ?: null);
+    }
 
     private function jobQuery(int $cmpId)
     {

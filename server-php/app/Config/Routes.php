@@ -110,6 +110,7 @@ $routes->group('', ['namespace' => 'App\Controllers\Api', 'filter' => 'cors'], s
         $routes->post('inventory-documents/(:num)/cancel', 'DocumentsController::cancel/$1');
         $routes->get('inventory-documents/(:num)/print-snapshot', 'DocumentsController::printSnapshot/$1');
         $routes->get('pending-quantities', 'PendingController::index');
+        $routes->get('pending-quantities/(:num)', 'PendingController::show/$1');
         $routes->get('packing-lists', 'PackingController::index');
         $routes->get('packing-lists/(:num)', 'PackingController::show/$1');
         $routes->post('packing-lists/(:num)/unpack', 'PackingController::unpack/$1');
@@ -128,6 +129,8 @@ $routes->group('', ['namespace' => 'App\Controllers\Api', 'filter' => 'cors'], s
         $routes->post('valuation/recalculations/(:num)/run', 'ValuationController::runRecalc/$1');
         $routes->get('valuation/revisions', 'ValuationController::revisions');
         $routes->post('valuation/revisions/ack', 'ValuationController::ackRevisions');
+        $routes->get('valuation/carry-forward', 'ValuationController::carryForwardPreview');
+        $routes->post('valuation/carry-forward', 'ValuationController::carryForward');
 
         // Reports
         $routes->get('reports/stock-summary', 'ReportsController::stockSummary');

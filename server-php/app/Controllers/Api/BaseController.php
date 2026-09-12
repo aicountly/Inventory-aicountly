@@ -153,11 +153,11 @@ class BaseController extends ResourceController
     }
 
     /** @param list<string> $permissions */
-    protected function authorizeAny(array $permissions, bool $requireContext = true): array
+    protected function authorizeAny(array $permissions, bool $requireContext = true, bool $requireFy = true): array
     {
         $last = null;
         foreach ($permissions as $permission) {
-            $a = $this->authorize($permission, $requireContext);
+            $a = $this->authorize($permission, $requireContext, $requireFy);
             if (!isset($a['response'])) {
                 return $a;
             }

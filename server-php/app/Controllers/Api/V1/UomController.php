@@ -10,6 +10,7 @@ class UomController extends MasterController
     protected string $permissionBase = 'masters.uom';
     protected string $label = 'Unit';
     protected string $entityType = 'uom';
+    protected ?string $mirrorKind = 'uom';
     protected array $columns = ['unit_symbol', 'print_name', 'uqc_gst', 'decimal_places'];
     protected array $required = ['unit_name', 'unit_symbol'];
     protected array $searchColumns = ['unit_symbol', 'uqc_gst'];

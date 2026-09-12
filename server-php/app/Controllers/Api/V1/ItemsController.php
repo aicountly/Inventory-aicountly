@@ -6,6 +6,7 @@ use App\Controllers\Api\BaseController;
 use App\Exceptions\InventoryException;
 use App\Services\AuditService;
 use App\Services\InventorySettingsService;
+use App\Services\MasterMirrorService;
 use App\Services\OpeningStockResolver;
 use App\Services\StockBalanceService;
 use App\Services\UnitConversionService;
@@ -190,6 +191,7 @@ class ItemsController extends BaseController
             $itemId = (int) $db->insertID();
             $this->saveUnitLines($db, $cmpId, $itemId, $lines);
             $this->saveOpeningsFromBody($db, $cmpId, $itemId, $body, (int) $a['ctx']['fy_id'], $a['session']['uuid']);
+            (new MasterMirrorService())->publishItem($cmpId, $itemId);
             $db->transComplete();
             (new AuditService())->log($cmpId, 'item', $itemId, 'item.create', $a['session']['uuid'], [], null, $row);
 
@@ -236,6 +238,7 @@ class ItemsController extends BaseController
                 $this->saveUnitLines($db, $cmpId, (int) $id, $lines);
             }
             $this->saveOpeningsFromBody($db, $cmpId, (int) $id, $body, (int) $a['ctx']['fy_id'], $a['session']['uuid']);
+            (new MasterMirrorService())->publishItem($cmpId, (int) $id);
             $db->transComplete();
             (new AuditService())->log($cmpId, 'item', (int) $id, 'item.update', $a['session']['uuid'], [], $existing, $row);
             if ($methodChanged && !empty($body['valuation_method_recost'])) {
@@ -601,7 +604,13 @@ class ItemsController extends BaseController
         if ($bom > 0) {
             return ['ok' => false, 'message' => 'Item is used in ' . $bom . ' bill(s) of materials', 'count' => $bom];
         }
+        $db->transStart();
         $db->table('inv_items')->where('item_id', $itemId)->update(['deleted_at' => date('Y-m-d H:i:s'), 'deleted_by' => $actor, 'is_active' => 0, 'updated_at' => date('Y-m-d H:i:s')]);
+        (new MasterMirrorService())->publishItem($cmpId, $itemId);
+        $db->transComplete();
+        if ($db->transStatus() === false) {
+            return ['ok' => false, 'message' => 'Item could not be deleted: transaction failed'];
+        }
         (new AuditService())->log($cmpId, 'item', $itemId, 'item.delete', $actor, [], $item, null);
 
         return ['ok' => true];
