@@ -210,35 +210,57 @@ Databases: create user `invread` (becomes `booksaicountly_invread`) and add it t
 `booksaicountly_smartbooksaic`.
 
 cPanel's PostgreSQL screen does not offer a read-only privilege level the way its MySQL screen
-does, so tighten it yourself. Connect as the Books database owner, which can grant on its own
-tables without any superuser access:
+does, so tighten it yourself, in **two separate sessions as two different roles**. Getting this
+wrong leaves a role that looks read-only and is not.
+
+**Session 1, as the Books database owner** (it can grant on its own tables, no superuser needed):
 ```bash
 psql -h 127.0.0.200 -p 5432 -U booksaicountly_smartbooksaic_user -d booksaicountly_smartbooksaic
 ```
-then:
 ```sql
 GRANT USAGE ON SCHEMA public TO booksaicountly_invread;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO booksaicountly_invread;
 GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO booksaicountly_invread;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO booksaicountly_invread;
+\q
+```
+Those four grant read access to everything that exists now and everything this owner creates
+later. They are **not** sufficient on their own: on PostgreSQL 13 the `public` schema still
+grants `CREATE` to `PUBLIC`, so the role can still create new objects of its own. Existing Books
+data is already safe at this point (`SELECT` only, no `INSERT`/`UPDATE`/`DELETE`), but the schema
+is not.
+
+**Session 2, as the read-only role itself**, to close that:
+```bash
+psql -h 127.0.0.200 -p 5432 -U booksaicountly_invread -d booksaicountly_smartbooksaic
+```
+```sql
 ALTER ROLE booksaicountly_invread SET default_transaction_read_only = on;
 \q
 ```
-These two `psql` calls deliberately omit `-w` and will prompt for the password, because
+This must run as that role, not as the Books owner. PostgreSQL lets an ordinary role set its own
+parameters, but only a superuser (or a `CREATEROLE` holder) can set another role's — as the
+owner it fails with a bare `permission denied`, which is easy to read past in a list of
+successful `GRANT` lines. The setting applies to **new** sessions, so reconnect before testing.
+
+Both `psql` calls above deliberately omit `-w` and will prompt for a password, because
 `~/.pgpass` is not set up until B1. Everything from B1 onward uses `-w`.
 
-The last line is the belt-and-braces one: every session that role opens starts read-only, so a
-write fails even if some grant slips through later.
-
-**Prove it before trusting it.** Connect as the read-only role and confirm both halves:
+**Prove it before trusting it**, in a fresh session so the role setting is in force. Every check
+here is non-destructive whether it passes or fails — the `UPDATE` matches no rows and the temp
+table dies with the session:
 ```bash
 psql -h 127.0.0.200 -p 5432 -U booksaicountly_invread -d booksaicountly_smartbooksaic \
+  -c "SHOW default_transaction_read_only;" \
   -c "SELECT count(*) FROM books_voucher_headers;" \
-  -c "CREATE TABLE should_not_work (x int);"
+  -c "UPDATE books_voucher_headers SET vch_number = vch_number WHERE false;" \
+  -c "CREATE TEMP TABLE rocheck (x int);"
 ```
-**Paste back both results.** The `SELECT` must return a count and the `CREATE TABLE` must fail
-with a read-only transaction error. If the `CREATE TABLE` succeeds, stop and tell me — we do not
-run a migration with a role that can write to Books.
+**Paste back all four.** Expected: `on`, then a count, then a failure, then a failure. If either
+write succeeds, stop and tell me. We do not run a migration with a role that can write to Books.
+
+Safe because the Inventory app issues no `INSERT`/`UPDATE`/`DELETE`/`CREATE`/`DROP` on the Books
+connection at all, and uses no temporary tables anywhere, so a read-only session cannot break it.
 
 ### A5 part 2. Write Inventory's `api/.env` (the one file the deploy never touches)
 Do this after the first deploy in A4, since `.env.example` arrives with it.
