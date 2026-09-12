@@ -14,18 +14,19 @@ what must be supplied out of band.
 
 | Area | Before | After |
 |------|--------|-------|
-| API clients | `src/api/client.ts` → Books only | `src/api/client.ts` (Books) **plus** `src/api/inventoryClient.ts` (Inventory). Same secure-store session key, same `cmp_id / fy_id / bo_id` injection, same error mapping, extra header `X-Source-App: books`. |
-| Environment | `EXPO_PUBLIC_BOOKS_ENV` picks `books.aicountly.com` / `books.gh.aicountly.com` | Same switch also picks the Inventory base: `https://inventory.aicountly.com/api` (production) / `https://inventory.gh.aicountly.com/api` (sandbox); `EXPO_PUBLIC_INVENTORY_API_BASE` overrides it (`src/config/env.ts`). |
-| Items, item groups, stock categories, units, material centres, BOM | `src/api/endpoints/masters.ts`, `inventory.ts` → Books `/api/masters/...` | Read and written through Inventory `/v1/items`, `/v1/item-groups`, `/v1/stock-categories`, `/v1/uom`, `/v1/warehouses`, `/v1/bill-of-materials`. Field mapping: `mc_id/mc_name → warehouse_id/warehouse_name`, `mc_grp_id → warehouse_group_id`, opening stock under `/v1/items/{id}/openings`, unit conversions as `uoms[]` on the item. |
-| Item pickers on sales / purchase / credit-note / debit-note entry | Books item search | Inventory `GET /v1/items/search` plus live availability from `GET /v1/availability/check` per warehouse. The **posted payload is unchanged** (`item_id, qty, rate, amount, unit_id, mc_id, tax_cat_id, dr_cr`) — the Books server maps it and hands the lines to Inventory. |
-| "From challan" settlement on invoices | open challans from Books | `GET /v1/pending-quantities`; each settlement row posts `source_document_id` (the Inventory document id). Legacy rows keep `source_vch_txn_id`. |
-| Pure inventory vouchers (stock transfer 15, stock journal 20, physical stock 10, production 14, job work in/out 6/7, packing 4, delivery / inward challan 23/24) | created and edited under `app/(app)/inventory/vouchers/[type]` and the quick-action tiles | **Create / edit removed.** The hub, quick actions and transactions menu show "Now in Aicountly Inventory" and open the Inventory app (`https://inventory.aicountly.com`, sandbox `https://inventory.gh.aicountly.com`) with the device browser. Historical vouchers still open **read-only** (`app/(app)/vouchers/[id]`) and print through the Books print endpoints, because Books keeps the voucher headers and a read-only mirror of the item / unit / material-centre names. |
-| Inventory reports (item ledger, summary, status, valuation) | Books report endpoints | Inventory `/v1/reports/stock-ledger`, `/v1/reports/stock-summary`, `/v1/reports/warehouse-stock`, `/v1/valuation/unit-costs`; the richer views deep-link into the Inventory app. |
-| Version | `1.1.0`, iOS build 61 / Android versionCode 61 | bumped (see `mobile/app.json` and `mobile/package.json` on the branch); `eas.json` keeps `autoIncrement` for store profiles. |
+| API clients | `src/api/client.ts` → Books only | `src/api/client.ts` (Books) **plus** `src/api/inventoryClient.ts` (Inventory). Both go through the shared `authedRequest` cycle: same secure-store session key, same `cmp_id / fy_id / bo_id` injection, same 401 refresh and error mapping; Inventory calls add `X-Source-App: books`. |
+| Environment | `EXPO_PUBLIC_BOOKS_ENV` picks `books.aicountly.com` / `books.gh.aicountly.com` | Same switch also picks the Inventory API (`https://inventory.aicountly.com/api`, sandbox `https://inventory.gh.aicountly.com/api`) and app URL; `EXPO_PUBLIC_INVENTORY_API_BASE` / `EXPO_PUBLIC_INVENTORY_APP_URL` override them (`src/config/env.ts`). |
+| Items, item groups, bills of materials, material centres | `src/api/endpoints/inventory.ts` → Books `/api/masters/...` | `itemsApi`, `itemGroupsApi`, `bomApi`, `materialCentresApi` read and write through Inventory `/v1/items`, `/v1/item-groups`, `/v1/bill-of-materials`, `/v1/warehouses`. Rows are mapped back to the Books names the screens use (`books_tax_cat_id → tax_cat_id`, `warehouse_id → mc_id`, `unit_lines` kept); the item form's payload is accepted by Inventory as it is, with the Books account / tax links copied to their `books_*` names. Item form dropdowns merge Inventory (units, groups, categories) with Books (accounts, tax categories). |
+| Item pickers on sales / purchase / credit-note / debit-note entry | Books item search | Unchanged: the pickers read Books' read-only mirror (kept in step by Inventory events) and the **posted payload is unchanged** (`item_id, qty, rate, amount, unit_id, mc_id, tax_cat_id, dr_cr`) — the Books server hands the lines to Inventory and writes the COGS pairs. |
+| Packing lists | Books `/packing-lists` | Inventory `/v1/packing-lists` (list, unpack, unlock); rows map the Inventory document id onto `vch_txn_id` so the packing screen is unchanged. |
+| Pure inventory vouchers (stock transfer 15, stock journal 20, physical stock 10, production 14, job work in/out 6/7, packing 4, delivery / inward challan 23/24) | entry form under `app/(app)/inventory/vouchers/[type]`, reached from the hub, the Movement Vouchers index and the quick actions | **The entry form is gone.** Every existing route now lands on a hand-off screen ("… is now recorded in Aicountly Inventory") with an *Open Aicountly Inventory* button that deep-links the matching document type in the Inventory app through the device browser, and a link to the Books registers. Historical vouchers still open **read-only** in the registers (`app/(app)/vouchers/[id]`) and print through Books, which keeps the voucher headers and a read-only mirror of item / unit / material-centre names. |
+| Inventory reports (item ledger, summary, status, valuation) | Books report endpoints | Unchanged on the app: the Books server serves those endpoints **from Inventory** in live mode (`InventoryReportAdapter`), so the screens show live quantities and values with Books' commercial columns kept. Responses carry `source: "inventory"`. |
+| Version | `1.1.0`, iOS build 61 / Android versionCode 61 | `1.2.0`, iOS build 62 / Android versionCode 62 (`mobile/app.json`; `package.json` 1.2.0). `eas.json` keeps `autoIncrement` for store profiles. |
 
-Tests under `mobile/src/**/*.test.ts` were updated for the new clients and the
-removed screens; `npx tsc --noEmit` and `npm test -- --watchAll=false` are the
-gate.
+`src/api/inventoryClient.test.ts` covers the path / query helpers, the environment
+origins and the Inventory → Books row mapping; the hub and index tests still pass
+because every voucher route survives as the hand-off screen. `npx tsc --noEmit`,
+`npx jest` and `npm run lint` are the gate.
 
 ## 2. How an old build behaves after the cutover
 
@@ -44,10 +45,11 @@ enforces the split, so an out-of-date app degrades predictably once
   with the message "This document is now created in Aicountly Inventory
   (stock transfer, stock journal, physical stock, production, job work,
   packing and challans live there). Open Inventory to record it."
-* Inventory reports on an old build read Books' legacy report endpoints; they
-  keep answering from the frozen Books tables (correct up to the cutover
-  date, stale afterwards). This is the one silent degradation, and the reason
-  the new build should be in the stores **before** the cutover.
+* Inventory reports on an old build call the same Books endpoints the new
+  build does, and those are served from Inventory in live mode — so even old
+  builds show live quantities. Packing lists and item / group / BOM screens
+  on an old build read the frozen Books tables (stale for packing lists,
+  read-only mirror for items) until the user updates.
 
 No forced-update mechanism exists in the app today. If a hard block for old
 builds is wanted, add a minimum-version check against `GET /api/health` on the
@@ -58,9 +60,8 @@ Books server; it is deliberately not part of this migration.
 1. Deploy Books server (still `INVENTORY_MODE=legacy`) and the Inventory API;
    run the data migration and validation (`DB_MIGRATION_RUNBOOK.md`).
 2. Build the new mobile version with the **production** profiles and submit
-   it for review. While Books is still in legacy mode the new build's
-   Inventory-backed screens read the migrated (read-only) Inventory copy, and
-   every write still goes through Books — so it is safe to release it early.
+   it for review, but hold the release: its item / group / BOM screens write
+   to Inventory, which only becomes the owner at the cutover.
 3. Cut over (`INVENTORY_MODE=live`, Inventory "live" flag, Books web deploy).
 4. Release the reviewed build to 100 % (or start the phased release) the same
    day. Old builds behave as in section 2 until users update.
