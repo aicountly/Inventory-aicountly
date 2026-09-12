@@ -73,7 +73,7 @@ one shared readable path before Phase B starts rather than discovering the probl
 | A2 merge both branches to `main` | **next** |
 | A3 GitHub SSH secrets for Inventory | done (verified by an earlier test deploy) |
 | A4 first real Inventory deploy | after A2 |
-| A5 part 1, databases and roles | done — `inventoryaic_inventory` created; `booksaicountly_invread` created and **proven** read-only (`SELECT` works, `UPDATE` and `CREATE` both rejected) |
+| A5 part 1, databases and roles | done — `inventoryaic_inventory` created and ownership set (below); `booksaicountly_invread` created and **proven** read-only (`SELECT` works, `UPDATE` and `CREATE` both rejected) |
 | A5 part 2, Inventory `api/.env` | after A4 |
 | A6 onward | not started |
 
@@ -82,6 +82,37 @@ of GST and Item Master work that deploying the branch as-is would have reverted.
 the merged tree: Books PHP 3294 tests 0 failing, Books mobile 315 suites / 4565 tests, Inventory
 59 unit and 34 integration, web lint and production build clean. `main` added no SQL migrations
 and touched nothing in the migration read path, so the rehearsal evidence still stands.
+
+## Inventory database ownership (set manually, 2026-09-12)
+
+Done as the `postgres` superuser, outside cPanel's UI, so that the `.env` user owns everything
+and the cPanel account can still manage it in phpPgAdmin:
+
+```sql
+ALTER DATABASE inventoryaic_inventory OWNER TO inventoryaic_inventory_user;
+GRANT inventoryaic_inventory_user TO inventoryaic;
+GRANT ALL PRIVILEGES ON DATABASE inventoryaic_inventory TO inventoryaic;
+-- and, inside the database:
+ALTER SCHEMA public OWNER TO inventoryaic_inventory_user;
+-- plus loops reassigning every table, sequence and view in public to that user
+```
+
+This is the right shape. `GRANT <dbuser> TO inventoryaic` makes the cPanel role a **member** of
+the `.env` role, and PostgreSQL roles inherit by default, so `inventoryaic` picks up everything
+the owner can do — including the owner-only operations phpPgAdmin needs, such as `DROP` and
+`ALTER`. Owning `public` also means the `.env` user creates tables by right of ownership rather
+than leaning on PostgreSQL 13's default `CREATE` grant to `PUBLIC`.
+
+Two consequences worth knowing:
+
+* **The reassignment loops ran against an empty database, so they were no-ops, and that is fine.**
+  `inventory:sql-migrate` connects as `inventoryaic_inventory_user`, so every `inv_*` table and
+  sequence it creates is owned by that role from the start. The loops do not need re-running —
+  but A6 verifies it rather than assuming, because the cutover's sequence reset calls `setval()`
+  and needs ownership of every sequence.
+* **cPanel did not perform these changes, so its own bookkeeping does not know about them.** They
+  hold for normal operation. Be aware that a cPanel privilege repair, or restoring this account
+  from a cPanel backup, could reset ownership, in which case re-run the statements above.
 
 ## Confirmed environment (checked on the live server, 2026-09-12)
 
@@ -307,13 +338,26 @@ grep -E "^(CI_ENVIRONMENT|app\.baseURL|database\.default\.(hostname|port|databas
 ```
 That pattern excludes every password and key by construction.
 
-### A6. Confirm Inventory is healthy
+### A6. Confirm Inventory is healthy, and that the new tables landed with the right owner
 Re-run **Deploy to cPanel Production** for Inventory (picks up the new `.env`, re-applies
 `inventory:sql-migrate` idempotently), then:
 ```bash
 curl -s https://inventory.aicountly.com/api/health
 ```
-Paste the JSON response back.
+Then check ownership of what the migration just created. The cutover's sequence reset calls
+`setval()` on every `inv_*` sequence, which requires ownership, so a wrong owner here surfaces
+as a failure at the worst possible moment rather than now:
+```bash
+psql -h 127.0.0.200 -p 5432 -U inventoryaic_inventory_user -d inventoryaic_inventory -tAc "
+SELECT 'tables not owned by the .env user: ' || count(*)
+  FROM pg_tables WHERE schemaname='public' AND tableowner <> 'inventoryaic_inventory_user';
+SELECT 'sequences not owned by the .env user: ' || count(*)
+  FROM pg_sequences WHERE schemaname='public' AND sequenceowner <> 'inventoryaic_inventory_user';
+SELECT 'inv_ tables created: ' || count(*)
+  FROM pg_tables WHERE schemaname='public' AND tablename LIKE 'inv\\_%';"
+```
+Paste back the health JSON and these three counts. The first two must be `0`; the third must be
+a healthy count of `inv_*` tables, not zero.
 
 ### A7. Inventory's cron (cPanel → Cron Jobs, or `crontab -e` in this terminal)
 ```
