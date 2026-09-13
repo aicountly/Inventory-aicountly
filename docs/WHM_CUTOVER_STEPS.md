@@ -361,22 +361,14 @@ psql -h 127.0.0.200 -p 5432 -U inventoryaic_inventory_user -d inventoryaic_inven
 Paste back the health JSON and all four counts. The two `not_owned` counts must be `0`, and both
 totals must be non-zero.
 
-### A7. Inventory's cron
-Use the **absolute** PHP path. Cron runs with a minimal environment, where bare `php` may resolve
-to a different version or to nothing; on this server `which php` gives `/usr/local/bin/php`, the
-cPanel wrapper that honours the account's chosen version.
+### A7. Inventory's cron — deliberately NOT now, see E3
+These workers do nothing before cutover: Inventory has no documents and no events until Books
+goes live, and the migration itself queues neither (it writes no outbox rows and no
+recalculation jobs). Installing them now buys nothing and costs something, because the nightly
+`reconcile --all` would fire at 02:00 inside the overnight window, running a full reconciliation
+against a half-migrated database and competing for the same connections.
 
-Errors go to a log rather than to `/dev/null`. Normal output is discarded, because these run
-every minute and would otherwise bury the log in CodeIgniter banners, but a failing
-`outbox-dispatch` after cutover means Books silently stops receiving COGS corrections, and that
-must not be invisible.
-```
-* * * * * cd /home/inventoryaic/public_html/api && /usr/local/bin/php spark inventory:outbox-dispatch >/dev/null 2>> /home/inventoryaic/inventory-cron-errors.log
-* * * * * cd /home/inventoryaic/public_html/api && /usr/local/bin/php spark inventory:recalc-worker >/dev/null 2>> /home/inventoryaic/inventory-cron-errors.log
-*/5 * * * * cd /home/inventoryaic/public_html/api && /usr/local/bin/php spark inventory:expire-reservations >/dev/null 2>> /home/inventoryaic/inventory-cron-errors.log
-0 2 * * * cd /home/inventoryaic/public_html/api && /usr/local/bin/php spark inventory:reconcile --all >/dev/null 2>> /home/inventoryaic/inventory-cron-errors.log
-```
-Check that log during the first days after cutover; an empty file is the expected state.
+They are installed at **E3**, immediately after the mode flip and before users return.
 
 ### A8. Deploy Books (still `INVENTORY_MODE=legacy` — no user-visible change yet)
 In Books' `.env`, add/confirm: `INVENTORY_MODE = legacy`, `INVENTORY_API_BASE = https://inventory.aicountly.com/api`,
@@ -661,14 +653,37 @@ curl -s -H "X-Service-Key: $(grep '^INVENTORY_SERVICE_KEY' .env | cut -d= -f2- |
 ```
 **Paste back** — must now report `mode: live`.
 
-### E3. Resync masters (proves the channel works; Books' mirror should already match exactly)
+### E3. Start Inventory's background workers
+Now, not earlier: Books is live, so events and recalculations start being produced from this
+point. Install as the `inventoryaic` user. Use the absolute PHP path, because cron's minimal
+environment may not resolve bare `php`; on this server that is `/usr/local/bin/php`. Errors go to
+a log rather than `/dev/null`, since a failing `outbox-dispatch` means Books silently stops
+receiving COGS corrections:
+```bash
+crontab -l 2>/dev/null > /tmp/inv.cron
+cat >> /tmp/inv.cron <<'CRONEOF'
+* * * * * cd /home/inventoryaic/public_html/api && /usr/local/bin/php spark inventory:outbox-dispatch >/dev/null 2>> /home/inventoryaic/inventory-cron-errors.log
+* * * * * cd /home/inventoryaic/public_html/api && /usr/local/bin/php spark inventory:recalc-worker >/dev/null 2>> /home/inventoryaic/inventory-cron-errors.log
+*/5 * * * * cd /home/inventoryaic/public_html/api && /usr/local/bin/php spark inventory:expire-reservations >/dev/null 2>> /home/inventoryaic/inventory-cron-errors.log
+0 2 * * * cd /home/inventoryaic/public_html/api && /usr/local/bin/php spark inventory:reconcile --all >/dev/null 2>> /home/inventoryaic/inventory-cron-errors.log
+CRONEOF
+crontab /tmp/inv.cron
+crontab -l
+rm -f /tmp/inv.cron
+```
+Wait two minutes, then confirm they run clean. An empty log is the expected result:
+```bash
+tail -20 /home/inventoryaic/inventory-cron-errors.log 2>/dev/null; echo "--- empty above is correct ---"
+```
+
+### E4. Resync masters (proves the channel works; Books' mirror should already match exactly)
 ```bash
 cd /home/inventoryaic/public_html/api
 php spark inventory:resync-masters --all
 ```
 Paste back the output.
 
-### E4. Cross-check Books now reads stock from Inventory (use the logged-in apps, not curl)
+### E5. Cross-check Books now reads stock from Inventory (use the logged-in apps, not curl)
 Both the report Books shows and Inventory's own warehouse-stock report are gated by company/FY
 context and permissions resolved from a real logged-in session, not something a bare curl call
 can reproduce meaningfully — so do this from the browser, already signed in:
@@ -678,13 +693,13 @@ can reproduce meaningfully — so do this from the browser, already signed in:
    compare the same items' closing quantities.
 Tell me whether they agree — this is a real cross-check, not a formality.
 
-### E5. Smoke test with one real company
+### E6. Smoke test with one real company
 In the live Books app: post a purchase with items, post a sales invoice, cancel a test invoice,
 print a historical invoice, then open Inventory's web app and check that item's stock ledger
 reflects each of those. Tell me how each one went — this step needs a human eyeballing the UI,
 not a paste-back.
 
-### E6. Lift maintenance mode
+### E7. Lift maintenance mode
 Only after E5 looks right. Books web and mobile already point at Inventory as of the Phase A8
 deploy, so there's no separate frontend deploy at this point.
 
