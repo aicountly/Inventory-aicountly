@@ -1,0 +1,94 @@
+name: CI
+
+# The Inventory repo had no CI. It carries a migration toolkit, a valuation engine and the item
+# master every other product now reads from, and nothing ran its 72 tests before a merge.
+#
+# The integration suite needs a real PostgreSQL: the valuation and migration code uses window
+# functions, ON CONFLICT and numeric precision that SQLite does not reproduce, so testing against
+# anything else would pass while production failed.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  php:
+    name: PHP (PHPUnit against PostgreSQL)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server-php
+
+    services:
+      postgres:
+        image: postgres:13
+        env:
+          POSTGRES_USER: inventory_rehearsal
+          POSTGRES_PASSWORD: inventory_rehearsal
+          POSTGRES_DB: inventory_test
+        ports:
+          - 5432:5432
+        # Without this the first test connects before the server is listening.
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # PostgreSQL 13 deliberately: production runs 13.23, and 14 accepts bare keyword column
+      # labels that 13 rejects. Testing on a newer server hides that class of syntax error until
+      # deploy — which is exactly how it reached us once already.
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+          extensions: intl, mbstring, curl, pgsql, pdo_pgsql
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: PHP syntax check
+        run: find app -name '*.php' -print0 | xargs -0 -n1 php -l
+
+      - name: PHPUnit
+        env:
+          INVENTORY_TEST_DB_HOST: 127.0.0.1
+          INVENTORY_TEST_DB_PORT: '5432'
+          INVENTORY_TEST_DB_USER: inventory_rehearsal
+          INVENTORY_TEST_DB_PASSWORD: inventory_rehearsal
+          INVENTORY_TEST_DB_NAME: inventory_test
+        run: php vendor/bin/phpunit
+
+  web:
+    name: Web (typecheck, tests, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm test
+
+      # The build is its own gate: a type error can pass tsc in isolation and still break the
+      # bundle, and a broken bundle is only discovered at deploy time otherwise.
+      - name: Build
+        run: npm run build
