@@ -11,6 +11,8 @@ use CodeIgniter\CLI\CLI;
  */
 class InventorySqlMigrate extends BaseCommand
 {
+    use EqualsOptionSyntax;
+
     protected $group       = 'Inventory';
     protected $name        = 'inventory:sql-migrate';
     protected $description = 'Apply pending SQL migrations from database/migrations/';
@@ -23,6 +25,7 @@ class InventorySqlMigrate extends BaseCommand
 
     public function run(array $params)
     {
+        $this->normaliseEqualsOptions();
         $filters = array_values(array_filter(array_map('trim', $params)));
         try {
             $runner = new InventorySqlMigrationRunner();
