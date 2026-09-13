@@ -67,7 +67,9 @@ final class ReservationsAndPackingTest extends IntegrationTestCase
         $this->assertEqualsWithDelta(4.0, $res['open_qty'], 0.0001);
         $this->assertSame('sales', $res['source_app']);
         $this->assertSame('Reservable', $res['item_name']);
-        $this->assertSame('2026-12-31 18:30:00', $res['expires_at']);
+        // Stored as naive local time, like every other timestamp in the schema: the Z-anchored
+        // input is 2026-12-31 18:30 UTC, which is 2027-01-01 00:00 in the app's Asia/Kolkata.
+        $this->assertSame('2027-01-01 00:00:00', $res['expires_at']);
 
         $bal = $this->balances->balance($this->cmpId, $item, $wh);
         $this->assertEqualsWithDelta(10.0, $bal['on_hand'], 0.0001, 'a reservation never moves stock');
