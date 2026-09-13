@@ -298,6 +298,21 @@ final class InventoryPurgeCompanyTest extends TestCase
         $this->assertSame(['t_headers' => 223], $db->live());
     }
 
+    public function testLeavesTheAuditTrailWhereItIs(): void
+    {
+        // Books retains its audit trail for eight years under statute. Inventory owns the stock
+        // domain now, so its audit of that domain is the other half of the same record; deleting
+        // one while the other is kept leaves a purged company's history half destroyed.
+        $db = new StubAbortingPostgres(['inv_audit_log' => 2, 't_documents' => 38]);
+
+        $this->assertSame(EXIT_SUCCESS, $this->purge($db));
+        $this->assertSame(['inv_audit_log' => 2, 't_documents' => 0], $db->live(),
+            'the audit rows must still be in public');
+        $this->assertSame(['t_documents' => 38], $db->archive,
+            'the audit rows must not be copied into an archive schema that later gets dropped');
+        $this->assertNotContains('DELETE FROM public."inv_audit_log" WHERE cmp_id = 3', $db->log);
+    }
+
     public function testFailsWhenTheCommitKeepsNothing(): void
     {
         // A connection that accepts every statement and throws the work away at COMMIT: what an
