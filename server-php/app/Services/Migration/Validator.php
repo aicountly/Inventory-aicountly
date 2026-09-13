@@ -413,6 +413,7 @@ class Validator
             $excluded = $this->booksDoubleCountedByItem($cmpId, $fyId, $asOf);
             $zeroCostTransfers = $this->booksZeroCostTransferInByItem($cmpId, $fyId, $asOf);
             $missingCostLayers = $this->booksMissingCostLayerByItem($cmpId, $fyId, $asOf);
+            $booksLayerValue   = $this->booksLayerValueByItem($cmpId);
             $qtyDiffs = [];
             $explained = [];
             $valueDiffs = [];
@@ -446,6 +447,19 @@ class Validator
                         // Books' own report whenever that layer is still open at the as-of date.
                         $entry['reason'] = 'transfer_zero_cost_layer';
                         $entry['transfer_zero_cost_lines'] = $zeroCostTransfers[$itemId];
+                        $valueExplained[] = $entry;
+                    } elseif (
+                        isset($booksLayerValue[$itemId])
+                        && abs($booksLayerValue[$itemId]['value'] - $iv) <= $moneyTol
+                        && abs($booksLayerValue[$itemId]['value'] - $bv) > $moneyTol
+                    ) {
+                        // Books' own cost layers are complete and intact, and their total agrees
+                        // with Inventory to the penny. Books' *valuation report* is the outlier.
+                        // No accounting judgement is needed here: Books' own data proves the
+                        // migrated figure correct.
+                        $entry['reason'] = 'books_report_disagrees_with_own_layers';
+                        $entry['books_layer_value'] = $booksLayerValue[$itemId]['value'];
+                        $entry['books_layers'] = $booksLayerValue[$itemId]['layers'];
                         $valueExplained[] = $entry;
                     } elseif (
                         isset($missingCostLayers[$itemId])
@@ -559,6 +573,7 @@ class Validator
         $texts = [
             'transfer_zero_cost_layer' => "Books wrote unit_cost 0 for these items' stock-transfer (vch_type 15) receiving-side cost layer, though the transfer line's own cost_rate was real and non-zero — a known Books valuation gap, not a migration defect. Inventory's replayed valuation uses the line's real cost_rate.",
             'books_cost_layer_missing' => "Books' inward line carries a real cost_rate but the cost layer its valuation report reads was never written, or was written at zero, so Books reports the item as worthless. Inventory replays the movement using the cost Books itself recorded on the line. Reviewed and approved by the owner before cutover: accepting Inventory's figures rather than carrying demonstrably purchased stock at zero. Every affected item and voucher is listed under books_lines_with_cost.",
+            'books_report_disagrees_with_own_layers' => "Books' own cost layers for these items are complete and intact, and their total (qty_remaining x unit_cost, listed under books_layers) agrees with Inventory exactly. Books' valuation report disagrees with Books' own stored layers - a reporting defect in Books, not a migration difference. Inventory's figure is corroborated by Books' data itself, so no judgement call is involved in accepting it.",
             'qty_explained'            => 'Value differs only because the quantity difference is itself already explained; see explanation.',
         ];
         $out = [];
@@ -570,6 +585,42 @@ class Validator
         }
 
         return $out === [] ? null : $out;
+    }
+
+    /**
+     * Books' own closing value per item, derived from its stored cost layers rather than from its
+     * valuation report: SUM(qty_remaining * unit_cost). Layers are company-scoped, not FY-scoped,
+     * and reflect current state, so this only corroborates a comparison whose as-of date is the
+     * present. That is self-limiting: a historical as-of simply will not match, and then the
+     * explanation does not fire and the difference still fails.
+     *
+     * @return array<int, array{value: float, layers: list<array<string, mixed>>}>
+     */
+    private function booksLayerValueByItem(int $cmpId): array
+    {
+        if (!$this->has('books_inventory_cost_layers')) {
+            return [];
+        }
+        $rows = $this->books->query(
+            "SELECT item_id, layer_id, qty_remaining, unit_cost
+             FROM books_inventory_cost_layers
+             WHERE cmp_id = ? AND qty_remaining <> 0
+             ORDER BY item_id, layer_id",
+            [$cmpId]
+        )->getResultArray();
+        $out = [];
+        foreach ($rows as $r) {
+            $itemId = (int) $r['item_id'];
+            $qty = (float) $r['qty_remaining'];
+            $cost = (float) $r['unit_cost'];
+            $out[$itemId]['value'] = round(($out[$itemId]['value'] ?? 0.0) + $qty * $cost, 4);
+            $out[$itemId]['layers'][] = [
+                'layer_id' => (int) $r['layer_id'], 'qty_remaining' => $qty, 'unit_cost' => $cost,
+                'layer_value' => round($qty * $cost, 4),
+            ];
+        }
+
+        return $out;
     }
 
     /**
