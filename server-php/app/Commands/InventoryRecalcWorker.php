@@ -14,6 +14,8 @@ use CodeIgniter\CLI\CLI;
  */
 class InventoryRecalcWorker extends BaseCommand
 {
+    use EqualsOptionSyntax;
+
     protected $group       = 'Inventory';
     protected $name        = 'inventory:recalc-worker';
     protected $description = 'Run queued backdated valuation recalculation jobs (oldest first).';
@@ -25,6 +27,7 @@ class InventoryRecalcWorker extends BaseCommand
 
     public function run(array $params)
     {
+        $this->normaliseEqualsOptions();
         $limit = (int) (CLI::getOption('limit') ?? $params['limit'] ?? 20);
         $limit = $limit > 0 ? min($limit, 1000) : 20;
         $cmpId = (int) (CLI::getOption('cmp') ?? $params['cmp'] ?? 0);

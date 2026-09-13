@@ -14,6 +14,8 @@ use CodeIgniter\CLI\CLI;
  */
 class InventoryOutboxDispatch extends BaseCommand
 {
+    use EqualsOptionSyntax;
+
     protected $group       = 'Inventory';
     protected $name        = 'inventory:outbox-dispatch';
     protected $description = 'Deliver pending outbox events (inventory -> Books) with retries.';
@@ -24,6 +26,7 @@ class InventoryOutboxDispatch extends BaseCommand
 
     public function run(array $params)
     {
+        $this->normaliseEqualsOptions();
         $limit = (int) (CLI::getOption('limit') ?? $params['limit'] ?? 100);
         $limit = $limit > 0 ? min($limit, 5000) : 100;
         $started = microtime(true);

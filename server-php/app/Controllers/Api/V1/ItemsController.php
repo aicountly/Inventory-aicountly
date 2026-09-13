@@ -89,10 +89,19 @@ class ItemsController extends BaseController
             $this->applySearch($b, $q, (string) ($this->request->getGet('q_mode') ?? 'contains'));
         }
         $total = (clone $b)->countAllResults(false);
-        $sortMap = ['item_name' => 'i.item_name', 'item_sku' => 'i.item_sku', 'updated_at' => 'i.updated_at', 'created_at' => 'i.created_at', 'grp_name' => 'g.grp_name', 'item_id' => 'i.item_id'];
+        $sortMap = ['item_name' => 'i.item_name', 'item_sku' => 'i.item_sku', 'updated_at' => 'i.updated_at', 'created_at' => 'i.created_at', 'grp_name' => 'g.grp_name', 'item_id' => 'i.item_id', 'mrp' => 'i.mrp'];
         $rows = $b->select(self::LIST_COLUMNS)->orderBy($sortMap[$p['sort']] ?? 'i.item_name', $p['order'])->limit($p['limit'], $p['offset'])->get()->getResultArray();
         if ((int) ($this->request->getGet('with_stock') ?? 0) === 1 && $rows !== []) {
             $this->attachStock($cmpId, $rows, (int) $this->request->getGet('warehouse_id') ?: null);
+        }
+        // Books' quantity conversion needs every item's alternate units in one pass; without this
+        // it would have to call bulk-lookup for the whole catalogue a second time.
+        if ((int) ($this->request->getGet('with_units') ?? 0) === 1 && $rows !== []) {
+            $units = $this->unitsForItems($cmpId, array_map(static fn ($r) => (int) $r['item_id'], $rows));
+            foreach ($rows as &$r) {
+                $r['units'] = $units[(int) $r['item_id']] ?? [];
+            }
+            unset($r);
         }
 
         return $this->respondList($rows, $total, $p['limit'], $p['offset']);
@@ -278,6 +287,151 @@ class ItemsController extends BaseController
         $r = $this->tryDelete($cmpId, (int) $id, $a['session']['uuid']);
 
         return $r['ok'] ? $this->respondDeleted(['data' => ['item_id' => (int) $id]]) : $this->failStructured(409, 'delete_blocked', $r['message'], $r);
+    }
+
+    /**
+     * Fields a bulk edit may set. Deliberately narrow: nothing here changes how stock is counted
+     * or costed, so a mistake is a wrong label or price, never a wrong valuation. Units, the
+     * valuation method, batch / serial tracking and openings are excluded and stay one item at a
+     * time, where their consequences are visible.
+     */
+    private const BULK_EDITABLE = [
+        'hsn_sac', 'mrp', 'item_alias', 'print_name',
+        'item_grp_id', 'stock_cat_id', 'brand_id',
+        'books_tax_cat_id', 'books_sales_acc_id', 'books_purchase_acc_id',
+        'min_stock_qty', 'max_stock_qty', 'reorder_point_qty', 'reorder_qty', 'is_active',
+    ];
+
+    private const BULK_MAX_ROWS = 500;
+
+    /**
+     * POST /v1/items/bulk-update — edit one field across many items in a single transaction.
+     *
+     * Two shapes, because both are natural:
+     *   {"item_ids": [1,2,3], "fields": {"books_tax_cat_id": 7}}   same value for every item
+     *   {"rows": [{"item_id": 1, "mrp": 100}, {"item_id": 2, "mrp": 120}]}   a value per item
+     *
+     * All or nothing: one rejected row rolls the whole batch back, so a half-applied price list
+     * cannot exist. Each item still goes through the same validation and audit as a single edit.
+     */
+    public function bulkUpdate()
+    {
+        $a = $this->authorize('masters.items.write', true, false);
+        if (isset($a['response'])) {
+            return $a['response'];
+        }
+        $cmpId = (int) $a['ctx']['cmp_id'];
+        $body = $this->request->getJSON(true) ?? [];
+
+        try {
+            $changes = self::normalizeBulkRows($body);
+        } catch (\Throwable $e) {
+            return $this->failFromException($e);
+        }
+        if ($changes === []) {
+            return $this->failStructured(400, 'validation_error', 'Select at least one item and one field to change');
+        }
+        if (count($changes) > self::BULK_MAX_ROWS) {
+            return $this->failStructured(400, 'validation_error', sprintf('Bulk edit is limited to %d items per request; send the selection in pages.', self::BULK_MAX_ROWS), ['limit' => self::BULK_MAX_ROWS, 'received' => count($changes)]);
+        }
+
+        $db = \Config\Database::connect();
+        $existingRows = [];
+        foreach (array_chunk(array_keys($changes), 500) as $chunk) {
+            foreach ($db->table('inv_items')->where('cmp_id', $cmpId)->where('deleted_at', null)->whereIn('item_id', $chunk)->get()->getResultArray() as $r) {
+                $existingRows[(int) $r['item_id']] = $r;
+            }
+        }
+        $missing = array_values(array_diff(array_keys($changes), array_keys($existingRows)));
+        if ($missing !== []) {
+            return $this->failStructured(404, 'not_found', 'Some items no longer exist', ['item_ids' => $missing]);
+        }
+
+        $now = date('Y-m-d H:i:s');
+        $actor = $a['session']['uuid'];
+        $mirror = new MasterMirrorService();
+        $audit = new AuditService();
+        $applied = [];
+        try {
+            $db->transBegin();
+            foreach ($changes as $itemId => $fields) {
+                $existing = $existingRows[$itemId];
+                $row = $this->buildRow($cmpId, array_merge($existing, $fields), $existing);
+                // buildRow leaves is_active alone; it is a flag on the row, not a master column.
+                if (array_key_exists('is_active', $fields)) {
+                    $row['is_active'] = !empty($fields['is_active']) ? 1 : 0;
+                }
+                $row['updated_by'] = $actor;
+                $row['updated_at'] = $now;
+                $row['version'] = (int) $existing['version'] + 1;
+                $db->table('inv_items')->where('cmp_id', $cmpId)->where('item_id', $itemId)->update($row);
+                $mirror->publishItem($cmpId, $itemId);
+                $applied[] = ['item_id' => $itemId, 'changed' => array_keys($fields)];
+            }
+            if ($db->transStatus() === false) {
+                throw InventoryException::validation('Bulk edit could not be written');
+            }
+            $db->transCommit();
+        } catch (\Throwable $e) {
+            $db->transRollback();
+
+            return $this->failFromException($e);
+        }
+
+        // Audit after the commit: a failed audit must not undo an edit the user can already see.
+        foreach ($applied as $entry) {
+            $audit->log($cmpId, 'item', $entry['item_id'], 'item.bulk_update', $actor, ['fields' => $entry['changed']], $existingRows[$entry['item_id']], $changes[$entry['item_id']]);
+        }
+
+        return $this->respond(['data' => ['updated' => count($applied), 'rows' => $applied]]);
+    }
+
+    /**
+     * Both request shapes reduced to item_id => changed fields, with anything outside the
+     * whitelist refused rather than silently dropped: a caller that thinks it changed the
+     * valuation method must hear that it did not.
+     *
+     * @param array<string, mixed> $body
+     * @return array<int, array<string, mixed>>
+     */
+    private static function normalizeBulkRows(array $body): array
+    {
+        $reject = static function (array $fields): void {
+            $unknown = array_values(array_diff(array_keys($fields), self::BULK_EDITABLE));
+            if ($unknown !== []) {
+                throw InventoryException::validation('These fields cannot be changed in bulk: ' . implode(', ', $unknown), ['fields' => $unknown, 'allowed' => self::BULK_EDITABLE]);
+            }
+        };
+
+        $out = [];
+        if (is_array($body['rows'] ?? null)) {
+            foreach ($body['rows'] as $row) {
+                $row = (array) $row;
+                $itemId = (int) ($row['item_id'] ?? 0);
+                unset($row['item_id']);
+                $reject($row);
+                if ($itemId > 0 && $row !== []) {
+                    // A repeated item id merges rather than the last one winning silently.
+                    $out[$itemId] = array_merge($out[$itemId] ?? [], $row);
+                }
+            }
+
+            return $out;
+        }
+
+        $fields = is_array($body['fields'] ?? null) ? $body['fields'] : [];
+        $reject($fields);
+        if ($fields === []) {
+            return [];
+        }
+        foreach ((array) ($body['item_ids'] ?? []) as $id) {
+            $id = (int) $id;
+            if ($id > 0) {
+                $out[$id] = $fields;
+            }
+        }
+
+        return $out;
     }
 
     public function bulkDelete()

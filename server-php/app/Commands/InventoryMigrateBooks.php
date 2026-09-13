@@ -22,6 +22,8 @@ use CodeIgniter\CLI\CLI;
  */
 class InventoryMigrateBooks extends BaseCommand
 {
+    use EqualsOptionSyntax;
+
     protected $group       = 'Inventory';
     protected $name        = 'inventory:migrate-books';
     protected $description = 'Migrate inventory-owned data from the Books database (rehearsable, idempotent, logged).';
@@ -41,7 +43,7 @@ class InventoryMigrateBooks extends BaseCommand
 
     public function run(array $params)
     {
-        $this->normaliseOptions();
+        $this->normaliseEqualsOptions();
         $stage = strtolower((string) (CLI::getOption('stage') ?? ''));
         $runId = (string) (CLI::getOption('run-id') ?? date('Ymd-His'));
         $companies = array_values(array_filter(array_map('intval', explode(',', (string) (CLI::getOption('company') ?? '')))));
@@ -77,28 +79,6 @@ class InventoryMigrateBooks extends BaseCommand
         CLI::write('Summary: ' . $path, $code === EXIT_SUCCESS ? 'green' : 'red');
 
         return $code;
-    }
-
-    /**
-     * CodeIgniter's CLI parser only understands `--opt value`; runbooks (and
-     * muscle memory) use `--opt=value`. Accept both so a mistyped stage never
-     * silently falls back to "unknown".
-     */
-    private function normaliseOptions(): void
-    {
-        foreach ($_SERVER['argv'] ?? [] as $arg) {
-            if (!is_string($arg) || strpos($arg, '--') !== 0 || strpos($arg, '=') === false) {
-                continue;
-            }
-            [$key, $value] = explode('=', ltrim($arg, '-'), 2);
-            if (CLI::getOption($key) === null) {
-                $options = CLI::getOptions();
-                $options[$key] = $value;
-                $ref = new \ReflectionProperty(CLI::class, 'options');
-                $ref->setAccessible(true);
-                $ref->setValue(null, $options);
-            }
-        }
     }
 
     private function precheck(MigrationLog $log, array $companies): int

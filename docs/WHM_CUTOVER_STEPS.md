@@ -69,9 +69,89 @@ one shared readable path before Phase B starts rather than discovering the probl
 
 | Step | State |
 |---|---|
-| **Phase A — complete and verified** | both apps deployed from `main`; Inventory schema live with ownership verified 0/0 across 45 sequences; `/api/health` green on both; Books reports `mode: legacy` with migration 150 applied; read-only Books role proven unable to write |
-| **Phase R — rehearsal, no freeze** | **next**, and it can run any time — it does not need a maintenance window |
-| Phase B onward — the real window | size it from Phase R's measured timings, not from a guess |
+| **Phase A — complete and verified** | both apps deployed from `main`; Inventory schema live, ownership verified 0/0 across 45 sequences; Books reports `mode: legacy` with migration 150 applied |
+| **Phase R — complete and clean** | full cycle run against a restored copy of real production data. `PRECHECK ok`, `VALIDATE ok`, `CUTOVER checks passed`, `postcheck ok`. Every quantity matched exactly across 19,447 items and 69,747 vouchers; 7 value-only differences, all explained with evidence |
+| **Phase B — the real window** | ready to schedule. Every stage is now timed, below |
+
+## The live cutover — executed 2026-09-13, run id `prod-20260913-0114`
+
+Freeze began 06:38 IST. Books reported `mode: live` at 06:46:50 IST. **Eight minutes from freeze
+to live**, database work end to end.
+
+| Step | Result |
+|---|---|
+| Pre-freeze check | all four Inventory tables empty; Books 1128 MB; 655 GB free |
+| Backup | `books_pre_inventory_20260913_0108.dump`, 63 MB, 6.2s, 1,748 objects, mode 600 |
+| Restore proof | live 69,747 vouchers = restored 69,747, in 10.9s |
+| Books snapshot | 35 files, from the live database, post-freeze |
+| `books:backfill-vch-uuid` | 69,747 vouchers, 5.7s |
+| `precheck` | `PRECHECK ok`, same five warnings as the rehearsal, same counts |
+| `migrate --dry-run` | rolled back, 7.7s |
+| `migrate` | `MIGRATE complete`, sequences reset 45, 8.1s |
+| `validate --books-snapshot` | `VALIDATE ok`, four explained warnings, zero failures, 1.0s |
+| `cutover` | `VALIDATE ok`, `Sequences ok`, checks passed and recorded, 0.9s |
+| `INVENTORY_MODE` | flipped to `live` as the account user, ownership preserved, health confirms |
+| Cron | four workers installed as `inventoryaic`, error log empty |
+| `resync-masters` | 1,478 unit, 25 warehouse and 19,438 item events queued for 63 companies |
+
+Two operational notes worth keeping:
+
+* **Never edit Books' `.env` as root.** `sed -i` writes a new file and renames it, leaving it
+  owned by root; at mode 600 the account can then no longer read it and Books goes down entirely.
+  The flip runs through `su -s /bin/bash - booksaicountly -c`.
+* **Never run a manual `outbox-dispatch` while cron is running it.** `OutboxService::dispatch()`
+  selects pending rows with no `FOR UPDATE SKIP LOCKED` and no atomic claim, so two dispatchers
+  double-send. To drain a backlog faster, raise the cron's own `--limit` instead, and keep the
+  run comfortably inside the one-minute interval — 300 events take about 18 seconds; 600 or more
+  risks one run overrunning into the next.
+
+## Measured timings, against real production data (2026-09-13)
+
+| Stage | Time |
+|---|---|
+| `pg_dump -Fc -Z6` (1.1 GB source → 63 MB) | 6.5s |
+| verify restore into a scratch database | 11s |
+| `books:export-inventory-snapshot --company all` | 0.7s |
+| `books:backfill-vch-uuid` (69,747 rows) | 5.9s |
+| `precheck` | 0.4s |
+| `migrate --dry-run` | 7.6s |
+| `migrate` | 8.3s |
+| `validate --books-snapshot` | 0.9s |
+| `cutover` | 0.9s |
+| `postcheck` | 0.6s |
+
+**All database work totals roughly 43 seconds.** Plan the window around the human verification in
+E5 and E6, not around the migration. Thirty to forty-five minutes is comfortable, and almost all
+of it is the smoke test.
+
+## What Phase R caught
+
+Four defects, every one of which would otherwise have struck mid-freeze with users locked out:
+
+1. `deploy-production.yml` stripped `.env.example`, so a first deploy had nothing to bootstrap
+   `.env` from and `sql-migrate` failed with no credentials.
+2. `pg_hba.conf` uses `samerole`, so hand-created scratch databases are unreachable until a role
+   of the same name exists. This would have hit B3's verify restore.
+3. PostgreSQL 13 rejects bare keyword column labels, which 14+ accept. 21 aliases across three
+   files, including `StockBalanceService`, which sits behind validate's stock rebuild and would
+   have failed *after* the migration had written rows.
+4. `Validator::has()` did not exist — copied from a sibling class. Only reachable with
+   `--books-snapshot` against a real Books database.
+
+## Explained value differences, approved before cutover
+
+Quantities matched everywhere. Seven items differ in value only, in two companies:
+
+* **`books_cost_layer_missing`** (6 items, Galorekart Marketplace and Orobite India): Books'
+  inward purchase lines carry a real cost but the cost layer its valuation report reads was never
+  written, so Books reports the stock as worthless. Inventory uses the cost Books recorded on the
+  line. The owner reviewed the effect (+31,111 and +87,966 on two companies, -11,414 on a third,
+  against totals in the millions) and approved accepting Inventory's figures.
+* **`books_report_disagrees_with_own_layers`** (1 item, 19349): Books' layers are complete and
+  intact and total exactly what Inventory reports. Books' *report* is the outlier. No judgement
+  call: Books' own data corroborates the migrated figure.
+
+Every affected item, voucher and layer is listed in `validate.summary.json`.
 
 Both branches were found behind `main` and have been merged up. Books' `main` carried 14 commits
 of GST and Item Master work that deploying the branch as-is would have reverted. Verified green on
@@ -599,8 +679,9 @@ exit
 ```
 As root:
 ```bash
-su - postgres -c 'psql -c "DROP DATABASE inventory_verify; DROP ROLE inventory_verify;"'
-su - postgres -c 'psql -c "DROP DATABASE books_verify; DROP ROLE books_verify;"'
+# dropdb, not psql -c: several statements in one -c run inside a single transaction, and
+# DROP DATABASE cannot. Roles can, so they go together afterwards.
+su - postgres -c 'dropdb inventory_verify && dropdb books_verify && psql -c "DROP ROLE inventory_verify; DROP ROLE books_verify;"'
 ```
 
 ---

@@ -16,6 +16,8 @@ use CodeIgniter\CLI\CLI;
  */
 class InventoryResyncMasters extends BaseCommand
 {
+    use EqualsOptionSyntax;
+
     protected $group       = 'Inventory';
     protected $name        = 'inventory:resync-masters';
     protected $description = 'Enqueue a mirror upsert event for every live item, unit and warehouse (first sync of Books\' mirror).';
@@ -27,6 +29,7 @@ class InventoryResyncMasters extends BaseCommand
 
     public function run(array $params)
     {
+        $this->normaliseEqualsOptions();
         // CodeIgniter's CLI parser only understands `--opt value`; runbooks use `--opt=value`. Accept both.
         foreach ($_SERVER['argv'] ?? [] as $arg) {
             if (is_string($arg) && str_starts_with($arg, '--') && str_contains($arg, '=')) {

@@ -4,6 +4,7 @@ import Dashboard from './pages/Dashboard'
 import { renderDocumentRoutes } from './documents/routes'
 import NotFound from './pages/NotFound'
 import { ItemFormPage } from './pages/items/ItemFormPage'
+import { ItemsBulkEditPage } from './pages/items/ItemsBulkEditPage'
 import { ItemsListPage } from './pages/items/ItemsListPage'
 import { BomFormPage } from './pages/masters/BomFormPage'
 import { BomListPage } from './pages/masters/BomListPage'
@@ -47,6 +48,7 @@ export function AppRoutes() {
         <Route path="dashboard" element={<Dashboard />} />
 
         <Route path="items" element={<ItemsListPage />} />
+        <Route path="items/bulk-edit" element={<ItemsBulkEditPage />} />
         <Route path="items/new" element={<ItemFormPage />} />
         <Route path="items/:id" element={<ItemFormPage />} />
 

@@ -16,6 +16,8 @@ use CodeIgniter\CLI\CLI;
  */
 class InventoryExpireReservations extends BaseCommand
 {
+    use EqualsOptionSyntax;
+
     protected $group       = 'Inventory';
     protected $name        = 'inventory:expire-reservations';
     protected $description = 'Release open reservations whose expiry time has passed.';
@@ -27,6 +29,7 @@ class InventoryExpireReservations extends BaseCommand
 
     public function run(array $params)
     {
+        $this->normaliseEqualsOptions();
         $this->normaliseOptions();
         $cmpId = (int) (CLI::getOption('company') ?? $params['company'] ?? 0);
         $asOf = (string) (CLI::getOption('as-of') ?? $params['as-of'] ?? '');

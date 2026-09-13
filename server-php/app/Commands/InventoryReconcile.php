@@ -16,6 +16,8 @@ use CodeIgniter\CLI\CLI;
  */
 class InventoryReconcile extends BaseCommand
 {
+    use EqualsOptionSyntax;
+
     protected $group       = 'Inventory';
     protected $name        = 'inventory:reconcile';
     protected $description = 'Reconcile Inventory closing stock value with the Books Stock-in-Hand ledger per company.';
@@ -29,6 +31,7 @@ class InventoryReconcile extends BaseCommand
 
     public function run(array $params)
     {
+        $this->normaliseEqualsOptions();
         foreach ($_SERVER['argv'] ?? [] as $arg) {
             if (is_string($arg) && str_starts_with($arg, '--') && str_contains($arg, '=')) {
                 [$k, $v] = explode('=', ltrim($arg, '-'), 2);

@@ -16,6 +16,8 @@ use CodeIgniter\CLI\CLI;
  */
 class InventoryRebuildBalances extends BaseCommand
 {
+    use EqualsOptionSyntax;
+
     protected $group       = 'Inventory';
     protected $name        = 'inventory:rebuild-balances';
     protected $description = 'Rebuild materialised on-hand stock balances from openings + movements.';
@@ -27,6 +29,7 @@ class InventoryRebuildBalances extends BaseCommand
 
     public function run(array $params)
     {
+        $this->normaliseEqualsOptions();
         $cmpId = (int) (CLI::getOption('cmp') ?? $params['cmp'] ?? 0);
         if ($cmpId <= 0) {
             CLI::error('--cmp=ID is required.');

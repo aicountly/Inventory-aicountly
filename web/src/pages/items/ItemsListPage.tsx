@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { ActiveBadge } from '../../components/StatusBadge'
 import { MasterPage } from '../../masters/MasterPage'
 import type { MasterConfig } from '../../masters/types'
@@ -72,5 +73,16 @@ const itemsConfig: MasterConfig<ItemListRow> = {
 }
 
 export function ItemsListPage() {
-  return <MasterPage config={itemsConfig} />
+  return (
+    <MasterPage
+      config={itemsConfig}
+      extraActions={({ canWrite }) =>
+        canWrite ? (
+          <Link className="btn" to="/items/bulk-edit">
+            Bulk edit
+          </Link>
+        ) : null
+      }
+    />
+  )
 }

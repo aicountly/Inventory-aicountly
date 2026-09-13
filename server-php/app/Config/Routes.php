@@ -74,6 +74,7 @@ $routes->group('', ['namespace' => 'App\Controllers\Api', 'filter' => 'cors'], s
         $routes->get('items/search', 'ItemsController::search');
         $routes->get('items/by-barcode/(:segment)', 'ItemsController::byBarcode/$1');
         $routes->post('items/bulk-lookup', 'ItemsController::bulkLookup');
+        $routes->post('items/bulk-update', 'ItemsController::bulkUpdate');
         $routes->post('items/bulk-delete', 'ItemsController::bulkDelete');
         $routes->get('items', 'ItemsController::index');
         $routes->get('items/(:num)', 'ItemsController::show/$1');
