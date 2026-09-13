@@ -255,7 +255,7 @@ class BatchesController extends BaseController
     private function balancesByWarehouse(int $cmpId, int $batchId): array
     {
         $rows = \Config\Database::connect()->table('inv_stock_balances s')
-            ->select('s.warehouse_id, w.warehouse_name, w.warehouse_code, SUM(s.on_hand_qty) on_hand, SUM(s.reserved_qty) reserved, SUM(s.committed_qty) committed, SUM(s.packed_qty) packed, SUM(s.in_transit_qty) in_transit, SUM(s.job_worker_qty) job_worker, SUM(s.quality_hold_qty) quality_hold, SUM(s.damaged_qty) damaged, SUM(s.blocked_qty) blocked, SUM(s.expected_qty) expected, MAX(s.last_movement_at) last_movement_at', false)
+            ->select('s.warehouse_id, w.warehouse_name, w.warehouse_code, SUM(s.on_hand_qty) on_hand, SUM(s.reserved_qty) reserved, SUM(s.committed_qty) AS committed, SUM(s.packed_qty) packed, SUM(s.in_transit_qty) in_transit, SUM(s.job_worker_qty) job_worker, SUM(s.quality_hold_qty) quality_hold, SUM(s.damaged_qty) damaged, SUM(s.blocked_qty) blocked, SUM(s.expected_qty) expected, MAX(s.last_movement_at) last_movement_at', false)
             ->join('inv_warehouses w', 'w.warehouse_id = s.warehouse_id', 'left')
             ->where('s.cmp_id', $cmpId)->where('s.batch_id', $batchId)
             ->groupBy('s.warehouse_id, w.warehouse_name, w.warehouse_code', false)

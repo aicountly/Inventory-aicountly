@@ -69,13 +69,9 @@ one shared readable path before Phase B starts rather than discovering the probl
 
 | Step | State |
 |---|---|
-| A1 environment discovery | done — see the table below |
-| A2 merge both branches to `main` | **next** |
-| A3 GitHub SSH secrets for Inventory | done (verified by an earlier test deploy) |
-| A4 first real Inventory deploy | after A2 |
-| A5 part 1, databases and roles | done — `inventoryaic_inventory` created and ownership set (below); `booksaicountly_invread` created and **proven** read-only (`SELECT` works, `UPDATE` and `CREATE` both rejected) |
-| A5 part 2, Inventory `api/.env` | after A4 |
-| A6 onward | not started |
+| **Phase A — complete and verified** | both apps deployed from `main`; Inventory schema live with ownership verified 0/0 across 45 sequences; `/api/health` green on both; Books reports `mode: legacy` with migration 150 applied; read-only Books role proven unable to write |
+| **Phase R — rehearsal, no freeze** | **next**, and it can run any time — it does not need a maintenance window |
+| Phase B onward — the real window | size it from Phase R's measured timings, not from a guess |
 
 Both branches were found behind `main` and have been merged up. Books' `main` carried 14 commits
 of GST and Item Master work that deploying the branch as-is would have reverted. Verified green on
@@ -360,12 +356,24 @@ psql -h 127.0.0.200 -p 5432 -U inventoryaic_inventory_user -d inventoryaic_inven
 Paste back the health JSON and all four counts. The two `not_owned` counts must be `0`, and both
 totals must be non-zero.
 
-### A7. Inventory's cron (cPanel → Cron Jobs, or `crontab -e` in this terminal)
-```
-* * * * * cd /home/inventoryaic/public_html/api && php spark inventory:outbox-dispatch >/dev/null 2>&1
-* * * * * cd /home/inventoryaic/public_html/api && php spark inventory:recalc-worker  >/dev/null 2>&1
-*/5 * * * * cd /home/inventoryaic/public_html/api && php spark inventory:expire-reservations >/dev/null 2>&1
-0 2 * * * cd /home/inventoryaic/public_html/api && php spark inventory:reconcile --all >/dev/null 2>&1
+### A7. Inventory's cron — deliberately NOT now, see E3
+These workers do nothing before cutover: Inventory has no documents and no events until Books
+goes live, and the migration itself queues neither (it writes no outbox rows and no
+recalculation jobs). Installing them now buys nothing and costs something, because the nightly
+`reconcile --all` would fire at 02:00 inside the overnight window, running a full reconciliation
+against a half-migrated database and competing for the same connections.
+
+They are installed at **E3**, immediately after the mode flip and before users return.
+
+If the three frequent workers are already installed, leave them: with no documents and no events
+they are no-ops, and the migration queues neither (verified: it writes no outbox rows and no
+recalculation jobs). **Remove only the nightly `reconcile --all` until after cutover** —
+`0 2 * * *` in the server's IST would otherwise fire mid-window, reconciling a half-migrated
+Inventory against Books, storing a run record showing enormous false differences and competing
+for connections while it does:
+```bash
+crontab -l | grep -v 'inventory:reconcile' > /tmp/inv.cron
+crontab /tmp/inv.cron && crontab -l && rm -f /tmp/inv.cron
 ```
 
 ### A8. Deploy Books (still `INVENTORY_MODE=legacy` — no user-visible change yet)
@@ -374,11 +382,14 @@ In Books' `.env`, add/confirm: `INVENTORY_MODE = legacy`, `INVENTORY_API_BASE = 
 `BOOKS_SERVICE_KEY` from A5), `INVENTORY_POSTING_MODE = strict`, `INVENTORY_COGS_REVISION_MODE = inline`.
 Then GitHub → `books-react-app` → Actions → **Deploy to cPanel Production** → Run workflow.
 
-Confirm nothing changed for users (this endpoint checks `X-Service-Key` against Books' own
-`INVENTORY_SERVICE_KEY`, so read it straight out of the `.env` you're sitting in — the header
-value never needs to be typed or pasted anywhere):
+Confirm nothing changed for users. The endpoint compares `X-Service-Key` against
+`INVENTORY_INBOUND_SERVICE_KEY`, the key **Inventory presents when calling Books**, and only
+falls back to `INVENTORY_SERVICE_KEY` when the inbound one is unset — which it no longer is.
+Sending the outbound key returns `Invalid service key` and looks like a misconfiguration when
+nothing is wrong. Read it straight out of the `.env` you are sitting in, so the value is never
+typed or pasted anywhere:
 ```bash
-curl -s -H "X-Service-Key: $(grep '^INVENTORY_SERVICE_KEY' .env | cut -d= -f2- | xargs)" \
+curl -s -H "X-Service-Key: $(grep '^INVENTORY_INBOUND_SERVICE_KEY ' .env | cut -d= -f2- | xargs)" \
     https://books.aicountly.com/api/integration/inventory/health
 ```
 Expect `mode: legacy`. Log in to Books yourself and confirm it behaves exactly as before —
@@ -393,6 +404,35 @@ because it should be a no-op today.
 reports `mode: legacy` and the app behaves normally. Nothing above touched a single row of real
 data. This is a good place to stop and pick up Phase B later, fresh, whenever your overnight
 window starts.
+
+---
+
+## Phase R — Rehearse against real production data, with no freeze
+
+**Run this before booking any window.** It touches nothing live, needs no maintenance mode, and
+answers the two questions that otherwise get answered during a freeze with users locked out.
+
+`pg_dump` takes an MVCC-consistent snapshot while the database is being written to, so a dump
+taken now is internally consistent even though users are working. That is all a rehearsal needs.
+
+What this buys:
+
+* **Does `precheck` pass against your real data?** This is the biggest open unknown. Precheck's
+  blocking findings — inventory lines with no header, items with `cmp_id` 0 — must be fixed *in
+  Books* before any migration. Finding them tonight leaves time to fix them. Finding them at 2am
+  with the system frozen means abandoning the window.
+* **How long does 69,747 vouchers actually take?** Every rehearsal so far ran against 272. The
+  real migrate and validate timings come out of this run, and the window gets sized from measured
+  numbers instead of a guess.
+
+Run Phase B's steps B1, B3 and B6 exactly as written, but **skip B2 (the freeze)**. Keep the
+dump: it is also the rehearsal input, and it costs nothing to reuse.
+
+Then record the timings — `time` each stage — and bring them back before choosing a window.
+
+Once Phase R is clean, the real window shortens considerably: B6 can drop to `precheck` plus a
+dry-run `migrate` as a sanity check on the fresh backup, rather than a full cycle, because the
+full cycle has already been proven against this data.
 
 ---
 
@@ -436,7 +476,8 @@ pg_dump -Fc -Z6 --no-owner --no-acl -w -U booksaicountly_smartbooksaic_user -d b
 pg_dump -Fc -w -U booksaicountly_smartbooksaic_user -d booksaicountly_smartbooksaic --schema-only \
   -f /root/inv_migration_backups/books_globals_$(date +%Y%m%d).dump
 pg_restore --list /root/inv_migration_backups/books_pre_inventory_*.dump | wc -l
-createdb -w -U booksaicountly_smartbooksaic_user books_verify
+su - postgres -c 'psql -c "CREATE DATABASE books_verify OWNER booksaicountly_smartbooksaic_user;"'
+su - postgres -c 'psql -c "CREATE ROLE books_verify; GRANT books_verify TO booksaicountly_smartbooksaic_user;"'
 pg_restore --no-owner --no-acl -w -U booksaicountly_smartbooksaic_user -d books_verify \
   /root/inv_migration_backups/books_pre_inventory_*.dump
 psql -w -U booksaicountly_smartbooksaic_user -d books_verify -c "SELECT count(*) FROM books_voucher_headers;"
@@ -484,8 +525,10 @@ php spark books:export-inventory-snapshot \
 ls -la /home/booksaicountly/inv_migration_backups/books_snapshots_$(date +%Y%m%d) | head
 exit
 ```
-Then as **root**, copy it where the Inventory account can read it. Inventory's validate runs as
-`inventoryaic` and cannot see into another account's home:
+Then as **root**, copy it where the Inventory account can read it. This step is **required, not
+tidiness**: the accounts run under a jailshell (CageFS), so `inventoryaic` cannot see into
+another account's home at all, and it cannot even `su`. A shared directory outside both homes
+would not be visible inside the jail either, which is why the file is copied rather than shared:
 ```bash
 mkdir -p /home/inventoryaic/inv_migration_backups
 cp -r /home/booksaicountly/inv_migration_backups/books_snapshots_$(date +%Y%m%d) \
@@ -504,9 +547,14 @@ su -s /bin/bash - booksaicountly -c 'cd /home/booksaicountly/public_html/api && 
 This is what catches anything specific to *your* data before it can touch the real Inventory
 database. Do not skip it, even at 3am.
 
-As **root**, create the throwaway database:
+As **root**, create the throwaway database. Two statements, not one: `pg_hba.conf` on this
+server authenticates with `samerole`, meaning a user may connect to a database only if it is a
+member of a role **named after that database**. cPanel creates that role alongside every
+database it provisions, so a hand-created database is unreachable by anyone until the matching
+role exists. Creating it is the whole fix — never edit `pg_hba.conf` for this:
 ```bash
-createdb -w -U <inventory db user> inventory_verify
+su - postgres -c 'psql -c "CREATE DATABASE inventory_verify OWNER inventoryaic_inventory_user;"'
+su - postgres -c 'psql -c "CREATE ROLE inventory_verify; GRANT inventory_verify TO inventoryaic_inventory_user;"'
 ```
 As the **Inventory** account user, make a throwaway copy of the app so the real `api/.env` is
 never touched:
@@ -551,8 +599,8 @@ exit
 ```
 As root:
 ```bash
-dropdb -w -U <inventory db user> inventory_verify
-dropdb -w -U booksaicountly_smartbooksaic_user books_verify
+su - postgres -c 'psql -c "DROP DATABASE inventory_verify; DROP ROLE inventory_verify;"'
+su - postgres -c 'psql -c "DROP DATABASE books_verify; DROP ROLE books_verify;"'
 ```
 
 ---
@@ -644,19 +692,44 @@ Edit `.env`, change `INVENTORY_MODE = legacy` to `INVENTORY_MODE = live`. CodeIg
 restart needed. Confirm:
 ```bash
 grep -n "^INVENTORY_MODE" .env
-curl -s -H "X-Service-Key: $(grep '^INVENTORY_SERVICE_KEY' .env | cut -d= -f2- | xargs)" \
+curl -s -H "X-Service-Key: $(grep '^INVENTORY_INBOUND_SERVICE_KEY ' .env | cut -d= -f2- | xargs)" \
     https://books.aicountly.com/api/integration/inventory/health
 ```
 **Paste back** — must now report `mode: live`.
 
-### E3. Resync masters (proves the channel works; Books' mirror should already match exactly)
+### E3. Start Inventory's background workers
+Now, not earlier: Books is live, so events and recalculations start being produced from this
+point. Install as the `inventoryaic` user. Use the absolute PHP path, because cron's minimal
+environment may not resolve bare `php`; on this server that is `/usr/local/bin/php`. Errors go to
+a log rather than `/dev/null`, since a failing `outbox-dispatch` means Books silently stops
+receiving COGS corrections:
+Write the full crontab rather than appending to it, so this is safe to run whether or not some
+of these lines are already present:
+```bash
+crontab -l 2>/dev/null | grep -v 'spark inventory:' > /tmp/inv.cron
+cat >> /tmp/inv.cron <<'CRONEOF'
+* * * * * cd /home/inventoryaic/public_html/api && /usr/local/bin/php spark inventory:outbox-dispatch >/dev/null 2>> /home/inventoryaic/inventory-cron-errors.log
+* * * * * cd /home/inventoryaic/public_html/api && /usr/local/bin/php spark inventory:recalc-worker >/dev/null 2>> /home/inventoryaic/inventory-cron-errors.log
+*/5 * * * * cd /home/inventoryaic/public_html/api && /usr/local/bin/php spark inventory:expire-reservations >/dev/null 2>> /home/inventoryaic/inventory-cron-errors.log
+0 2 * * * cd /home/inventoryaic/public_html/api && /usr/local/bin/php spark inventory:reconcile --all >/dev/null 2>> /home/inventoryaic/inventory-cron-errors.log
+CRONEOF
+crontab /tmp/inv.cron
+crontab -l
+rm -f /tmp/inv.cron
+```
+Wait two minutes, then confirm they run clean. An empty log is the expected result:
+```bash
+tail -20 /home/inventoryaic/inventory-cron-errors.log 2>/dev/null; echo "--- empty above is correct ---"
+```
+
+### E4. Resync masters (proves the channel works; Books' mirror should already match exactly)
 ```bash
 cd /home/inventoryaic/public_html/api
 php spark inventory:resync-masters --all
 ```
 Paste back the output.
 
-### E4. Cross-check Books now reads stock from Inventory (use the logged-in apps, not curl)
+### E5. Cross-check Books now reads stock from Inventory (use the logged-in apps, not curl)
 Both the report Books shows and Inventory's own warehouse-stock report are gated by company/FY
 context and permissions resolved from a real logged-in session, not something a bare curl call
 can reproduce meaningfully — so do this from the browser, already signed in:
@@ -666,13 +739,13 @@ can reproduce meaningfully — so do this from the browser, already signed in:
    compare the same items' closing quantities.
 Tell me whether they agree — this is a real cross-check, not a formality.
 
-### E5. Smoke test with one real company
+### E6. Smoke test with one real company
 In the live Books app: post a purchase with items, post a sales invoice, cancel a test invoice,
 print a historical invoice, then open Inventory's web app and check that item's stock ledger
 reflects each of those. Tell me how each one went — this step needs a human eyeballing the UI,
 not a paste-back.
 
-### E6. Lift maintenance mode
+### E7. Lift maintenance mode
 Only after E5 looks right. Books web and mobile already point at Inventory as of the Phase A8
 deploy, so there's no separate frontend deploy at this point.
 

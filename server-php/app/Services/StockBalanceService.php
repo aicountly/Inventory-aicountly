@@ -50,7 +50,7 @@ class StockBalanceService
     {
         $db = \Config\Database::connect();
         $b = $db->table('inv_stock_balances')
-            ->select('COALESCE(SUM(on_hand_qty),0) on_hand, COALESCE(SUM(reserved_qty),0) reserved, COALESCE(SUM(committed_qty),0) committed, COALESCE(SUM(packed_qty),0) packed, COALESCE(SUM(in_transit_qty),0) in_transit, COALESCE(SUM(job_worker_qty),0) job_worker, COALESCE(SUM(quality_hold_qty),0) quality_hold, COALESCE(SUM(damaged_qty),0) damaged, COALESCE(SUM(blocked_qty),0) blocked, COALESCE(SUM(expected_qty),0) expected', false)
+            ->select('COALESCE(SUM(on_hand_qty),0) on_hand, COALESCE(SUM(reserved_qty),0) reserved, COALESCE(SUM(committed_qty),0) AS committed, COALESCE(SUM(packed_qty),0) packed, COALESCE(SUM(in_transit_qty),0) in_transit, COALESCE(SUM(job_worker_qty),0) job_worker, COALESCE(SUM(quality_hold_qty),0) quality_hold, COALESCE(SUM(damaged_qty),0) damaged, COALESCE(SUM(blocked_qty),0) blocked, COALESCE(SUM(expected_qty),0) expected', false)
             ->where('cmp_id', $cmpId)->where('item_id', $itemId);
         if ($warehouseId !== null && $warehouseId > 0) {
             $b->where('warehouse_id', $warehouseId);
@@ -91,7 +91,7 @@ class StockBalanceService
         foreach (array_chunk($itemIds, 500) as $chunk) {
             $group = $byBatch ? 'item_id, warehouse_id, batch_id' : 'item_id, warehouse_id';
             $b = $db->table('inv_stock_balances')
-                ->select($group . ', SUM(on_hand_qty) on_hand, SUM(reserved_qty) reserved, SUM(committed_qty) committed, SUM(packed_qty) packed, SUM(in_transit_qty) in_transit, SUM(job_worker_qty) job_worker, SUM(quality_hold_qty) quality_hold, SUM(damaged_qty) damaged, SUM(blocked_qty) blocked, SUM(expected_qty) expected', false)
+                ->select($group . ', SUM(on_hand_qty) on_hand, SUM(reserved_qty) reserved, SUM(committed_qty) AS committed, SUM(packed_qty) packed, SUM(in_transit_qty) in_transit, SUM(job_worker_qty) job_worker, SUM(quality_hold_qty) quality_hold, SUM(damaged_qty) damaged, SUM(blocked_qty) blocked, SUM(expected_qty) expected', false)
                 ->where('cmp_id', $cmpId)->whereIn('item_id', $chunk)
                 ->groupBy($group, false);
             if ($warehouseId !== null && $warehouseId > 0) {
