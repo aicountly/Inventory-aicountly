@@ -476,7 +476,8 @@ pg_dump -Fc -Z6 --no-owner --no-acl -w -U booksaicountly_smartbooksaic_user -d b
 pg_dump -Fc -w -U booksaicountly_smartbooksaic_user -d booksaicountly_smartbooksaic --schema-only \
   -f /root/inv_migration_backups/books_globals_$(date +%Y%m%d).dump
 pg_restore --list /root/inv_migration_backups/books_pre_inventory_*.dump | wc -l
-createdb -w -U booksaicountly_smartbooksaic_user books_verify
+su - postgres -c 'psql -c "CREATE DATABASE books_verify OWNER booksaicountly_smartbooksaic_user;"'
+su - postgres -c 'psql -c "CREATE ROLE books_verify; GRANT books_verify TO booksaicountly_smartbooksaic_user;"'
 pg_restore --no-owner --no-acl -w -U booksaicountly_smartbooksaic_user -d books_verify \
   /root/inv_migration_backups/books_pre_inventory_*.dump
 psql -w -U booksaicountly_smartbooksaic_user -d books_verify -c "SELECT count(*) FROM books_voucher_headers;"
@@ -546,9 +547,14 @@ su -s /bin/bash - booksaicountly -c 'cd /home/booksaicountly/public_html/api && 
 This is what catches anything specific to *your* data before it can touch the real Inventory
 database. Do not skip it, even at 3am.
 
-As **root**, create the throwaway database:
+As **root**, create the throwaway database. Two statements, not one: `pg_hba.conf` on this
+server authenticates with `samerole`, meaning a user may connect to a database only if it is a
+member of a role **named after that database**. cPanel creates that role alongside every
+database it provisions, so a hand-created database is unreachable by anyone until the matching
+role exists. Creating it is the whole fix — never edit `pg_hba.conf` for this:
 ```bash
-createdb -w -U <inventory db user> inventory_verify
+su - postgres -c 'psql -c "CREATE DATABASE inventory_verify OWNER inventoryaic_inventory_user;"'
+su - postgres -c 'psql -c "CREATE ROLE inventory_verify; GRANT inventory_verify TO inventoryaic_inventory_user;"'
 ```
 As the **Inventory** account user, make a throwaway copy of the app so the real `api/.env` is
 never touched:
@@ -593,8 +599,8 @@ exit
 ```
 As root:
 ```bash
-dropdb -w -U <inventory db user> inventory_verify
-dropdb -w -U booksaicountly_smartbooksaic_user books_verify
+su - postgres -c 'psql -c "DROP DATABASE inventory_verify; DROP ROLE inventory_verify;"'
+su - postgres -c 'psql -c "DROP DATABASE books_verify; DROP ROLE books_verify;"'
 ```
 
 ---
