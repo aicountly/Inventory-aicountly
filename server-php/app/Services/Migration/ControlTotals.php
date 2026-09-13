@@ -83,33 +83,33 @@ class ControlTotals
              WHERE h.status = 'posted' AND h.deleted_at IS NULL " . str_replace('cmp_id', 'l.cmp_id', $in) . "
              GROUP BY l.cmp_id, l.fy_id ORDER BY 1,2"
         )->getResultArray();
-        $out['opening_totals'] = $b->query("SELECT l.cmp_id, COUNT(*) lines, SUM(l.opening_qty) qty, SUM(l.opening_qty * l.opening_rate) value FROM books_item_unit_lines l WHERE l.opening_qty <> 0 " . str_replace('cmp_id', 'l.cmp_id', $in) . " GROUP BY l.cmp_id ORDER BY 1")->getResultArray();
+        $out['opening_totals'] = $b->query("SELECT l.cmp_id, COUNT(*) lines, SUM(l.opening_qty) qty, SUM(l.opening_qty * l.opening_rate) AS value FROM books_item_unit_lines l WHERE l.opening_qty <> 0 " . str_replace('cmp_id', 'l.cmp_id', $in) . " GROUP BY l.cmp_id ORDER BY 1")->getResultArray();
         if ($this->has('books_item_fy_openings')) {
-            $out['fy_opening_totals'] = $b->query("SELECT cmp_id, fy_id, COUNT(*) lines, SUM(opening_qty) qty, SUM(COALESCE(opening_value,0)) value FROM books_item_fy_openings WHERE 1=1 {$in} GROUP BY cmp_id, fy_id ORDER BY 1,2")->getResultArray();
+            $out['fy_opening_totals'] = $b->query("SELECT cmp_id, fy_id, COUNT(*) lines, SUM(opening_qty) qty, SUM(COALESCE(opening_value,0)) AS value FROM books_item_fy_openings WHERE 1=1 {$in} GROUP BY cmp_id, fy_id ORDER BY 1,2")->getResultArray();
         }
         if ($this->has('books_inventory_cost_layers')) {
-            $out['cost_layers'] = $b->query("SELECT cmp_id, COUNT(*) rows, SUM(qty_remaining) qty_remaining, SUM(qty_remaining * unit_cost) value_remaining FROM books_inventory_cost_layers WHERE 1=1 {$in} GROUP BY cmp_id ORDER BY 1")->getResultArray();
+            $out['cost_layers'] = $b->query("SELECT cmp_id, COUNT(*) AS rows, SUM(qty_remaining) qty_remaining, SUM(qty_remaining * unit_cost) value_remaining FROM books_inventory_cost_layers WHERE 1=1 {$in} GROUP BY cmp_id ORDER BY 1")->getResultArray();
         }
         if ($this->has('books_inventory_wac_state')) {
-            $out['wac_state'] = $b->query("SELECT cmp_id, COUNT(*) rows, SUM(qty_on_hand) qty, SUM(qty_on_hand * average_cost) value FROM books_inventory_wac_state WHERE 1=1 {$in} GROUP BY cmp_id ORDER BY 1")->getResultArray();
+            $out['wac_state'] = $b->query("SELECT cmp_id, COUNT(*) AS rows, SUM(qty_on_hand) qty, SUM(qty_on_hand * average_cost) AS value FROM books_inventory_wac_state WHERE 1=1 {$in} GROUP BY cmp_id ORDER BY 1")->getResultArray();
         }
         if ($this->has('books_stock_bucket_balances')) {
-            $out['buckets'] = $b->query("SELECT cmp_id, COUNT(*) rows, SUM(packed_qty) packed, SUM(job_worker_qty) job_worker FROM books_stock_bucket_balances WHERE 1=1 {$in} GROUP BY cmp_id ORDER BY 1")->getResultArray();
+            $out['buckets'] = $b->query("SELECT cmp_id, COUNT(*) AS rows, SUM(packed_qty) packed, SUM(job_worker_qty) job_worker FROM books_stock_bucket_balances WHERE 1=1 {$in} GROUP BY cmp_id ORDER BY 1")->getResultArray();
         }
         if ($this->has('books_inventory_pending')) {
-            $out['pending'] = $b->query("SELECT cmp_id, pending_kind, direction, status, COUNT(*) rows, SUM(qty_original) qty_original, SUM(qty_settled) qty_settled FROM books_inventory_pending WHERE 1=1 {$in} GROUP BY cmp_id, pending_kind, direction, status ORDER BY 1,2,3,4")->getResultArray();
+            $out['pending'] = $b->query("SELECT cmp_id, pending_kind, direction, status, COUNT(*) AS rows, SUM(qty_original) qty_original, SUM(qty_settled) qty_settled FROM books_inventory_pending WHERE 1=1 {$in} GROUP BY cmp_id, pending_kind, direction, status ORDER BY 1,2,3,4")->getResultArray();
         }
         // Financial controls that must NOT change (Books stays authoritative)
         $out['ledger_totals'] = $b->query("SELECT l.cmp_id, l.fy_id, SUM(CASE WHEN l.dr_cr = 1 THEN l.amount ELSE 0 END) debit, SUM(CASE WHEN l.dr_cr = 2 THEN l.amount ELSE 0 END) credit, COUNT(*) lines FROM books_voucher_lines l JOIN books_voucher_headers h ON h.vch_txn_id = l.vch_txn_id WHERE h.status = 'posted' AND h.deleted_at IS NULL " . str_replace('cmp_id', 'l.cmp_id', $in) . " GROUP BY l.cmp_id, l.fy_id ORDER BY 1,2")->getResultArray();
         $out['cogs_journal_totals'] = $b->query("SELECT l.cmp_id, l.fy_id, SUM(CASE WHEN l.line_narration LIKE 'COGS —%' THEN l.amount ELSE 0 END) cogs, SUM(CASE WHEN l.line_narration LIKE 'Stock issue —%' THEN l.amount ELSE 0 END) stock_issue, COUNT(*) FILTER (WHERE l.line_narration LIKE 'COGS —%') pairs FROM books_voucher_lines l JOIN books_voucher_headers h ON h.vch_txn_id = l.vch_txn_id WHERE h.status = 'posted' AND h.deleted_at IS NULL " . str_replace('cmp_id', 'l.cmp_id', $in) . " GROUP BY l.cmp_id, l.fy_id ORDER BY 1,2")->getResultArray();
         if ($this->has('books_bills')) {
-            $out['bills'] = $b->query("SELECT cmp_id, fy_id, COUNT(*) rows, SUM(original_amount) original, SUM(pending_amount) pending FROM books_bills WHERE 1=1 {$in} GROUP BY cmp_id, fy_id ORDER BY 1,2")->getResultArray();
+            $out['bills'] = $b->query("SELECT cmp_id, fy_id, COUNT(*) AS rows, SUM(original_amount) original, SUM(pending_amount) pending FROM books_bills WHERE 1=1 {$in} GROUP BY cmp_id, fy_id ORDER BY 1,2")->getResultArray();
         }
         if ($this->has('books_voucher_line_cc_allocations')) {
-            $out['cc_allocations'] = $b->query("SELECT cmp_id, COUNT(*) rows, SUM(amount) amount FROM books_voucher_line_cc_allocations WHERE 1=1 {$in} GROUP BY cmp_id ORDER BY 1")->getResultArray();
+            $out['cc_allocations'] = $b->query("SELECT cmp_id, COUNT(*) AS rows, SUM(amount) amount FROM books_voucher_line_cc_allocations WHERE 1=1 {$in} GROUP BY cmp_id ORDER BY 1")->getResultArray();
         }
         if ($this->has('books_voucher_line_subledger_allocations')) {
-            $out['subledger_allocations'] = $b->query("SELECT cmp_id, COUNT(*) rows, SUM(amount) amount FROM books_voucher_line_subledger_allocations WHERE 1=1 {$in} GROUP BY cmp_id ORDER BY 1")->getResultArray();
+            $out['subledger_allocations'] = $b->query("SELECT cmp_id, COUNT(*) AS rows, SUM(amount) amount FROM books_voucher_line_subledger_allocations WHERE 1=1 {$in} GROUP BY cmp_id ORDER BY 1")->getResultArray();
         }
         $out['project_lines'] = $b->query("SELECT cmp_id, COUNT(*) FILTER (WHERE project_id IS NOT NULL) project_lines, COUNT(*) FILTER (WHERE cc_id IS NOT NULL) cc_lines FROM books_voucher_lines WHERE 1=1 {$in} GROUP BY cmp_id ORDER BY 1")->getResultArray();
         if ($this->has('books_credit_note_line_details')) {
@@ -157,13 +157,13 @@ class ControlTotals
              WHERE d.status IN ('POSTED','COMPLETED','PARTIALLY_FULFILLED') AND l.legacy_source_table = 'books_voucher_inventory_lines' AND l.direction IN ('in','out') " . str_replace('cmp_id', 'l.cmp_id', $in) . "
              GROUP BY l.cmp_id, l.fy_id ORDER BY 1,2"
         )->getResultArray();
-        $out['opening_totals'] = $b->query("SELECT cmp_id, COUNT(*) lines, SUM(opening_qty) qty, SUM(opening_value) value FROM inv_item_openings WHERE fy_id = 0 {$in} GROUP BY cmp_id ORDER BY 1")->getResultArray();
-        $out['fy_opening_totals'] = $b->query("SELECT cmp_id, fy_id, COUNT(*) lines, SUM(opening_qty) qty, SUM(opening_value) value FROM inv_item_openings WHERE fy_id > 0 {$in} GROUP BY cmp_id, fy_id ORDER BY 1,2")->getResultArray();
-        $out['cost_layers'] = $b->query("SELECT cmp_id, COUNT(*) rows, SUM(qty_remaining) qty_remaining, SUM(qty_remaining * unit_cost) value_remaining FROM inv_cost_layers WHERE legacy_source_table = 'books_inventory_cost_layers' {$in} GROUP BY cmp_id ORDER BY 1")->getResultArray();
-        $out['wac_state'] = $b->query("SELECT cmp_id, COUNT(*) rows, SUM(qty_on_hand) qty, SUM(qty_on_hand * average_cost) value FROM inv_wac_state WHERE 1=1 {$in} GROUP BY cmp_id ORDER BY 1")->getResultArray();
-        $out['buckets'] = $b->query("SELECT cmp_id, COUNT(*) rows, SUM(packed_qty) packed, SUM(job_worker_qty) job_worker FROM inv_stock_balances WHERE legacy_source_table = 'books_stock_bucket_balances' {$in} GROUP BY cmp_id ORDER BY 1")->getResultArray();
-        $out['pending'] = $b->query("SELECT cmp_id, pending_kind, direction, CASE status WHEN 'settled' THEN 'closed' ELSE status END AS status, COUNT(*) rows, SUM(qty_original) qty_original, SUM(qty_settled) qty_settled FROM inv_pending_quantities WHERE legacy_source_table = 'books_inventory_pending' {$in} GROUP BY cmp_id, pending_kind, direction, 4 ORDER BY 1,2,3,4")->getResultArray();
-        $out['stock_movements'] = $b->query("SELECT cmp_id, fy_id, COUNT(*) rows, SUM(CASE WHEN qty > 0 THEN qty ELSE 0 END) in_qty, SUM(CASE WHEN qty < 0 THEN -qty ELSE 0 END) out_qty FROM inv_stock_movements WHERE 1=1 {$in} GROUP BY cmp_id, fy_id ORDER BY 1,2")->getResultArray();
+        $out['opening_totals'] = $b->query("SELECT cmp_id, COUNT(*) lines, SUM(opening_qty) qty, SUM(opening_value) AS value FROM inv_item_openings WHERE fy_id = 0 {$in} GROUP BY cmp_id ORDER BY 1")->getResultArray();
+        $out['fy_opening_totals'] = $b->query("SELECT cmp_id, fy_id, COUNT(*) lines, SUM(opening_qty) qty, SUM(opening_value) AS value FROM inv_item_openings WHERE fy_id > 0 {$in} GROUP BY cmp_id, fy_id ORDER BY 1,2")->getResultArray();
+        $out['cost_layers'] = $b->query("SELECT cmp_id, COUNT(*) AS rows, SUM(qty_remaining) qty_remaining, SUM(qty_remaining * unit_cost) value_remaining FROM inv_cost_layers WHERE legacy_source_table = 'books_inventory_cost_layers' {$in} GROUP BY cmp_id ORDER BY 1")->getResultArray();
+        $out['wac_state'] = $b->query("SELECT cmp_id, COUNT(*) AS rows, SUM(qty_on_hand) qty, SUM(qty_on_hand * average_cost) AS value FROM inv_wac_state WHERE 1=1 {$in} GROUP BY cmp_id ORDER BY 1")->getResultArray();
+        $out['buckets'] = $b->query("SELECT cmp_id, COUNT(*) AS rows, SUM(packed_qty) packed, SUM(job_worker_qty) job_worker FROM inv_stock_balances WHERE legacy_source_table = 'books_stock_bucket_balances' {$in} GROUP BY cmp_id ORDER BY 1")->getResultArray();
+        $out['pending'] = $b->query("SELECT cmp_id, pending_kind, direction, CASE status WHEN 'settled' THEN 'closed' ELSE status END AS status, COUNT(*) AS rows, SUM(qty_original) qty_original, SUM(qty_settled) qty_settled FROM inv_pending_quantities WHERE legacy_source_table = 'books_inventory_pending' {$in} GROUP BY cmp_id, pending_kind, direction, 4 ORDER BY 1,2,3,4")->getResultArray();
+        $out['stock_movements'] = $b->query("SELECT cmp_id, fy_id, COUNT(*) AS rows, SUM(CASE WHEN qty > 0 THEN qty ELSE 0 END) in_qty, SUM(CASE WHEN qty < 0 THEN -qty ELSE 0 END) out_qty FROM inv_stock_movements WHERE 1=1 {$in} GROUP BY cmp_id, fy_id ORDER BY 1,2")->getResultArray();
 
         return $this->normalize($out);
     }
