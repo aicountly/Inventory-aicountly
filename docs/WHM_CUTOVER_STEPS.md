@@ -73,6 +73,38 @@ one shared readable path before Phase B starts rather than discovering the probl
 | **Phase R — complete and clean** | full cycle run against a restored copy of real production data. `PRECHECK ok`, `VALIDATE ok`, `CUTOVER checks passed`, `postcheck ok`. Every quantity matched exactly across 19,447 items and 69,747 vouchers; 7 value-only differences, all explained with evidence |
 | **Phase B — the real window** | ready to schedule. Every stage is now timed, below |
 
+## The live cutover — executed 2026-09-13, run id `prod-20260913-0114`
+
+Freeze began 06:38 IST. Books reported `mode: live` at 06:46:50 IST. **Eight minutes from freeze
+to live**, database work end to end.
+
+| Step | Result |
+|---|---|
+| Pre-freeze check | all four Inventory tables empty; Books 1128 MB; 655 GB free |
+| Backup | `books_pre_inventory_20260913_0108.dump`, 63 MB, 6.2s, 1,748 objects, mode 600 |
+| Restore proof | live 69,747 vouchers = restored 69,747, in 10.9s |
+| Books snapshot | 35 files, from the live database, post-freeze |
+| `books:backfill-vch-uuid` | 69,747 vouchers, 5.7s |
+| `precheck` | `PRECHECK ok`, same five warnings as the rehearsal, same counts |
+| `migrate --dry-run` | rolled back, 7.7s |
+| `migrate` | `MIGRATE complete`, sequences reset 45, 8.1s |
+| `validate --books-snapshot` | `VALIDATE ok`, four explained warnings, zero failures, 1.0s |
+| `cutover` | `VALIDATE ok`, `Sequences ok`, checks passed and recorded, 0.9s |
+| `INVENTORY_MODE` | flipped to `live` as the account user, ownership preserved, health confirms |
+| Cron | four workers installed as `inventoryaic`, error log empty |
+| `resync-masters` | 1,478 unit, 25 warehouse and 19,438 item events queued for 63 companies |
+
+Two operational notes worth keeping:
+
+* **Never edit Books' `.env` as root.** `sed -i` writes a new file and renames it, leaving it
+  owned by root; at mode 600 the account can then no longer read it and Books goes down entirely.
+  The flip runs through `su -s /bin/bash - booksaicountly -c`.
+* **Never run a manual `outbox-dispatch` while cron is running it.** `OutboxService::dispatch()`
+  selects pending rows with no `FOR UPDATE SKIP LOCKED` and no atomic claim, so two dispatchers
+  double-send. To drain a backlog faster, raise the cron's own `--limit` instead, and keep the
+  run comfortably inside the one-minute interval — 300 events take about 18 seconds; 600 or more
+  risks one run overrunning into the next.
+
 ## Measured timings, against real production data (2026-09-13)
 
 | Stage | Time |
