@@ -97,6 +97,17 @@ class InventoryFindOrphanCompanies extends BaseCommand
         CLI::write(sprintf('  active %d, recycled %d, deleted %d, unknown %d',
             $counts['active'], $counts['recycled'], $counts['deleted'], $counts['unknown']));
 
+        // Most of them unknown almost never means most of them were deleted. It means the wrong
+        // Manage was asked — a sandbox database against the production portal, or the reverse.
+        // Saying so here is the difference between noticing and purging sixty companies.
+        if ($counts['unknown'] > $counts['active'] && $counts['unknown'] >= 5) {
+            CLI::write('');
+            CLI::error(sprintf('%d of %d ids are unknown to that Manage. Check it is the right one',
+                $counts['unknown'], count($ids)));
+            CLI::write('before acting on any of this: a database asked about the wrong portal reports');
+            CLI::write('its own live companies as deleted. MANAGE_API_BASE is what decides.');
+        }
+
         if ($orphans === []) {
             CLI::write('');
             CLI::write('Every company held here still exists in Manage.', 'green');
@@ -190,8 +201,20 @@ class InventoryFindOrphanCompanies extends BaseCommand
             return null;
         }
 
-        $base = rtrim((string) (getenv('MANAGE_API_BASE') ?: 'https://manage.aicountly.com'), '/');
+        // No default. Elsewhere in this codebase an unset MANAGE_API_BASE falls back to the
+        // production host and the cost is a missing label; here the answer decides whether a
+        // company's data gets purged, and a sandbox that quietly asks production gets told its
+        // test companies do not exist. Refuse instead of guessing.
+        $base = rtrim(trim((string) (getenv('MANAGE_API_BASE') ?: '')), '/');
+        if ($base === '') {
+            CLI::error('MANAGE_API_BASE is not set in this .env, so there is no way to know which');
+            CLI::write('Manage to ask. Set it to the Manage that owns this database\'s companies —');
+            CLI::write('a sandbox asking production would report every test company as deleted.');
+
+            return null;
+        }
         $url = $base . '/api/internal/company-status?ids=' . implode(',', $ids);
+        CLI::write('  ' . $base);
 
         try {
             $client = service('curlrequest', ['http_errors' => false, 'timeout' => 15, 'connect_timeout' => 5]);
