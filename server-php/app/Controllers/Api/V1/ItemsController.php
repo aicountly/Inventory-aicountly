@@ -94,6 +94,15 @@ class ItemsController extends BaseController
         if ((int) ($this->request->getGet('with_stock') ?? 0) === 1 && $rows !== []) {
             $this->attachStock($cmpId, $rows, (int) $this->request->getGet('warehouse_id') ?: null);
         }
+        // Books' quantity conversion needs every item's alternate units in one pass; without this
+        // it would have to call bulk-lookup for the whole catalogue a second time.
+        if ((int) ($this->request->getGet('with_units') ?? 0) === 1 && $rows !== []) {
+            $units = $this->unitsForItems($cmpId, array_map(static fn ($r) => (int) $r['item_id'], $rows));
+            foreach ($rows as &$r) {
+                $r['units'] = $units[(int) $r['item_id']] ?? [];
+            }
+            unset($r);
+        }
 
         return $this->respondList($rows, $total, $p['limit'], $p['offset']);
     }
