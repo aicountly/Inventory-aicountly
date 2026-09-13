@@ -69,14 +69,9 @@ one shared readable path before Phase B starts rather than discovering the probl
 
 | Step | State |
 |---|---|
-| A1 environment discovery | done — see the table below |
-| A2 merge both branches to `main` | **next** |
-| A3 GitHub SSH secrets for Inventory | done (verified by an earlier test deploy) |
-| A4 first real Inventory deploy | after A2 |
-| A4 first Inventory deploy | done — run #8 green on `main`, schema applied, `/api/health` reports `db:true`, table and sequence ownership verified 0/0 across 45 sequences |
-| A5 part 1, databases and roles | done — `inventoryaic_inventory` created and ownership set (below); `booksaicountly_invread` created and **proven** read-only (`SELECT` works, `UPDATE` and `CREATE` both rejected) |
-| A5 part 2, Inventory `api/.env` | after A4 |
-| A6 onward | not started |
+| **Phase A — complete and verified** | both apps deployed from `main`; Inventory schema live with ownership verified 0/0 across 45 sequences; `/api/health` green on both; Books reports `mode: legacy` with migration 150 applied; read-only Books role proven unable to write |
+| **Phase R — rehearsal, no freeze** | **next**, and it can run any time — it does not need a maintenance window |
+| Phase B onward — the real window | size it from Phase R's measured timings, not from a guess |
 
 Both branches were found behind `main` and have been merged up. Books' `main` carried 14 commits
 of GST and Item Master work that deploying the branch as-is would have reverted. Verified green on
@@ -409,6 +404,35 @@ because it should be a no-op today.
 reports `mode: legacy` and the app behaves normally. Nothing above touched a single row of real
 data. This is a good place to stop and pick up Phase B later, fresh, whenever your overnight
 window starts.
+
+---
+
+## Phase R — Rehearse against real production data, with no freeze
+
+**Run this before booking any window.** It touches nothing live, needs no maintenance mode, and
+answers the two questions that otherwise get answered during a freeze with users locked out.
+
+`pg_dump` takes an MVCC-consistent snapshot while the database is being written to, so a dump
+taken now is internally consistent even though users are working. That is all a rehearsal needs.
+
+What this buys:
+
+* **Does `precheck` pass against your real data?** This is the biggest open unknown. Precheck's
+  blocking findings — inventory lines with no header, items with `cmp_id` 0 — must be fixed *in
+  Books* before any migration. Finding them tonight leaves time to fix them. Finding them at 2am
+  with the system frozen means abandoning the window.
+* **How long does 69,747 vouchers actually take?** Every rehearsal so far ran against 272. The
+  real migrate and validate timings come out of this run, and the window gets sized from measured
+  numbers instead of a guess.
+
+Run Phase B's steps B1, B3 and B6 exactly as written, but **skip B2 (the freeze)**. Keep the
+dump: it is also the rehearsal input, and it costs nothing to reuse.
+
+Then record the timings — `time` each stage — and bring them back before choosing a window.
+
+Once Phase R is clean, the real window shortens considerably: B6 can drop to `precheck` plus a
+dry-run `migrate` as a sanity check on the fresh backup, rather than a full cycle, because the
+full cycle has already been proven against this data.
 
 ---
 
