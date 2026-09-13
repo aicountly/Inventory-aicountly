@@ -66,11 +66,13 @@ final class StubAbortingPostgres
      * @param array<string, int>    $rows            live row count per table
      * @param array<string, string> $blockedBy       table => the table whose rows must go first, or '*' for never
      * @param bool                  $discardAtCommit accept COMMIT and keep nothing, as an aborted transaction does
+     * @param list<string>          $protected       tables the database guards with an append-only trigger
      */
     public function __construct(
         private array $rows,
         private array $blockedBy = [],
         private bool $discardAtCommit = false,
+        private array $protected = [],
     ) {}
 
     /** @return array<string, int> */
@@ -141,6 +143,12 @@ final class StubAbortingPostgres
         }
         if ($sql === 'SELECT 1') {
             return new StubPurgeResult([['?column?' => 1]]);
+        }
+        if (str_contains($sql, 'pg_trigger')) {
+            return new StubPurgeResult(array_map(
+                static fn (string $t): array => ['table_name' => $t],
+                $this->protected,
+            ));
         }
         if (str_contains($sql, 'information_schema.columns')) {
             return new StubPurgeResult(array_map(
@@ -271,6 +279,23 @@ final class InventoryPurgeCompanyTest extends TestCase
         $this->assertTrue($db->committed);
         $this->assertSame(['t_headers' => 0, 't_lines' => 0], $db->live());
         $this->assertSame(['t_headers' => 223, 't_lines' => 400], $db->archive);
+    }
+
+    public function testRefusesWhenATableIsAppendOnlyButNotDeclaredRetained(): void
+    {
+        // A table hardened after RETAINED was written. Purging it would fail halfway through,
+        // so the command stops before touching anything rather than finding out mid-transaction.
+        $db = new StubAbortingPostgres(
+            ['t_headers' => 223],
+            [],
+            false,
+            ['zz_hardened_later'],
+        );
+
+        $this->assertSame(EXIT_ERROR, $this->purge($db));
+        $this->assertFalse($db->committed);
+        $this->assertNotContains('BEGIN', $db->log, 'it must refuse before opening a transaction');
+        $this->assertSame(['t_headers' => 223], $db->live());
     }
 
     public function testFailsWhenTheCommitKeepsNothing(): void

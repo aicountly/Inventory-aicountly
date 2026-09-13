@@ -18,7 +18,8 @@ use CodeIgniter\CLI\CLI;
  * company nobody can see.
  *
  * Every table in the public schema carrying a cmp_id column is included, discovered at run time
- * rather than listed, because a hard-coded list silently misses whatever was added since.
+ * rather than listed, because a hard-coded list silently misses whatever was added since — except
+ * the audit tables, which are retained deliberately. See RETAINED.
  *
  * Order of operations, all inside one transaction:
  *   1. copy each table's rows for the company into the archive schema
@@ -81,6 +82,45 @@ class InventoryPurgeCompany extends BaseCommand
         }
 
         return $this->purge($db, $cmpId, $schema);
+    }
+
+    /**
+     * Tables a company purge must not touch.
+     *
+     * Nothing here is append-only today. Books keeps its audit trail under an eight-year
+     * statutory retention, enforced by a BEFORE DELETE trigger in the database; this database
+     * has no equivalent, so the list is empty.
+     *
+     * Empty is not the same as absent. appendOnlyTables() below reads the catalogue on every
+     * run, and if a table here is ever hardened without being added to this list, the purge
+     * refuses rather than deleting records something went to the trouble of protecting.
+     */
+    private const RETAINED = [];
+
+    /**
+     * Tables the database protects with an append-only trigger.
+     *
+     * Read from the catalogue rather than trusted from RETAINED, so the two can be compared. A
+     * table hardened after this list was written would otherwise be purged, and a guard dropped
+     * from a table still listed here would hide that the protection is gone.
+     *
+     * @return list<string>
+     */
+    private function appendOnlyTables($db): array
+    {
+        $res = $db->query(
+            "SELECT DISTINCT c.relname AS table_name
+               FROM pg_trigger t
+               JOIN pg_class c ON c.oid = t.tgrelid
+               JOIN pg_namespace n ON n.oid = c.relnamespace
+               JOIN pg_proc p ON p.oid = t.tgfoid
+              WHERE n.nspname = 'public'
+                AND NOT t.tgisinternal
+                AND (t.tgtype & 8) <> 0
+                AND p.proname LIKE '%deny_mutation%'",
+        );
+
+        return $res === false ? [] : array_column($res->getResultArray(), 'table_name');
     }
 
     /** @return list<string> every public table carrying a cmp_id column */
@@ -154,20 +194,43 @@ class InventoryPurgeCompany extends BaseCommand
             return EXIT_ERROR;
         }
 
-        $counts = [];
-        $total = 0;
+        $protected = $this->appendOnlyTables($db);
+        $undeclared = array_values(array_diff($protected, self::RETAINED));
+        if ($undeclared !== []) {
+            CLI::error('These tables are append-only in the database but are not listed in RETAINED:');
+            foreach ($undeclared as $t) {
+                CLI::write('  ' . $t, 'red');
+            }
+            CLI::write('Purging them would fail halfway, or worse, succeed. Add them to RETAINED with');
+            CLI::write('the reason they are protected, or remove the trigger. Nothing was touched.');
+
+            return EXIT_ERROR;
+        }
+
+        $found = [];
         foreach ($tables as $t) {
             $n = $this->countIn($db, 'public', $t, $cmpId);
             if ($n > 0) {
-                $counts[$t] = $n;
-                $total += $n;
+                $found[$t] = $n;
             }
         }
+        $keep = array_flip(self::RETAINED);
+        $counts = array_diff_key($found, $keep);
+        $retained = array_intersect_key($found, $keep);
+        $total = array_sum($counts);
 
-        CLI::write(sprintf('Company %d: %d table(s) of %d hold rows, %s row(s) in total',
+        CLI::write(sprintf('Company %d: %d table(s) of %d hold rows to purge, %s row(s) in total',
             $cmpId, count($counts), count($tables), number_format($total)));
         foreach ($counts as $t => $n) {
             CLI::write(sprintf('  %-44s %10s', $t, number_format($n)));
+        }
+        if ($retained !== []) {
+            CLI::write('');
+            CLI::write(sprintf('Retained, not purged — append-only under statutory retention, %s row(s):',
+                number_format(array_sum($retained))), 'yellow');
+            foreach ($retained as $t => $n) {
+                CLI::write(sprintf('  %-44s %10s', $t, number_format($n)), 'yellow');
+            }
         }
         if ($counts === []) {
             CLI::write('Nothing to purge.', 'green');
@@ -272,7 +335,7 @@ class InventoryPurgeCompany extends BaseCommand
             return EXIT_ERROR;
         }
 
-        return $this->verify($db, $cmpId, $schema, $counts, $total, $pass);
+        return $this->verify($db, $cmpId, $schema, $counts, $retained, $total, $pass);
     }
 
     /** Roll back, say why, and fail. */
@@ -293,8 +356,9 @@ class InventoryPurgeCompany extends BaseCommand
      * does is stop looking. The only evidence worth printing is the rows themselves.
      *
      * @param array<string, int> $counts
+     * @param array<string, int> $retained
      */
-    private function verify($db, int $cmpId, string $schema, array $counts, int $total, int $pass): int
+    private function verify($db, int $cmpId, string $schema, array $counts, array $retained, int $total, int $pass): int
     {
         $stillLive = [];
         $notArchived = [];
@@ -326,6 +390,10 @@ class InventoryPurgeCompany extends BaseCommand
         CLI::write(sprintf('Purged company %d: %s row(s) archived into "%s" and removed from public, in %d pass(es).',
             $cmpId, number_format($total), $schema, $pass), 'green');
         CLI::write(sprintf('Verified: %d table(s) now hold 0 rows for the company, and the archive holds every row.', count($counts)), 'green');
+        if ($retained !== []) {
+            CLI::write(sprintf('%s audit row(s) across %d table(s) were deliberately left in place under their retention policy.',
+                number_format(array_sum($retained)), count($retained)), 'yellow');
+        }
         CLI::write('Reverse with: --restore --schema ' . $schema);
         CLI::write('Keep the schema until you are satisfied, then dump it and drop it.');
 
