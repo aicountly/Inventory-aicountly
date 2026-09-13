@@ -647,8 +647,9 @@ exit
 ```
 As root:
 ```bash
-su - postgres -c 'psql -c "DROP DATABASE inventory_verify; DROP ROLE inventory_verify;"'
-su - postgres -c 'psql -c "DROP DATABASE books_verify; DROP ROLE books_verify;"'
+# dropdb, not psql -c: several statements in one -c run inside a single transaction, and
+# DROP DATABASE cannot. Roles can, so they go together afterwards.
+su - postgres -c 'dropdb inventory_verify && dropdb books_verify && psql -c "DROP ROLE inventory_verify; DROP ROLE books_verify;"'
 ```
 
 ---
