@@ -87,15 +87,28 @@ class InventoryPurgeCompany extends BaseCommand
     /**
      * Tables a company purge must not touch.
      *
-     * Nothing here is append-only today. Books keeps its audit trail under an eight-year
-     * statutory retention, enforced by a BEFORE DELETE trigger in the database; this database
-     * has no equivalent, so the list is empty.
+     * Inventory owns the stock domain Books used to own, and the audit of that domain lives
+     * here now. Books retains its own audit trail for eight years — AuditRetentionRegistry
+     * returns false from mayPurge(), and a BEFORE DELETE trigger enforces it — so deleting
+     * these while those are kept would leave a purged company's history half preserved and half
+     * destroyed, which is worse than either answer on its own.
      *
-     * Empty is not the same as absent. appendOnlyTables() below reads the catalogue on every
-     * run, and if a table here is ever hardened without being added to this list, the purge
-     * refuses rather than deleting records something went to the trouble of protecting.
+     * Nothing enforces it on this side yet. AuditService calls inv_audit_log append-only in its
+     * docblock and no trigger backs that up. Hardening it belongs in a migration of its own, not
+     * in a purge command; until that exists, this list is what stands between a deleted company
+     * and its audit trail.
+     *
+     * The rows stay where they are, and are not copied into the archive schema either: that
+     * schema is dropped after thirty to ninety days, so copying records meant to outlive it
+     * would only duplicate them on their way out.
+     *
+     * appendOnlyTables() below still reads the catalogue on every run, so a table hardened later
+     * without being added here stops the purge rather than being deleted.
      */
-    private const RETAINED = [];
+    private const RETAINED = [
+        'inv_audit_log',
+        'inv_access_audit_log',
+    ];
 
     /**
      * Tables the database protects with an append-only trigger.
