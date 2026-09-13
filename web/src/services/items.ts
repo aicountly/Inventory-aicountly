@@ -182,6 +182,34 @@ export interface ItemListQuery extends ListQuery {
   warehouse_id?: number | ''
 }
 
+/** Fields POST /v1/items/bulk-update accepts. Units and the valuation method are deliberately absent. */
+export const BULK_EDITABLE_FIELDS = [
+  'hsn_sac',
+  'mrp',
+  'item_alias',
+  'print_name',
+  'item_grp_id',
+  'stock_cat_id',
+  'brand_id',
+  'books_tax_cat_id',
+  'min_stock_qty',
+  'max_stock_qty',
+  'reorder_point_qty',
+  'reorder_qty',
+  'is_active',
+] as const
+
+export type BulkEditableField = (typeof BULK_EDITABLE_FIELDS)[number]
+
+export interface BulkUpdateRow extends Partial<Record<BulkEditableField, string | number | null>> {
+  item_id: number
+}
+
+export interface BulkUpdateResult {
+  updated: number
+  rows: { item_id: number; changed: string[] }[]
+}
+
 export const itemsApi = {
   list: (query: ItemListQuery = {}, signal?: AbortSignal) => api.list<ItemListRow>('v1/items', query, { signal }),
   get: async (id: number, signal?: AbortSignal) => (await api.get<ItemResponse<Item>>(`v1/items/${id}`, { signal })).data,
@@ -194,6 +222,9 @@ export const itemsApi = {
     const res = await api.get<ItemResponse<ItemSearchRow[]>>('v1/items/search', { signal, query: { q, limit } })
     return Array.isArray(res.data) ? res.data : []
   },
+  /** One field across many items, in a single all-or-nothing transaction. */
+  bulkUpdate: async (rows: BulkUpdateRow[]): Promise<BulkUpdateResult> =>
+    (await api.post<ItemResponse<BulkUpdateResult>>('v1/items/bulk-update', { rows })).data,
   openings: async (id: number, signal?: AbortSignal) => (await api.get<ItemResponse<ItemOpeningsResponse>>(`v1/items/${id}/openings`, { signal })).data,
   saveOpenings: async (id: number, fyId: number, rows: Partial<ItemOpening>[]) =>
     (await api.put<ItemResponse<ItemOpeningsResponse>>(`v1/items/${id}/openings`, { fy_id: fyId, rows })).data,
