@@ -93,22 +93,21 @@ class InventoryPurgeCompany extends BaseCommand
      * these while those are kept would leave a purged company's history half preserved and half
      * destroyed, which is worse than either answer on its own.
      *
-     * Nothing enforces it on this side yet. AuditService calls inv_audit_log append-only in its
-     * docblock and no trigger backs that up. Hardening it belongs in a migration of its own, not
-     * in a purge command; until that exists, this list is what stands between a deleted company
-     * and its audit trail.
+     * Migration 007 now enforces it at the database too, with the same BEFORE DELETE trigger
+     * Books uses, so this list is no longer the only thing standing between a deleted company and
+     * its audit trail. The list is still needed: without it the purge would hit the trigger and
+     * abort, having done nothing, rather than purging everything it legitimately can.
      *
      * The rows stay where they are, and are not copied into the archive schema either: that
      * schema is dropped after thirty to ninety days, so copying records meant to outlive it
      * would only duplicate them on their way out.
      *
-     * appendOnlyTables() below still reads the catalogue on every run, so a table hardened later
-     * without being added here stops the purge rather than being deleted.
+     * The list comes from AuditRetentionRegistry so the policy is stated once, next to the
+     * retention period, rather than copied into a command. appendOnlyTables() below still reads
+     * the catalogue on every run, so a table hardened later without being added there stops the
+     * purge rather than being deleted by it.
      */
-    private const RETAINED = [
-        'inv_audit_log',
-        'inv_access_audit_log',
-    ];
+    private const RETAINED = \App\Services\AuditRetentionRegistry::AUDIT_TABLES;
 
     /**
      * Tables the database protects with an append-only trigger.
