@@ -598,7 +598,7 @@ class Validator
      */
     private function booksLayerValueByItem(int $cmpId): array
     {
-        if (!$this->has('books_inventory_cost_layers')) {
+        if (!$this->books->tableExists('books_inventory_cost_layers')) {
             return [];
         }
         $rows = $this->books->query(
