@@ -449,16 +449,20 @@ class Validator
                         $valueExplained[] = $entry;
                     } elseif (
                         isset($missingCostLayers[$itemId])
-                        && abs((float) ($entry['books_unit_cost'] ?? 0)) < 0.00001
-                        && abs((float) ($entry['inventory_unit_cost'] ?? 0)) > 0.00001
+                        && (float) ($entry['books_unit_cost'] ?? 0) < (float) ($entry['inventory_unit_cost'] ?? 0) - 0.00001
                     ) {
                         // Books' inward line carries a real cost_rate, but the cost layer its
                         // valuation report reads was never written (or was written at zero), so
-                        // Books reports the item as worthless. Inventory replays the movement and
-                        // uses the cost Books itself recorded on the line. Deliberately narrow:
-                        // only when Books reports no unit cost at all and Inventory has one. An
-                        // item where both are non-zero but differ is a different question and
-                        // must still fail.
+                        // Books values the item off fewer receipts than it actually has.
+                        // Inventory replays the movements and uses the cost Books itself recorded
+                        // on each line, including the amount when the rate field was left blank.
+                        //
+                        // The test is on UNIT cost, not total value: a missing layer always
+                        // leaves Books' per-unit cost too low, whether it reports zero (no layer
+                        // at all) or merely too little (some layers present, others missing), and
+                        // it holds for negative stock too, where a lower unit cost produces a
+                        // MORE negative total. An item where Books' unit cost is at or above
+                        // Inventory's is a different question and must still fail.
                         $entry['reason'] = 'books_cost_layer_missing';
                         $entry['books_lines_with_cost'] = $missingCostLayers[$itemId];
                         $valueExplained[] = $entry;
