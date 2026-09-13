@@ -116,6 +116,44 @@ final class PurgeCompanyTest extends IntegrationTestCase
         $this->assertSame(3, $this->rows('SELECT COUNT(*) AS n FROM "' . self::SCHEMA . '".zz_purge_b_child'));
     }
 
+    public function testTheDatabaseItselfRefusesToDeleteAnAuditRow(): void
+    {
+        // Migration 007. Before it, inv_audit_log was append-only only in a docblock, and the
+        // company purge was the one thing that would have deleted from it.
+        $this->raw->query(
+            'INSERT INTO inv_audit_log (cmp_id, entity_type, entity_id, action) VALUES ('
+            . self::COMPANY . ", 'item', 1, 'create')",
+        );
+        $this->assertSame(1, $this->rows('SELECT COUNT(*) AS n FROM inv_audit_log WHERE cmp_id = ' . self::COMPANY));
+
+        $deleted = $this->raw->query('DELETE FROM inv_audit_log WHERE cmp_id = ' . self::COMPANY);
+
+        $this->assertFalse($deleted, 'the trigger must reject the delete');
+        $this->raw->query('ROLLBACK');
+        $this->assertSame(1, $this->rows('SELECT COUNT(*) AS n FROM inv_audit_log WHERE cmp_id = ' . self::COMPANY),
+            'the audit row must survive the attempt');
+    }
+
+    public function testPurgesAroundTheAuditTrailRatherThanFailingOnIt(): void
+    {
+        // The guard and the retained list have to agree. If they drift, this is how it shows:
+        // either the purge aborts on the trigger having done nothing, or it deletes the rows.
+        $this->seed(self::COMPANY);
+        $this->raw->query(
+            'INSERT INTO inv_audit_log (cmp_id, entity_type, entity_id, action) VALUES ('
+            . self::COMPANY . ", 'document', 7, 'post')",
+        );
+
+        $this->assertSame(EXIT_SUCCESS, $this->purge());
+
+        $this->assertSame(0, $this->rows('SELECT COUNT(*) AS n FROM zz_purge_a_parent WHERE cmp_id = ' . self::COMPANY));
+        $this->assertSame(1, $this->rows('SELECT COUNT(*) AS n FROM inv_audit_log WHERE cmp_id = ' . self::COMPANY),
+            'the audit row must still be in public');
+        $this->assertSame(0, $this->rows(
+            "SELECT COUNT(*) AS n FROM information_schema.tables WHERE table_schema = '" . self::SCHEMA . "' AND table_name = 'inv_audit_log'",
+        ), 'and must not have been copied into the archive schema');
+    }
+
     public function testRefusesWhenTheDatabaseGuardsATableThatIsNotDeclaredRetained(): void
     {
         // Books protects its audit trail with a BEFORE DELETE trigger and an eight-year statutory
