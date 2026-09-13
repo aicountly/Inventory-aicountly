@@ -370,6 +370,17 @@ against a half-migrated database and competing for the same connections.
 
 They are installed at **E3**, immediately after the mode flip and before users return.
 
+If the three frequent workers are already installed, leave them: with no documents and no events
+they are no-ops, and the migration queues neither (verified: it writes no outbox rows and no
+recalculation jobs). **Remove only the nightly `reconcile --all` until after cutover** —
+`0 2 * * *` in the server's IST would otherwise fire mid-window, reconciling a half-migrated
+Inventory against Books, storing a run record showing enormous false differences and competing
+for connections while it does:
+```bash
+crontab -l | grep -v 'inventory:reconcile' > /tmp/inv.cron
+crontab /tmp/inv.cron && crontab -l && rm -f /tmp/inv.cron
+```
+
 ### A8. Deploy Books (still `INVENTORY_MODE=legacy` — no user-visible change yet)
 In Books' `.env`, add/confirm: `INVENTORY_MODE = legacy`, `INVENTORY_API_BASE = https://inventory.aicountly.com/api`,
 `INVENTORY_SERVICE_KEY` (= the `books:` key from A5), `INVENTORY_INBOUND_SERVICE_KEY` (= Inventory's
@@ -659,8 +670,10 @@ point. Install as the `inventoryaic` user. Use the absolute PHP path, because cr
 environment may not resolve bare `php`; on this server that is `/usr/local/bin/php`. Errors go to
 a log rather than `/dev/null`, since a failing `outbox-dispatch` means Books silently stops
 receiving COGS corrections:
+Write the full crontab rather than appending to it, so this is safe to run whether or not some
+of these lines are already present:
 ```bash
-crontab -l 2>/dev/null > /tmp/inv.cron
+crontab -l 2>/dev/null | grep -v 'spark inventory:' > /tmp/inv.cron
 cat >> /tmp/inv.cron <<'CRONEOF'
 * * * * * cd /home/inventoryaic/public_html/api && /usr/local/bin/php spark inventory:outbox-dispatch >/dev/null 2>> /home/inventoryaic/inventory-cron-errors.log
 * * * * * cd /home/inventoryaic/public_html/api && /usr/local/bin/php spark inventory:recalc-worker >/dev/null 2>> /home/inventoryaic/inventory-cron-errors.log
