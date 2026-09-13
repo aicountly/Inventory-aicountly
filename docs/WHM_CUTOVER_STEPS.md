@@ -387,11 +387,14 @@ In Books' `.env`, add/confirm: `INVENTORY_MODE = legacy`, `INVENTORY_API_BASE = 
 `BOOKS_SERVICE_KEY` from A5), `INVENTORY_POSTING_MODE = strict`, `INVENTORY_COGS_REVISION_MODE = inline`.
 Then GitHub → `books-react-app` → Actions → **Deploy to cPanel Production** → Run workflow.
 
-Confirm nothing changed for users (this endpoint checks `X-Service-Key` against Books' own
-`INVENTORY_SERVICE_KEY`, so read it straight out of the `.env` you're sitting in — the header
-value never needs to be typed or pasted anywhere):
+Confirm nothing changed for users. The endpoint compares `X-Service-Key` against
+`INVENTORY_INBOUND_SERVICE_KEY`, the key **Inventory presents when calling Books**, and only
+falls back to `INVENTORY_SERVICE_KEY` when the inbound one is unset — which it no longer is.
+Sending the outbound key returns `Invalid service key` and looks like a misconfiguration when
+nothing is wrong. Read it straight out of the `.env` you are sitting in, so the value is never
+typed or pasted anywhere:
 ```bash
-curl -s -H "X-Service-Key: $(grep '^INVENTORY_SERVICE_KEY' .env | cut -d= -f2- | xargs)" \
+curl -s -H "X-Service-Key: $(grep '^INVENTORY_INBOUND_SERVICE_KEY ' .env | cut -d= -f2- | xargs)" \
     https://books.aicountly.com/api/integration/inventory/health
 ```
 Expect `mode: legacy`. Log in to Books yourself and confirm it behaves exactly as before —
@@ -659,7 +662,7 @@ Edit `.env`, change `INVENTORY_MODE = legacy` to `INVENTORY_MODE = live`. CodeIg
 restart needed. Confirm:
 ```bash
 grep -n "^INVENTORY_MODE" .env
-curl -s -H "X-Service-Key: $(grep '^INVENTORY_SERVICE_KEY' .env | cut -d= -f2- | xargs)" \
+curl -s -H "X-Service-Key: $(grep '^INVENTORY_INBOUND_SERVICE_KEY ' .env | cut -d= -f2- | xargs)" \
     https://books.aicountly.com/api/integration/inventory/health
 ```
 **Paste back** — must now report `mode: live`.
