@@ -361,13 +361,22 @@ psql -h 127.0.0.200 -p 5432 -U inventoryaic_inventory_user -d inventoryaic_inven
 Paste back the health JSON and all four counts. The two `not_owned` counts must be `0`, and both
 totals must be non-zero.
 
-### A7. Inventory's cron (cPanel → Cron Jobs, or `crontab -e` in this terminal)
+### A7. Inventory's cron
+Use the **absolute** PHP path. Cron runs with a minimal environment, where bare `php` may resolve
+to a different version or to nothing; on this server `which php` gives `/usr/local/bin/php`, the
+cPanel wrapper that honours the account's chosen version.
+
+Errors go to a log rather than to `/dev/null`. Normal output is discarded, because these run
+every minute and would otherwise bury the log in CodeIgniter banners, but a failing
+`outbox-dispatch` after cutover means Books silently stops receiving COGS corrections, and that
+must not be invisible.
 ```
-* * * * * cd /home/inventoryaic/public_html/api && php spark inventory:outbox-dispatch >/dev/null 2>&1
-* * * * * cd /home/inventoryaic/public_html/api && php spark inventory:recalc-worker  >/dev/null 2>&1
-*/5 * * * * cd /home/inventoryaic/public_html/api && php spark inventory:expire-reservations >/dev/null 2>&1
-0 2 * * * cd /home/inventoryaic/public_html/api && php spark inventory:reconcile --all >/dev/null 2>&1
+* * * * * cd /home/inventoryaic/public_html/api && /usr/local/bin/php spark inventory:outbox-dispatch >/dev/null 2>> /home/inventoryaic/inventory-cron-errors.log
+* * * * * cd /home/inventoryaic/public_html/api && /usr/local/bin/php spark inventory:recalc-worker >/dev/null 2>> /home/inventoryaic/inventory-cron-errors.log
+*/5 * * * * cd /home/inventoryaic/public_html/api && /usr/local/bin/php spark inventory:expire-reservations >/dev/null 2>> /home/inventoryaic/inventory-cron-errors.log
+0 2 * * * cd /home/inventoryaic/public_html/api && /usr/local/bin/php spark inventory:reconcile --all >/dev/null 2>> /home/inventoryaic/inventory-cron-errors.log
 ```
+Check that log during the first days after cutover; an empty file is the expected state.
 
 ### A8. Deploy Books (still `INVENTORY_MODE=legacy` — no user-visible change yet)
 In Books' `.env`, add/confirm: `INVENTORY_MODE = legacy`, `INVENTORY_API_BASE = https://inventory.aicountly.com/api`,
