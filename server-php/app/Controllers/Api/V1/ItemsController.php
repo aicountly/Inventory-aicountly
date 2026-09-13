@@ -89,7 +89,7 @@ class ItemsController extends BaseController
             $this->applySearch($b, $q, (string) ($this->request->getGet('q_mode') ?? 'contains'));
         }
         $total = (clone $b)->countAllResults(false);
-        $sortMap = ['item_name' => 'i.item_name', 'item_sku' => 'i.item_sku', 'updated_at' => 'i.updated_at', 'created_at' => 'i.created_at', 'grp_name' => 'g.grp_name', 'item_id' => 'i.item_id'];
+        $sortMap = ['item_name' => 'i.item_name', 'item_sku' => 'i.item_sku', 'updated_at' => 'i.updated_at', 'created_at' => 'i.created_at', 'grp_name' => 'g.grp_name', 'item_id' => 'i.item_id', 'mrp' => 'i.mrp'];
         $rows = $b->select(self::LIST_COLUMNS)->orderBy($sortMap[$p['sort']] ?? 'i.item_name', $p['order'])->limit($p['limit'], $p['offset'])->get()->getResultArray();
         if ((int) ($this->request->getGet('with_stock') ?? 0) === 1 && $rows !== []) {
             $this->attachStock($cmpId, $rows, (int) $this->request->getGet('warehouse_id') ?: null);
