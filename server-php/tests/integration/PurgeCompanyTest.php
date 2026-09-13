@@ -73,7 +73,9 @@ final class PurgeCompanyTest extends IntegrationTestCase
     {
         $this->raw->query('ROLLBACK');
         $this->raw->query('DROP TABLE IF EXISTS zz_purge_b_child');
+        $this->raw->query('DROP TABLE IF EXISTS zz_purge_c_guarded');
         $this->raw->query('DROP TABLE IF EXISTS zz_purge_a_parent');
+        $this->raw->query('DROP FUNCTION IF EXISTS zz_purge_deny_mutation() CASCADE');
         $this->raw->query('DROP SCHEMA IF EXISTS "' . self::SCHEMA . '" CASCADE');
     }
 
@@ -112,6 +114,34 @@ final class PurgeCompanyTest extends IntegrationTestCase
         $this->assertSame(0, $this->rows('SELECT COUNT(*) AS n FROM zz_purge_b_child WHERE cmp_id = ' . self::COMPANY));
         $this->assertSame(1, $this->rows('SELECT COUNT(*) AS n FROM "' . self::SCHEMA . '".zz_purge_a_parent'));
         $this->assertSame(3, $this->rows('SELECT COUNT(*) AS n FROM "' . self::SCHEMA . '".zz_purge_b_child'));
+    }
+
+    public function testRefusesWhenTheDatabaseGuardsATableThatIsNotDeclaredRetained(): void
+    {
+        // Books protects its audit trail with a BEFORE DELETE trigger and an eight-year statutory
+        // retention, and the purge reads pg_trigger to find such tables rather than trusting its
+        // own list. That catalogue query is the part a stubbed connection cannot check: if the
+        // trigger-type bit test or the function-name match is wrong it silently finds nothing,
+        // and the guard that is supposed to stop the purge never fires. So build a real one.
+        $this->seed(self::COMPANY);
+        $this->raw->query('CREATE TABLE zz_purge_c_guarded (id serial PRIMARY KEY, cmp_id int NOT NULL)');
+        $this->raw->query('INSERT INTO zz_purge_c_guarded (cmp_id) VALUES (' . self::COMPANY . ')');
+        $this->raw->query(
+            'CREATE FUNCTION zz_purge_deny_mutation() RETURNS trigger LANGUAGE plpgsql AS $$'
+            . " BEGIN RAISE EXCEPTION 'append-only'; END; $$",
+        );
+        $this->raw->query(
+            'CREATE TRIGGER zz_purge_c_no_delete BEFORE DELETE ON zz_purge_c_guarded'
+            . ' FOR EACH ROW EXECUTE PROCEDURE zz_purge_deny_mutation()',
+        );
+
+        $this->assertSame(EXIT_ERROR, $this->purge(), 'an undeclared append-only table must stop the purge');
+
+        $this->assertSame(1, $this->rows('SELECT COUNT(*) AS n FROM zz_purge_a_parent WHERE cmp_id = ' . self::COMPANY),
+            'it must refuse before deleting anything');
+        $this->assertSame(0, $this->rows(
+            "SELECT COUNT(*) AS n FROM information_schema.schemata WHERE schema_name = '" . self::SCHEMA . "'",
+        ), 'it must refuse before creating the archive schema');
     }
 
     public function testFailsAndChangesNothingWhenAnotherCompanyStillReferencesTheRows(): void
