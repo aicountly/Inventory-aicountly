@@ -102,11 +102,22 @@ class BaseController extends ResourceController
         if ($auth === '') {
             return $session;
         }
-        $resolved = (new PortalCompanyAccessService())
-            ->withAuth($auth)
-            ->resolveAcsTypeForCompany((int) $ctx['cmp_id'], $this->request);
-        if ($resolved !== null) {
-            $session['acs_type'] = $resolved;
+        // Enrichment only ever upgrades acs_type; AccessService::assert() still decides. So a
+        // failure here must leave the session as it was, never abort the request: this call
+        // reaches out to Manage over the network, and for a while the class it needs was
+        // missing entirely, which turned every delegated user's request into a blank 500.
+        try {
+            $resolved = (new PortalCompanyAccessService())
+                ->withAuth($auth)
+                ->resolveAcsTypeForCompany((int) $ctx['cmp_id'], $this->request);
+            if ($resolved !== null) {
+                $session['acs_type'] = $resolved;
+            }
+        } catch (\Throwable $e) {
+            log_message('error', 'Portal access-type lookup failed for company {cmp}: {msg}', [
+                'cmp' => (int) $ctx['cmp_id'],
+                'msg' => $e->getMessage(),
+            ]);
         }
 
         return $session;
