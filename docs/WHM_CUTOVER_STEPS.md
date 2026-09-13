@@ -73,6 +73,7 @@ one shared readable path before Phase B starts rather than discovering the probl
 | A2 merge both branches to `main` | **next** |
 | A3 GitHub SSH secrets for Inventory | done (verified by an earlier test deploy) |
 | A4 first real Inventory deploy | after A2 |
+| A4 first Inventory deploy | done — run #8 green on `main`, schema applied, `/api/health` reports `db:true`, table and sequence ownership verified 0/0 across 45 sequences |
 | A5 part 1, databases and roles | done — `inventoryaic_inventory` created and ownership set (below); `booksaicountly_invread` created and **proven** read-only (`SELECT` works, `UPDATE` and `CREATE` both rejected) |
 | A5 part 2, Inventory `api/.env` | after A4 |
 | A6 onward | not started |
@@ -484,8 +485,10 @@ php spark books:export-inventory-snapshot \
 ls -la /home/booksaicountly/inv_migration_backups/books_snapshots_$(date +%Y%m%d) | head
 exit
 ```
-Then as **root**, copy it where the Inventory account can read it. Inventory's validate runs as
-`inventoryaic` and cannot see into another account's home:
+Then as **root**, copy it where the Inventory account can read it. This step is **required, not
+tidiness**: the accounts run under a jailshell (CageFS), so `inventoryaic` cannot see into
+another account's home at all, and it cannot even `su`. A shared directory outside both homes
+would not be visible inside the jail either, which is why the file is copied rather than shared:
 ```bash
 mkdir -p /home/inventoryaic/inv_migration_backups
 cp -r /home/booksaicountly/inv_migration_backups/books_snapshots_$(date +%Y%m%d) \
