@@ -69,9 +69,57 @@ one shared readable path before Phase B starts rather than discovering the probl
 
 | Step | State |
 |---|---|
-| **Phase A — complete and verified** | both apps deployed from `main`; Inventory schema live with ownership verified 0/0 across 45 sequences; `/api/health` green on both; Books reports `mode: legacy` with migration 150 applied; read-only Books role proven unable to write |
-| **Phase R — rehearsal, no freeze** | **next**, and it can run any time — it does not need a maintenance window |
-| Phase B onward — the real window | size it from Phase R's measured timings, not from a guess |
+| **Phase A — complete and verified** | both apps deployed from `main`; Inventory schema live, ownership verified 0/0 across 45 sequences; Books reports `mode: legacy` with migration 150 applied |
+| **Phase R — complete and clean** | full cycle run against a restored copy of real production data. `PRECHECK ok`, `VALIDATE ok`, `CUTOVER checks passed`, `postcheck ok`. Every quantity matched exactly across 19,447 items and 69,747 vouchers; 7 value-only differences, all explained with evidence |
+| **Phase B — the real window** | ready to schedule. Every stage is now timed, below |
+
+## Measured timings, against real production data (2026-09-13)
+
+| Stage | Time |
+|---|---|
+| `pg_dump -Fc -Z6` (1.1 GB source → 63 MB) | 6.5s |
+| verify restore into a scratch database | 11s |
+| `books:export-inventory-snapshot --company all` | 0.7s |
+| `books:backfill-vch-uuid` (69,747 rows) | 5.9s |
+| `precheck` | 0.4s |
+| `migrate --dry-run` | 7.6s |
+| `migrate` | 8.3s |
+| `validate --books-snapshot` | 0.9s |
+| `cutover` | 0.9s |
+| `postcheck` | 0.6s |
+
+**All database work totals roughly 43 seconds.** Plan the window around the human verification in
+E5 and E6, not around the migration. Thirty to forty-five minutes is comfortable, and almost all
+of it is the smoke test.
+
+## What Phase R caught
+
+Four defects, every one of which would otherwise have struck mid-freeze with users locked out:
+
+1. `deploy-production.yml` stripped `.env.example`, so a first deploy had nothing to bootstrap
+   `.env` from and `sql-migrate` failed with no credentials.
+2. `pg_hba.conf` uses `samerole`, so hand-created scratch databases are unreachable until a role
+   of the same name exists. This would have hit B3's verify restore.
+3. PostgreSQL 13 rejects bare keyword column labels, which 14+ accept. 21 aliases across three
+   files, including `StockBalanceService`, which sits behind validate's stock rebuild and would
+   have failed *after* the migration had written rows.
+4. `Validator::has()` did not exist — copied from a sibling class. Only reachable with
+   `--books-snapshot` against a real Books database.
+
+## Explained value differences, approved before cutover
+
+Quantities matched everywhere. Seven items differ in value only, in two companies:
+
+* **`books_cost_layer_missing`** (6 items, Galorekart Marketplace and Orobite India): Books'
+  inward purchase lines carry a real cost but the cost layer its valuation report reads was never
+  written, so Books reports the stock as worthless. Inventory uses the cost Books recorded on the
+  line. The owner reviewed the effect (+31,111 and +87,966 on two companies, -11,414 on a third,
+  against totals in the millions) and approved accepting Inventory's figures.
+* **`books_report_disagrees_with_own_layers`** (1 item, 19349): Books' layers are complete and
+  intact and total exactly what Inventory reports. Books' *report* is the outlier. No judgement
+  call: Books' own data corroborates the migrated figure.
+
+Every affected item, voucher and layer is listed in `validate.summary.json`.
 
 Both branches were found behind `main` and have been merged up. Books' `main` carried 14 commits
 of GST and Item Master work that deploying the branch as-is would have reverted. Verified green on
