@@ -246,7 +246,15 @@ class InventoryRepairItemGroupCodes extends BaseCommand
             }
         }
 
-        return $this->verifyCodes($db, $cmpId, $moves) ? [$moves, $emptyGroupIds, $skipped] : null;
+        if (!$this->verifyCodes($db, $cmpId, $moves)) {
+            return null;
+        }
+        $retiring = array_values(array_unique(array_merge(array_column($moves, 'old_grp'), $emptyGroupIds)));
+        if (!$this->verifyNoChildrenOrphaned($db, $cmpId, $retiring)) {
+            return null;
+        }
+
+        return [$moves, $emptyGroupIds, $skipped];
     }
 
     /**
@@ -301,6 +309,41 @@ class InventoryRepairItemGroupCodes extends BaseCommand
         }
         if (count($problems) > 25) {
             CLI::write('  ... and ' . (count($problems) - 25) . ' more', 'red');
+        }
+
+        return false;
+    }
+
+    /**
+     * Company 16's groups are all top-level, but this command will be pointed at another company
+     * one day. Retiring a group that another group calls its parent would leave that child
+     * pointing at a deleted row, so refuse instead of producing it.
+     *
+     * @param list<int> $retiring
+     */
+    private function verifyNoChildrenOrphaned($db, int $cmpId, array $retiring): bool
+    {
+        if ($retiring === []) {
+            return true;
+        }
+        $orphans = [];
+        foreach (array_chunk($retiring, 1000) as $chunk) {
+            foreach ($db->table('inv_item_groups')->select('item_grp_id, grp_name, parent_grp_id')
+                ->where('cmp_id', $cmpId)->where('deleted_at', null)
+                ->whereIn('parent_grp_id', $chunk)->whereNotIn('item_grp_id', $retiring)
+                ->get()->getResultArray() as $child) {
+                $orphans[] = "group {$child['item_grp_id']} \"{$child['grp_name']}\" has parent {$child['parent_grp_id']}, which would be retired";
+            }
+        }
+        if ($orphans === []) {
+            CLI::write('  no group being retired is another group\'s parent', 'green');
+
+            return true;
+        }
+        CLI::write('');
+        CLI::error(sprintf('%d group(s) would be orphaned — nothing was written:', count($orphans)));
+        foreach (array_slice($orphans, 0, 25) as $o) {
+            CLI::write('  ' . $o, 'red');
         }
 
         return false;
