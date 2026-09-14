@@ -117,6 +117,15 @@ class ValuationEngine
     }
 
     /**
+     * $historicCostAsOf bounds the LAST-RESORT cost (resolveFallbackUnitCost's final step) to the
+     * documents known on that date. Posting leaves it null on purpose: a backdated document is
+     * deliberately allowed to price a shortfall from everything known today. A REPLAY must pass the
+     * date of the movement it is re-costing, because it re-costs an issue that was already valued
+     * and published — reading a receipt dated after that issue would re-price a historical sale
+     * from the future and hand Books a COGS revision for a period that may already be filed. The
+     * layers and the WAC state need no such bound: the replay rebuilds both in date order, so at
+     * this point they hold exactly what was known when the issue happened.
+     *
      * @return array{valuation_rate: float, valuation_amount: float, valuation_method_applied: string, consumptions: list<array{layer_id:int, qty:float, unit_cost:float}>, backorder_layer_id: ?int}
      */
     public function issueStock(
@@ -129,6 +138,7 @@ class ValuationEngine
         ?int $documentId = null,
         ?int $lineId = null,
         ?string $methodOverride = null,
+        ?string $historicCostAsOf = null,
     ): array {
         if ($baseQty <= 0) {
             throw new \RuntimeException('Issue quantity must be positive', 422);
@@ -139,11 +149,11 @@ class ValuationEngine
         $this->ensureOpeningSeeded($cmpId, $fyId, $itemId, $wh);
 
         if ($method === 'WAC') {
-            $r = $this->issueWac($db, $cmpId, $itemId, $wh, $baseQty);
+            $r = $this->issueWac($db, $cmpId, $itemId, $wh, $baseQty, $historicCostAsOf);
             $r['consumptions'] = [];
             $r['backorder_layer_id'] = null;
         } else {
-            $r = $this->issueFromLayers($db, $cmpId, $fyId, $itemId, $wh, $baseQty, $method === 'LIFO' ? 'DESC' : 'ASC', $issuedAt, $documentId, $lineId);
+            $r = $this->issueFromLayers($db, $cmpId, $fyId, $itemId, $wh, $baseQty, $method === 'LIFO' ? 'DESC' : 'ASC', $issuedAt, $documentId, $lineId, $historicCostAsOf);
         }
         $r['valuation_method_applied'] = $method;
 
@@ -362,7 +372,7 @@ class ValuationEngine
     // ------------------------------------------------------------------ internals
 
     /** @return array{valuation_rate: float, valuation_amount: float, consumptions: list<array{layer_id:int, qty:float, unit_cost:float}>, backorder_layer_id: ?int} */
-    private function issueFromLayers($db, int $cmpId, int $fyId, int $itemId, ?int $wh, float $qty, string $order, string $issuedAt, ?int $documentId, ?int $lineId): array
+    private function issueFromLayers($db, int $cmpId, int $fyId, int $itemId, ?int $wh, float $qty, string $order, string $issuedAt, ?int $documentId, ?int $lineId, ?string $historicCostAsOf = null): array
     {
         $b = $db->table('inv_cost_layers')
             ->where('cmp_id', $cmpId)->where('item_id', $itemId)->where('qty_remaining >', 0)
@@ -377,7 +387,7 @@ class ValuationEngine
         foreach ($sim as $l) {
             $available += $l['qty_remaining'];
         }
-        $fallback = $available + 0.0001 < $qty ? $this->resolveFallbackUnitCost($db, $cmpId, $itemId, $wh) : 0.0;
+        $fallback = $available + 0.0001 < $qty ? $this->resolveFallbackUnitCost($db, $cmpId, $itemId, $wh, $historicCostAsOf) : 0.0;
 
         $result = self::consumeLayers($sim, $qty, $order, $fallback);
         $consumptions = [];
@@ -415,19 +425,20 @@ class ValuationEngine
     }
 
     /** @return array{valuation_rate: float, valuation_amount: float} */
-    private function issueWac($db, int $cmpId, int $itemId, ?int $wh, float $qty): array
+    private function issueWac($db, int $cmpId, int $itemId, ?int $wh, float $qty, ?string $historicCostAsOf = null): array
     {
         $state = $this->loadWacState($db, $cmpId, $itemId, $wh);
         $avg = $state['average_cost'];
         if ($avg <= 0) {
-            $avg = $this->resolveFallbackUnitCost($db, $cmpId, $itemId, $wh);
+            $avg = $this->resolveFallbackUnitCost($db, $cmpId, $itemId, $wh, $historicCostAsOf);
         }
         $this->saveWacState($db, $cmpId, $itemId, $wh, round($state['qty_on_hand'] - $qty, 4), $avg);
 
         return ['valuation_rate' => $avg, 'valuation_amount' => round($qty * $avg, 4)];
     }
 
-    public function resolveFallbackUnitCost($db, int $cmpId, int $itemId, ?int $wh): float
+    /** @param ?string $historicCostAsOf see issueStock(): null = every cost known today. */
+    public function resolveFallbackUnitCost($db, int $cmpId, int $itemId, ?int $wh, ?string $historicCostAsOf = null): float
     {
         if ($cmpId <= 0 || $itemId <= 0) {
             return 0.0;
@@ -440,26 +451,31 @@ class ValuationEngine
             $cost = $this->loadWacState($db, $cmpId, $itemId, $wh)['average_cost'];
         }
         if ($cost <= 0) {
-            $cost = $this->historicUnitCost($db, $cmpId, $itemId);
+            $cost = $this->historicUnitCost($db, $cmpId, $itemId, $historicCostAsOf);
         }
 
         return $cost > 0 ? round($cost, 4) : 0.0;
     }
 
-    private function historicUnitCost($db, int $cmpId, int $itemId): float
+    private function historicUnitCost($db, int $cmpId, int $itemId, ?string $asOf = null): float
     {
-        $key = $cmpId . ':' . $itemId;
+        // The bound belongs in the key: a replay asks this once per issue it re-costs, in date
+        // order, so a single answer cached for the whole item would hand the earliest issue's cost
+        // to every later one.
+        $key = $cmpId . ':' . $itemId . ':' . ($asOf ?? '');
         if (array_key_exists($key, $this->historicCostCache)) {
             return $this->historicCostCache[$key];
         }
         // Last inward line with a valuation rate, else last inward with a source rate, else the opening.
-        $res = $db->table('inv_document_lines l')
+        $b = $db->table('inv_document_lines l')
             ->select('l.valuation_rate, l.source_transaction_rate, l.source_transaction_amount, l.base_qty, l.qty, l.unit_id, d.document_type')
             ->join('inv_documents d', 'd.document_id = l.document_id', 'inner')
             ->where('l.cmp_id', $cmpId)->where('l.item_id', $itemId)->where('l.direction', 'in')
-            ->whereIn('d.status', ['POSTED', 'COMPLETED', 'PARTIALLY_FULFILLED'])
-            ->orderBy('d.document_date', 'DESC')->orderBy('l.line_id', 'DESC')->limit(1)
-            ->get();
+            ->whereIn('d.status', ['POSTED', 'COMPLETED', 'PARTIALLY_FULFILLED']);
+        if ($asOf !== null && $asOf !== '') {
+            $b->where('d.document_date <=', $asOf);
+        }
+        $res = $b->orderBy('d.document_date', 'DESC')->orderBy('l.line_id', 'DESC')->limit(1)->get();
         $row = $res === false ? null : $res->getRowArray();
         $cost = 0.0;
         if ($row) {

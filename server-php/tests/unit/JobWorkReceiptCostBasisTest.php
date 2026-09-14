@@ -36,7 +36,7 @@ final class JobWorkReceiptCostBasisTest extends TestCase
                 return $warehouseId;
             }
 
-            public function resolveFallbackUnitCost($db, int $cmpId, int $itemId, ?int $wh): float
+            public function resolveFallbackUnitCost($db, int $cmpId, int $itemId, ?int $wh, ?string $historicCostAsOf = null): float
             {
                 return JobWorkReceiptCostBasisTest::FALLBACK;
             }
@@ -91,14 +91,19 @@ final class JobWorkReceiptCostBasisTest extends TestCase
     }
 
     /**
-     * The replay carries its own copy of the list, and a what-if that still costed a receipt from
-     * the challan value would answer with the very mixture the separation exists to prevent.
+     * The replay used to carry its own copy of the list, which is how it drifted: the copy never
+     * gained INWARD_CHALLAN, so the reporting engine costed challan-moved goods at the zero the
+     * line was left with while posting costed the same goods from the GRN rate. The separation a
+     * job-work receipt needs is declared in the registry, so reading the registry is what keeps
+     * the challan value out of the replay's cost basis AND what keeps the two engines together —
+     * a second copy can only fall behind the first again.
      */
-    public function testTheValuationReplayReadsThePostedCostForAReceiptToo(): void
+    public function testTheValuationReplayReadsTheRegistryListRatherThanACopyOfIt(): void
     {
         $source = (string) file_get_contents((string) (new \ReflectionClass(ValuationReplayService::class))->getFileName());
 
+        $this->assertStringContainsString('DocumentTypeRegistry::COST_BEARING_SOURCE_RATE', $source);
         $this->assertStringNotContainsString("'JOB_WORK_IN'", $source);
-        $this->assertStringContainsString("'PURCHASE_RECEIPT'", $source);
+        $this->assertStringNotContainsString("'PURCHASE_RECEIPT'", $source, 'a second copy of the list is how the two engines came apart');
     }
 }

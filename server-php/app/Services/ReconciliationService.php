@@ -421,7 +421,7 @@ class ReconciliationService
     {
         $db = \Config\Database::connect();
         $b = $db->table('inv_documents d')
-            ->select('d.document_id, d.document_uuid, d.document_type, d.document_no, d.document_date, d.status, d.source_app, d.source_document_type, d.source_document_id, d.source_document_uuid, d.source_document_no, d.failure_reason, d.cancel_reason, (SELECT COALESCE(SUM(CASE WHEN l.direction = \'out\' THEN -1 ELSE 1 END * COALESCE(l.valuation_amount, l.source_transaction_amount, l.source_transaction_rate * l.qty, 0)), 0) FROM inv_document_lines l WHERE l.document_id = d.document_id) AS stock_effect', false)
+            ->select('d.document_id, d.document_uuid, d.document_type, d.document_no, d.document_date, d.status, d.stock_effect, d.source_app, d.source_document_type, d.source_document_id, d.source_document_uuid, d.source_document_no, d.failure_reason, d.cancel_reason, (SELECT COALESCE(SUM(CASE WHEN l.direction = \'out\' THEN -1 ELSE 1 END * COALESCE(l.valuation_amount, l.source_transaction_amount, l.source_transaction_rate * l.qty, 0)), 0) FROM inv_document_lines l WHERE l.document_id = d.document_id) AS value_effect', false)
             ->where('d.cmp_id', $cmpId)->where('d.fy_id', $fyId)->whereIn('d.status', $statuses)
             ->where('d.document_date <=', $asOf)
             ->orderBy('d.document_date', 'ASC')->orderBy('d.document_id', 'ASC');
@@ -448,8 +448,10 @@ class ReconciliationService
         $sum = 0.0;
         foreach ($b->get()->getResultArray() as $r) {
             $spec = DocumentTypeRegistry::get((string) $r['document_type']);
-            // Documents that never carry valuation (packing, reservation, challan ...) explain nothing.
-            $effect = !empty($spec['valuation']) ? round((float) $r['stock_effect'], 4) : 0.0;
+            // Documents that never carry valuation (packing, reservation, a challan_only challan ...)
+            // explain nothing. An inward challan that would have moved stock does: it is valued.
+            $valued = DocumentPostingService::valuesLines((string) $r['document_type'], $spec, (string) ($r['stock_effect'] ?? ''));
+            $effect = $valued ? round((float) $r['value_effect'], 4) : 0.0;
             if ((string) $r['status'] === 'REVERSED' && (string) $r['source_app'] === 'books'
                 && (isset($cancelledInBooks['id:' . (int) $r['source_document_id']]) || isset($cancelledInBooks['uuid:' . strtolower((string) $r['source_document_uuid'])]))) {
                 $effect = 0.0;
