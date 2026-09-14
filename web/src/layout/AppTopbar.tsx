@@ -92,7 +92,7 @@ export function AppTopbar({ onToggleMobileNav }: AppTopbarProps) {
   const { isDark, setMode, setSettingsOpen } = useTheme()
 
   return (
-    <header className="aic app-topbar sticky top-0 z-30 flex h-12 shrink-0 items-center gap-2 border-b border-gray-200 bg-white px-2 md:px-3 print:hidden">
+    <header className="aic app-topbar sticky top-0 z-20 flex h-12 shrink-0 items-center gap-2 border-b border-gray-200 bg-white px-2 md:px-3 print:hidden">
       <button
         type="button"
         onClick={onToggleMobileNav}
@@ -108,7 +108,7 @@ export function AppTopbar({ onToggleMobileNav }: AppTopbarProps) {
       <button
         type="button"
         onClick={() => openCommandPalette()}
-        className="ml-auto inline-flex h-8 items-center gap-2 rounded-lg border border-gray-200 bg-white px-2.5 text-gray-400 transition-colors hover:border-primary/40 hover:text-gray-600 md:ml-2 md:w-72"
+        className="inline-flex h-8 items-center gap-2 rounded-lg border border-gray-200 bg-white px-2.5 text-gray-400 transition-colors hover:border-primary/40 hover:text-gray-600 md:ml-2 md:w-72"
         aria-label="Search anything"
       >
         <Search className="h-4 w-4 shrink-0" aria-hidden />
@@ -116,7 +116,10 @@ export function AppTopbar({ onToggleMobileNav }: AppTopbarProps) {
         <Kbd className="ml-auto hidden md:inline-flex">Ctrl K</Kbd>
       </button>
 
-      <div className="ml-auto flex items-center gap-1 md:ml-0">
+      {/* The row's only spacer. A second auto margin earlier in the row would
+          split the free space between the two instead of pushing this cluster
+          to the edge. */}
+      <div className="ml-auto flex items-center gap-1">
         <Tooltip label={isDark ? 'Switch to light' : 'Switch to dark'} placement="bottom">
           <button
             type="button"

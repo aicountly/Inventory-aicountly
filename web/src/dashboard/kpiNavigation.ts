@@ -12,6 +12,8 @@
  *     one key per entry in the report's own `filters` array (src/reports/configs).
  *     Toggles are '1' / '0' (see resolveFilterValues).
  *   - list screens — the `FILTER_KEYS` constant at the top of each page.
+ *   - `/registers/:path` — the same engine as `/reports/:path`, so the same rule
+ *     holds: one key per entry in the register's own `filters` array.
  * Nothing here invents a filter the server or the screen would ignore.
  */
 
@@ -57,16 +59,16 @@ export const drill = {
   itemsInStock: ({ asOf }: AsOf): string => path('/reports/stock-summary', { to: asOf, nonzero: 1 }),
 
   /**
-   * Items below zero. There is no `negative=1` filter anywhere in the product,
-   * so this sorts closing quantity ascending instead — the most negative item
-   * is the first row, which is what the user came to see.
+   * Stock below zero, in the register built on the very table the card counts
+   * from (inv_stock_balances) — not the movement-derived summary, which is a
+   * different computation and would disagree. Most negative first.
    */
-  negativeStock: ({ asOf }: AsOf): string =>
-    path('/reports/stock-summary', { to: asOf, nonzero: 1, sort: 'closing_qty', order: 'asc' }),
+  negativeStock: (): string =>
+    path('/registers/stock-balances', { negative: 1, sort: 'on_hand_qty', order: 'asc' }),
 
   /** One item's movements with running balance. */
   itemLedger: (itemId: number, period?: Partial<Period> & { warehouseId?: number | null }): string =>
-    path('/stock/ledger', {
+    path('/registers/stock-ledger', {
       item_id: itemId,
       from: period?.from,
       to: period?.to,
@@ -75,7 +77,11 @@ export const drill = {
 
   /** Materialised balance grid, optionally for one warehouse. */
   stockBalances: (opts: { warehouseId?: number | null; itemId?: number | null } = {}): string =>
-    path('/stock', { warehouse_id: opts.warehouseId ?? undefined, item_id: opts.itemId ?? undefined, nonzero: 1 }),
+    path('/registers/stock-balances', {
+      warehouse_id: opts.warehouseId ?? undefined,
+      item_id: opts.itemId ?? undefined,
+      nonzero: 1,
+    }),
 
   // ---- warehouses ----------------------------------------------------------
 
@@ -102,7 +108,7 @@ export const drill = {
 
   /** The append-only movement ledger. */
   stockMovements: (opts: { itemId?: number | null; documentId?: number | null; warehouseId?: number | null } = {}): string =>
-    path('/stock/movements', {
+    path('/registers/movement-register', {
       item_id: opts.itemId ?? undefined,
       document_id: opts.documentId ?? undefined,
       warehouse_id: opts.warehouseId ?? undefined,
@@ -122,9 +128,13 @@ export const drill = {
       order: 'asc',
     }),
 
-  /** Already-expired batches lead the list when expired rows are included. */
-  expiredBatches: ({ days }: { days: number }): string =>
-    path('/reports/near-expiry', { days, include_expired: true, sort: 'expiry_date', order: 'asc' }),
+  /**
+   * The batches that have already expired and nothing else, so the register's
+   * own batch count is the figure on the card. `days` is deliberately absent:
+   * the window bounds what is *about* to expire, not what already has.
+   */
+  expiredBatches: (): string =>
+    path('/reports/near-expiry', { expired_only: true, sort: 'expiry_date', order: 'asc' }),
 
   // ---- replenishment -------------------------------------------------------
 
@@ -150,7 +160,8 @@ export const drill = {
   document: (documentId: number): string => `/documents/${documentId}`,
 
   /** Open challans / deferred purchases / job work. */
-  pendingQuantities: (kind?: string | null): string => path('/pending-quantities', { kind: kind ?? undefined }),
+  pendingQuantities: (kind?: string | null): string =>
+    path('/registers/pending-quantities', { kind: kind ?? undefined }),
 
   // ---- integration + valuation --------------------------------------------
 

@@ -35,8 +35,9 @@ describe('SIDEBAR_NAV', () => {
   })
 
   it('keeps every screen the old flat NAV_ITEMS list could reach', () => {
-    // These are the paths src/layout/navigation.ts used to expose. Folding the
-    // nav into a registry must not drop one.
+    // The paths src/layout/navigation.ts used to expose. Folding the nav into a
+    // registry must not drop one — but four of them are registers now, so the
+    // screen, not the URL, is what has to stay reachable.
     const legacyPaths = [
       '/dashboard',
       '/items',
@@ -44,9 +45,9 @@ describe('SIDEBAR_NAV', () => {
       '/documents',
       '/packing-lists',
       '/reservations',
-      '/pending-quantities',
-      '/stock',
-      '/valuation',
+      '/registers/pending-quantities',
+      '/registers/stock-balances',
+      '/registers/valuation',
       '/reports',
       '/reconciliation',
       '/settings',
@@ -54,8 +55,45 @@ describe('SIDEBAR_NAV', () => {
     ]
     const reachable = new Set(collectNavLeaves().map(({ leaf }) => leaf.path))
     for (const path of legacyPaths) {
-      expect(reachable.has(path)).toBe(true)
+      expect(reachable.has(path), path).toBe(true)
     }
+  })
+
+  /**
+   * One screen, one door.
+   *
+   * The registers did not replace the plain listings, they were added beside
+   * them: three menu entries showed stock balances, two showed the ledger, and
+   * a reader who clicked the obvious "Stock › Ledger" never saw the new screen
+   * at all. Each pair below is the same data, so exactly one of the two may
+   * appear in the navigation.
+   */
+  it('never offers two nav entries for the same screen', () => {
+    const sameScreen: [string, string][] = [
+      ['/stock', '/registers/stock-balances'],
+      ['/stock/ledger', '/registers/stock-ledger'],
+      ['/stock/movements', '/registers/movement-register'],
+      ['/valuation', '/registers/valuation'],
+      ['/pending-quantities', '/registers/pending-quantities'],
+      ['/reservations', '/registers/reservations'],
+      ['/reconciliation', '/registers/reconciliation-runs'],
+    ]
+    const reachable = new Set(collectNavLeaves().map(({ leaf }) => leaf.path))
+    for (const pair of sameScreen) {
+      const doors = pair.filter((p) => reachable.has(p))
+      expect(doors.length, `${pair.join(' and ')} are both in the nav`).toBe(1)
+    }
+  })
+
+  it('lands the Stock and Valuation sections on the registers they now list', () => {
+    const stock = SIDEBAR_NAV.find((i) => i.key === 'stock')!
+    expect(stock.path).toBe('/registers/stock-balances')
+    expect(stock.megaMenu!.flatMap((c) => c.items.map((l) => l.path))).toEqual([
+      '/registers/stock-balances',
+      '/registers/stock-ledger',
+      '/registers/movement-register',
+    ])
+    expect(SIDEBAR_NAV.find((i) => i.key === 'valuation')!.path).toBe('/registers/valuation')
   })
 })
 

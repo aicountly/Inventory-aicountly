@@ -1,17 +1,17 @@
 /**
  * Who the document says it belongs to.
  *
- * Books loads a full letterhead for its exports — company name, registered
- * address, GSTIN and the uploaded logo — from its own company API
- * (reportDocumentContext.js). Inventory's Manage relay does not carry any of
- * that yet: `CompanyInfo` in `src/company/manageShapes.ts` is
- * `{cmpId, name, fyList, branches, hoId}` and there is no logo endpoint.
+ * A printed register or delivery challan carries the company's name, its
+ * registered office, its GSTIN and its logo — in India the GSTIN in particular
+ * is what an auditor looks for first, and a challan without it is a weaker
+ * document than the Books one it replaces.
  *
- * So the header degrades honestly to company name + scope line, and every
- * other field is optional in the sheet types rather than faked. When the relay
- * grows `address`, `gstin` and `logo`, this hook is the only file that changes
- * and every export picks them up at once — that is why the identity is resolved
- * here and not inline in each caller.
+ * All four come from Manage through the relay the API already allowlists
+ * (`manage/companyinfo` and `manage/company/logo`), are parsed in
+ * `company/manageShapes.ts` and held by `CompanyProvider`, so every export
+ * picks them up at once and no caller assembles its own letterhead. A company
+ * Manage has no address, GSTIN or logo for degrades to name + scope rather than
+ * faking anything.
  */
 
 import { useMemo } from 'react'
@@ -20,15 +20,16 @@ import { useScopeLabel } from '../company/useScopeLabel'
 import type { SheetIdentity } from './sheetHtml'
 
 export function useExportIdentity(): SheetIdentity {
-  const { companyName } = useCompany()
+  const { companyName, addressLines, gstin, logo } = useCompany()
   const scopeLabel = useScopeLabel()
   return useMemo<SheetIdentity>(
     () => ({
       companyName: companyName || undefined,
       scopeLabel,
-      addressLines: [],
-      logo: null,
+      addressLines: addressLines ?? [],
+      gstin: gstin || undefined,
+      logo: logo ?? null,
     }),
-    [companyName, scopeLabel],
+    [companyName, scopeLabel, addressLines, gstin, logo],
   )
 }

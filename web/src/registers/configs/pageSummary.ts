@@ -53,3 +53,25 @@ export function withPageSummary<T>(
 export function pageHint(summary: PageSummary): string {
   return summary.isWholeResult ? 'all rows' : 'this page only'
 }
+
+/**
+ * The same summary, totalled over a different set of rows.
+ *
+ * An export walks every page, so the sheet's footer and KPI cards have to be
+ * re-totalled over what it actually wrote — otherwise a printed register
+ * carries 10,000 rows under "Total (100 movements) — this page only". Hand this
+ * to `RegisterConfig.summaryForRows`; `isWholeResult` re-decides itself, so the
+ * caveat disappears from the sheet exactly when it stops being true.
+ */
+export function summaryOverRows<S extends PageSummary, T>(
+  summary: S,
+  rows: readonly T[],
+  keys: readonly string[],
+): S {
+  return {
+    ...summary,
+    pageRows: rows.length,
+    sums: sumColumns(rows, keys),
+    isWholeResult: rows.length >= summary.total,
+  }
+}

@@ -5,7 +5,7 @@ import type { ReactNode } from 'react'
 import { Badge } from './Badge'
 import type { BadgeTone } from './Badge'
 import { Card } from './Card'
-import { IconTile } from './IconTile'
+import { ICON_TILE_SIZE, IconTile } from './IconTile'
 import type { IconTone } from './IconTile'
 import { cx } from './cx'
 
@@ -42,6 +42,19 @@ export interface StatCardProps {
   to?: string
   className?: string
 }
+
+/*
+ * The four class strings that set the card's height. They are shared with
+ * StatCardSkeleton below, which is the only way the placeholder and the card
+ * can be guaranteed the same size.
+ */
+const SHELL_CLASS = 'flex flex-col gap-2 min-w-[160px]'
+const HEAD_ROW_CLASS = 'flex items-start justify-between gap-2'
+const LABEL_CLASS = 'text-[11px] font-medium text-gray-500 uppercase tracking-wide truncate'
+const VALUE_CLASS = 'mt-0.5 text-lg font-semibold tabular-nums truncate'
+const DELTA_ROW_CLASS = 'flex items-center gap-1.5 text-[11px] text-gray-500 min-h-[16px]'
+/** A line of shimmer that occupies exactly one line box of the text it replaces. */
+const BAR_CLASS = 'skeleton inline-block rounded text-transparent'
 
 /**
  * The clickable KPI card. Ported from Books so a figure means the same thing
@@ -89,9 +102,9 @@ export function StatCard({
       aria-label={to ? `Open ${label}` : undefined}
       padding="sm"
       interactive={Boolean(to)}
-      className={cx('flex flex-col gap-2 min-w-[160px]', className)}
+      className={cx(SHELL_CLASS, className)}
     >
-      <div className="flex items-start justify-between gap-2">
+      <div className={HEAD_ROW_CLASS}>
         <IconTile icon={icon} tone={tone} size="sm" />
         {badge ? (
           <Badge tone={badge.tone ?? 'success'} size="xs">
@@ -100,14 +113,14 @@ export function StatCard({
         ) : null}
       </div>
       <div className="min-w-0">
-        <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wide truncate">
+        <p className={LABEL_CLASS}>
           {label}
         </p>
-        <p className={cx('mt-0.5 text-lg font-semibold tabular-nums truncate', valueClass)}>
+        <p className={cx(VALUE_CLASS, valueClass)}>
           {value}
         </p>
       </div>
-      <div className="flex items-center gap-1.5 text-[11px] text-gray-500 min-h-[16px]">
+      <div className={DELTA_ROW_CLASS}>
         {pct != null ? (
           <>
             <span className={cx('inline-flex items-center gap-0.5 font-semibold', deltaCls)}>
@@ -119,6 +132,36 @@ export function StatCard({
         ) : (
           <span className="text-gray-400 truncate">{hint ?? '—'}</span>
         )}
+      </div>
+    </Card>
+  )
+}
+
+/**
+ * The card's own geometry, greyed out.
+ *
+ * A hand-measured `h-[104px]` cannot track the card it stands in for: it was
+ * measured at one root font size, against one type scale, and every later
+ * padding change makes the strip jump again on load. This renders the same
+ * shell, the same three rows and the same line boxes with the text made
+ * transparent, so the placeholder is exactly as tall as what replaces it.
+ */
+export function StatCardSkeleton({ className }: { className?: string }) {
+  return (
+    <Card aria-hidden padding="sm" className={cx(SHELL_CLASS, className)}>
+      <div className={HEAD_ROW_CLASS}>
+        <span className={cx('skeleton', ICON_TILE_SIZE.sm)} />
+      </div>
+      <div className="min-w-0">
+        <p className={LABEL_CLASS}>
+          <span className={cx(BAR_CLASS, 'w-16')}>&nbsp;</span>
+        </p>
+        <p className={VALUE_CLASS}>
+          <span className={cx(BAR_CLASS, 'w-20')}>&nbsp;</span>
+        </p>
+      </div>
+      <div className={DELTA_ROW_CLASS}>
+        <span className={cx(BAR_CLASS, 'w-12')}>&nbsp;</span>
       </div>
     </Card>
   )

@@ -131,15 +131,28 @@ describe('OverviewDashboard, permission gating', () => {
     // dashboard.read feeds exactly two of the eight tiles (negative stock and
     // awaiting approval). The other six have no readable source, so they are
     // not on the page at all — they are not left as permanent skeletons.
-    // At first paint all surviving tiles ARE skeletons, so count the tiles.
-    expect((html.match(/h-\[104px\]/g) ?? []).length).toBe(2)
+    // At first paint all surviving tiles ARE skeletons, so count the tiles by
+    // the KPI shell, which a tile carries loaded or loading.
+    expect((html.match(/min-w-\[160px\]/g) ?? []).length).toBe(2)
     expect(html).not.toContain('Stock value')
     expect(html).not.toContain('To reorder')
   })
 
   it('renders all eight tiles when every source is readable', async () => {
     const html = await render()
-    expect((html.match(/h-\[104px\]/g) ?? []).length).toBe(8)
+    expect((html.match(/min-w-\[160px\]/g) ?? []).length).toBe(8)
+  })
+
+  it('shows a dashboard.read user everything that payload carries', async () => {
+    // The server authorises GET /v1/dashboard on dashboard.read alone and sends
+    // the integration and reconciliation blocks to anyone who passes. Gating the
+    // widgets on integration.read / reconciliation.read as well hid data the
+    // user had already been given, and left them with one card.
+    permissions.value = new Set(['dashboard.read'])
+    const html = await render()
+    expect(html).toContain('Documents this year')
+    expect(html).toContain('Books integration')
+    expect(html).toContain('Reconciliation with Books')
   })
 
   it('explains itself to a user with no inventory access at all', async () => {

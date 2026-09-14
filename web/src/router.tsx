@@ -18,6 +18,7 @@ import { PostingStatusPage } from './pages/reconciliation/PostingStatusPage'
 import { ReconciliationLayout } from './pages/reconciliation/ReconciliationLayout'
 import { ReconciliationRunPage } from './pages/reconciliation/ReconciliationRunPage'
 import { ReconciliationRunsPage } from './pages/reconciliation/ReconciliationRunsPage'
+import { LegacyRedirect } from './registers/LegacyRedirect'
 import { RegisterRoutePage } from './registers/RegisterRoutePage'
 import { RegistersHubPage } from './registers/RegistersHubPage'
 import { ReportRoutePage } from './pages/reports/ReportRoutePage'
@@ -27,15 +28,10 @@ import { CompanySettingsPage } from './pages/settings/CompanySettingsPage'
 import { DocumentTypesPage } from './pages/settings/DocumentTypesPage'
 import { PeriodLocksPage } from './pages/settings/PeriodLocksPage'
 import { SettingsLayout } from './pages/settings/SettingsLayout'
-import { StockBalancesPage } from './pages/stock/StockBalancesPage'
-import { StockLayout } from './pages/stock/StockLayout'
-import { StockLedgerPage } from './pages/stock/StockLedgerPage'
-import { StockMovementsPage } from './pages/stock/StockMovementsPage'
 import { CostLayersPage } from './pages/valuation/CostLayersPage'
 import { RecalculationsPage } from './pages/valuation/RecalculationsPage'
 import { RevisionsPage } from './pages/valuation/RevisionsPage'
 import { ValuationLayout } from './pages/valuation/ValuationLayout'
-import { ValuationSnapshotPage } from './pages/valuation/ValuationSnapshotPage'
 
 /**
  * Authenticated route table. The portal callback (`/auth/callback`) is consumed
@@ -71,13 +67,14 @@ export function AppRoutes() {
         </Route>
 
         {renderDocumentRoutes()}
-        <Route path="stock" element={<StockLayout />}>
-          <Route index element={<StockBalancesPage />} />
-          <Route path="ledger" element={<StockLedgerPage />} />
-          <Route path="movements" element={<StockMovementsPage />} />
-        </Route>
+        {/* Stock balances, the ledger and the movement list are registers now.
+            One screen, one door: the old paths redirect rather than render a
+            second copy in a second visual language. */}
+        <Route path="stock" element={<LegacyRedirect to="/registers/stock-balances" />} />
+        <Route path="stock/ledger" element={<LegacyRedirect to="/registers/stock-ledger" />} />
+        <Route path="stock/movements" element={<LegacyRedirect to="/registers/movement-register" />} />
         <Route path="valuation" element={<ValuationLayout />}>
-          <Route index element={<ValuationSnapshotPage />} />
+          <Route index element={<LegacyRedirect to="/registers/valuation" />} />
           <Route path="cost-layers" element={<CostLayersPage />} />
           <Route path="recalculations" element={<RecalculationsPage />} />
           <Route path="revisions" element={<RevisionsPage />} />

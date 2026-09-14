@@ -11,11 +11,13 @@
  *     so no card gets a delta chip.
  *  2. **No dead numbers.** Every series item and every KPI carries a `to`, built
  *     by src/dashboard/kpiNavigation.ts from the same filters the figure was
- *     counted with.
+ *     counted with — except where the product has no screen to land on, which
+ *     is left as an absent `to` rather than a link that lies.
  */
 
 import type { AgeBucketKey, MovementAnalysisSummary, MovementClass, StockAgeingSummary, WarehouseStockSummary } from '../services/reportsApi'
 import type { DashboardData } from '../services/dashboard'
+import { labelForCode } from '../documents/registry'
 import { humanize } from '../utils/format'
 import { formatCount, formatCurrencyCompact, formatQtyCompact, percentOf } from './formatters'
 import { drill } from './kpiNavigation'
@@ -125,7 +127,9 @@ export function buildKpiCards(input: KpiInput): KpiCardSpec[] {
       numeric: s ? s.closing_qty : null,
       icon: 'qty',
       tone: 'teal',
-      hint: 'Base units across all warehouses',
+      hint: core
+        ? `Base units across ${formatCount(core.masters.warehouses.active)} active warehouses`
+        : 'Base units across all warehouses',
       to: drill.stockQty({ asOf }),
       emphasizeNegative: true,
     },
@@ -157,8 +161,8 @@ export function buildKpiCards(input: KpiInput): KpiCardSpec[] {
       numeric: negativeItems,
       icon: 'negative',
       tone: (negativeItems ?? 0) > 0 ? 'danger' : 'neutral',
-      hint: negativeRows ? `${formatCount(negativeRows)} warehouse rows below zero` : 'No item is below zero',
-      to: drill.negativeStock({ asOf }),
+      hint: negativeRows ? `${formatCount(negativeRows)} stock rows below zero` : 'No item is below zero',
+      to: drill.negativeStock(),
       attention: (negativeItems ?? 0) > 0,
     },
     {
@@ -180,7 +184,7 @@ export function buildKpiCards(input: KpiInput): KpiCardSpec[] {
       icon: 'expired',
       tone: (expiry?.expired ?? 0) > 0 ? 'danger' : 'neutral',
       hint: expiry && expiry.expired > 0 ? `${formatQtyCompact(expiry.summary.expired_qty)} units still on hand` : 'Nothing expired on hand',
-      to: drill.expiredBatches({ days: nearExpiryDays }),
+      to: drill.expiredBatches(),
       attention: (expiry?.expired ?? 0) > 0,
     },
     {
@@ -318,6 +322,33 @@ export function documentStatusSeries(byStatus: Record<string, number> | null | u
     }))
 }
 
+/**
+ * Posted documents by type — the paperwork actually raised this year, which is
+ * a different question from how many are stuck in each status. Each bar opens
+ * the document register filtered to that type.
+ */
+export function postedTypeSeries(byType: Record<string, number> | null | undefined, limit = 6): SeriesItem[] {
+  if (!byType) return []
+  const entries = Object.entries(byType).filter(([, n]) => n > 0)
+  const total = entries.reduce((acc, [, n]) => acc + n, 0)
+  const max = entries.reduce((m, [, n]) => Math.max(m, n), 0)
+  return entries
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([type, n]) => ({
+      key: type,
+      label: labelForCode(type),
+      value: n,
+      display: formatCount(n),
+      // Share of everything posted, not of the six shown, or the percentages
+      // would add up to 100 while hiding rows.
+      share: percentOf(n, total),
+      scale: max > 0 ? Math.min(100, (n / max) * 100) : 0,
+      tone: 'info' as Tone,
+      to: drill.documents({ documentType: type }),
+    }))
+}
+
 const OUTBOX_TONE: Record<string, Tone> = {
   PENDING: 'info',
   SENT: 'success',
@@ -341,6 +372,34 @@ export function outboxSeries(outbox: Record<string, number> | null | undefined):
     scale: max > 0 ? Math.min(100, (n / max) * 100) : 0,
     tone: OUTBOX_TONE[status] ?? 'neutral',
     to: drill.outbox(status),
+  }))
+}
+
+const INBOUND_TONE: Record<string, Tone> = {
+  RECEIVED: 'info',
+  PROCESSED: 'success',
+  FAILED: 'critical',
+  IGNORED: 'neutral',
+}
+
+/**
+ * Events Books sent *to* Inventory, by processing status. The sync is two-way,
+ * so a widget that shows only the outbox reports half the health of it. There
+ * is no inbound-event screen to link to, so these bars are figures only.
+ */
+export function inboundSeries(inbound: Record<string, number> | null | undefined): SeriesItem[] {
+  if (!inbound) return []
+  const entries = Object.entries(inbound).filter(([, n]) => n > 0)
+  const total = entries.reduce((acc, [, n]) => acc + n, 0)
+  const max = entries.reduce((m, [, n]) => Math.max(m, n), 0)
+  return entries.map(([status, n]) => ({
+    key: status,
+    label: humanize(status),
+    value: n,
+    display: formatCount(n),
+    share: percentOf(n, total),
+    scale: max > 0 ? Math.min(100, (n / max) * 100) : 0,
+    tone: INBOUND_TONE[status] ?? 'neutral',
   }))
 }
 

@@ -57,7 +57,13 @@ export interface SheetSummaryCard {
   label: string
   value: string
   hint?: string
-  tone?: 'default' | 'credit'
+  /**
+   * The emphasis the card carries on screen. `credit` is the house red for a
+   * figure that is wrong or negative, `warn` the amber for one that needs
+   * watching. A card the reader is meant to notice has to stay noticeable on
+   * paper, or the emphasis is the one thing the export loses.
+   */
+  tone?: 'default' | 'credit' | 'warn'
 }
 
 export interface TabularSheetOptions extends SheetIdentity {
@@ -141,9 +147,11 @@ body {
   border-radius: 10px; padding: 8px 10px; box-shadow: ${theme.cardShadow};
 }
 .kpi.credit { border-left-color: ${rgbCss(theme.red600)}; }
+.kpi.warn { border-left-color: ${rgbCss(theme.amber600)}; }
 .kpi .k { font-size: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: ${rgbCss(g[500])}; }
 .kpi .v { margin-top: 3px; font-size: 13px; font-weight: 800; color: ${rgbCss(g[900])}; font-variant-numeric: tabular-nums; }
 .kpi.credit .v { color: ${rgbCss(theme.red600)}; }
+.kpi.warn .v { color: ${rgbCss(theme.amber600)}; }
 .kpi .h { margin-top: 1px; font-size: 8.5px; color: ${rgbCss(g[500])}; }
 .table-card {
   background: #fff; border: 1px solid ${rgbCss(g[200])}; border-radius: 10px;
@@ -251,7 +259,7 @@ function summaryCardsHtml(cards: readonly SheetSummaryCard[]): string {
   return `<div class="cards">${cards
     .map(
       (c) =>
-        `<div class="kpi${c.tone === 'credit' ? ' credit' : ''}"><div class="k">${escapeHtml(
+        `<div class="kpi${c.tone && c.tone !== 'default' ? ` ${c.tone}` : ''}"><div class="k">${escapeHtml(
           c.label,
         )}</div><div class="v">${escapeHtml(c.value)}</div>${
           c.hint ? `<div class="h">${escapeHtml(c.hint)}</div>` : ''
@@ -306,10 +314,24 @@ function footBar(generatedAt: string | undefined, product: string): string {
   }</span></div>`
 }
 
-function htmlDocument(title: string, css: string, body: string): string {
+/**
+ * Font faces are per-document, so the print iframe inherits nothing from the
+ * SPA around it. Without this link the sheet asks for Nunito and Noto Sans and
+ * silently falls through to whatever the OS offers, while the PDF — which
+ * embeds both faces — comes out in the real ones. Same register, two products.
+ */
+function fontLinks(theme: ExportTheme): string {
+  if (!theme.googleFontsUrl) return ''
+  return `<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="${escapeHtml(theme.googleFontsUrl)}" rel="stylesheet" />`
+}
+
+function htmlDocument(title: string, theme: ExportTheme, css: string, body: string): string {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8" />
 <title>${escapeHtml(title)}</title>
+${fontLinks(theme)}
 <style>${css}</style>
 </head><body><div class="sheet">${body}</div></body></html>`
 }
@@ -387,6 +409,7 @@ export function buildTabularPrintHtml(options: TabularSheetOptions): string {
 
   return htmlDocument(
     title,
+    theme,
     `${pageRule(paperSize, orientation)}\n${buildSheetCss(theme)}`,
     bodyHtml,
   )
@@ -559,6 +582,7 @@ export function buildDocumentPrintHtml(options: DocumentSheetOptions): string {
 
   return htmlDocument(
     documentNo ? `${title} ${documentNo}` : title,
+    theme,
     `${pageRule(paperSize, orientation)}\n${buildSheetCss(theme)}`,
     sheets.join('<div class="page-break"></div>'),
   )

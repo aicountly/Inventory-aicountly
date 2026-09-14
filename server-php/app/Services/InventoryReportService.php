@@ -781,7 +781,7 @@ class InventoryReportService
      * Batches expiring within `days` of `as_of` (expired ones included unless include_expired = false) that
      * still have on-hand stock.
      *
-     * @param array{days?:int, as_of?:?string, include_expired?:bool, item_id?:int, warehouse_id?:int, item_grp_id?:int, stock_cat_id?:int, by_warehouse?:bool, sort?:string, order?:string} $f
+     * @param array{days?:int, as_of?:?string, include_expired?:bool, expired_only?:bool, item_id?:int, warehouse_id?:int, item_grp_id?:int, stock_cat_id?:int, by_warehouse?:bool, sort?:string, order?:string} $f
      * @return array{rows: list<array<string, mixed>>, total: int, summary: array<string, mixed>}
      */
     public function nearExpiry(int $cmpId, int $fyId, int $boId, array $f, int $limit, int $offset): array
@@ -790,12 +790,18 @@ class InventoryReportService
         $asOf = $f['as_of'] ?? null ?: date('Y-m-d');
         $days = max(0, (int) ($f['days'] ?? 30));
         $until = date('Y-m-d', strtotime($asOf . ' +' . $days . ' days'));
-        $includeExpired = !array_key_exists('include_expired', $f) || !empty($f['include_expired']);
+        $expiredOnly = !empty($f['expired_only']);
+        $includeExpired = $expiredOnly || !array_key_exists('include_expired', $f) || !empty($f['include_expired']);
         $byWh = !empty($f['by_warehouse']) || !empty($f['warehouse_id']);
 
         $where = 'bt.cmp_id = ? AND b.cmp_id = bt.cmp_id AND bt.expiry_date IS NOT NULL AND bt.expiry_date <= ?';
         $binds = [$cmpId, $until];
-        if (!$includeExpired) {
+        if ($expiredOnly) {
+            // Already gone off, not about to: the summary then counts the expired batches only,
+            // which is the figure the dashboard card shows.
+            $where .= ' AND bt.expiry_date < ?';
+            $binds[] = $asOf;
+        } elseif (!$includeExpired) {
             $where .= ' AND bt.expiry_date >= ?';
             $binds[] = $asOf;
         }
@@ -859,6 +865,7 @@ class InventoryReportService
             'days'            => $days,
             'until'           => $until,
             'include_expired' => $includeExpired,
+            'expired_only'    => $expiredOnly,
             'batches'         => (int) ($agg['batches'] ?? 0),
             'items'           => (int) ($agg['items'] ?? 0),
             'on_hand'         => round((float) ($agg['on_hand'] ?? 0), 4),

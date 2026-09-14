@@ -1,22 +1,8 @@
-import { Activity, AlertTriangle, CircleCheck, Info } from 'lucide-react'
+import { Activity } from 'lucide-react'
+import { SUMMARY_ICON, SUMMARY_TONE } from '../components/SummaryStrip'
 import type { SummaryItem } from '../components/SummaryStrip'
 import { StatCard } from '../ui/StatCard'
-import type { IconTone } from '../ui/IconTile'
 import type { StatCardSpec } from './RegisterConfig'
-
-const TONE_FOR_SUMMARY: Record<NonNullable<SummaryItem['tone']>, IconTone> = {
-  neutral: 'slate',
-  good: 'success',
-  warning: 'warning',
-  critical: 'danger',
-}
-
-const ICON_FOR_SUMMARY: Record<NonNullable<SummaryItem['tone']>, typeof Info> = {
-  neutral: Info,
-  good: CircleCheck,
-  warning: AlertTriangle,
-  critical: AlertTriangle,
-}
 
 /**
  * The register's KPI cards.
@@ -61,8 +47,8 @@ export function summaryItemsToCards(items: readonly SummaryItem[]): StatCardSpec
       label: item.label,
       value: item.value,
       hint: item.hint,
-      tone: TONE_FOR_SUMMARY[tone],
-      icon: ICON_FOR_SUMMARY[tone],
+      tone: SUMMARY_TONE[tone],
+      icon: item.icon ?? SUMMARY_ICON[tone],
       to: item.to,
     }
   })

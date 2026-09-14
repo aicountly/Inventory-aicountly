@@ -67,7 +67,7 @@ function actionsFor(asOf: string, period: { from: string; to: string }): QuickAc
       key: 'ledger',
       label: 'Stock ledger',
       hint: 'One item, every movement',
-      to: '/stock/ledger',
+      to: '/registers/stock-ledger',
       icon: History,
       permissions: [P.report('stock_ledger')],
     },

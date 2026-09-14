@@ -13,7 +13,7 @@ import { useQuery } from '../hooks/useQuery'
 import { usePageKeyboard } from '../keyboard/usePageKeyboard'
 import { errorMessage, isApiError } from '../services/api'
 import { documentsApi } from '../services/documentsApi'
-import { formatDateTime } from '../utils/format'
+import { formatGeneratedStamp } from '../utils/format'
 import { COPY_SETS, COPY_SET_LABELS, buildDocumentSheet, defaultCopySet } from '../export/documentSheet'
 import type { CopySetId } from '../export/documentSheet'
 import { DocumentSheetPreview } from '../export/DocumentSheetPreview'
@@ -89,7 +89,6 @@ export function DocumentPrintPage() {
       copies: COPY_SETS[effectiveCopySet],
       orientation: 'portrait',
       paperSize: 'A4',
-      generatedAt: formatDateTime(new Date().toISOString().replace('T', ' ')),
       theme: getExportTheme(),
     }
   }, [sheet, identity, effectiveCopySet])
@@ -98,7 +97,8 @@ export function DocumentPrintPage() {
     if (!sheetOptions) return
     setBusy('print')
     try {
-      if (!printDocumentSheet(sheetOptions)) {
+      // Stamped here, not in the memo: the sheet says when it was printed.
+      if (!printDocumentSheet({ ...sheetOptions, generatedAt: formatGeneratedStamp() })) {
         notify.error('The print sheet could not be opened. Check the browser’s popup settings.')
       }
     } finally {
@@ -110,7 +110,7 @@ export function DocumentPrintPage() {
     if (!sheetOptions || !sheet) return
     setBusy('pdf')
     try {
-      await exportDocumentPdf({ ...sheetOptions, filenameBase: sheet.filenameBase })
+      await exportDocumentPdf({ ...sheetOptions, filenameBase: sheet.filenameBase, generatedAt: formatGeneratedStamp() })
       notify.success(`${sheet.title} downloaded as PDF.`)
     } catch (err) {
       notify.error(exportErrorMessage(err, 'PDF export failed.'))

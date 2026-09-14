@@ -13,7 +13,7 @@ export function ReportsIndexPage() {
         {REPORT_CONFIGS.map((c) => (
           <ReportTile key={c.path} path={c.path} slug={c.slug} title={c.title} description={c.description} />
         ))}
-        <ReportTile path="../stock/ledger" slug="stock_ledger" title="Stock ledger" description="Every movement of one item with running quantity and value" />
+        <ReportTile path="/registers/stock-ledger" slug="stock_ledger" title="Stock ledger" description="Every movement of one item with running quantity and value" />
         <ReportTile path="../valuation" slug="valuation" title="Stock valuation" description="Closing quantity, unit cost and value per item at FIFO, LIFO, weighted average or as per the item master" />
       </div>
     </div>

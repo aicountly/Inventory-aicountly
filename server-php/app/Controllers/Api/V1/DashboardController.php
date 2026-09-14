@@ -4,6 +4,7 @@ namespace App\Controllers\Api\V1;
 
 use App\Controllers\Api\BaseController;
 use App\Services\ReconciliationService;
+use App\Services\StockBalanceService;
 
 /**
  * GET /api/v1/dashboard?near_expiry_days=30 — company / FY overview counters.
@@ -53,9 +54,10 @@ class DashboardController extends BaseController
                 $postedByType[(string) $r['document_type']] = (int) $r['cnt'];
             }
 
-            // Negative stock: items whose company-wide on-hand (all warehouses) is below zero, plus per-warehouse rows.
-            $negItems = $db->query('SELECT COUNT(*) AS cnt FROM (SELECT item_id FROM inv_stock_balances WHERE cmp_id = ? GROUP BY item_id HAVING SUM(on_hand_qty) < -0.00005) t', [$cmpId])->getRowArray() ?: [];
-            $negRows = $db->query('SELECT COUNT(*) AS cnt FROM (SELECT item_id, COALESCE(warehouse_id, 0) wh FROM inv_stock_balances WHERE cmp_id = ? GROUP BY item_id, COALESCE(warehouse_id, 0) HAVING SUM(on_hand_qty) < -0.00005) t', [$cmpId])->getRowArray() ?: [];
+            // Negative stock: items whose on-hand across the branch is below zero, plus the rows
+            // behind them. The register the card drills to counts the same way, from the same
+            // table (StockBalanceService::listBalances with ?negative=1).
+            $negative = (new StockBalanceService())->negativeStockCounts($cmpId, $boId);
 
             // Near-expiry / expired batches (active batches with an expiry date)
             $until = date('Y-m-d', strtotime($today . ' +' . $days . ' days'));
@@ -110,8 +112,8 @@ class DashboardController extends BaseController
                 'posted_by_type'    => $postedByType,
             ],
             'stock' => [
-                'negative_stock_items'      => (int) ($negItems['cnt'] ?? 0),
-                'negative_stock_warehouse_rows' => (int) ($negRows['cnt'] ?? 0),
+                'negative_stock_items'      => $negative['items'],
+                'negative_stock_warehouse_rows' => $negative['rows'],
                 'near_expiry_batches'       => (int) ($batches['near_expiry'] ?? 0),
                 'expired_batches'           => (int) ($batches['expired'] ?? 0),
                 'near_expiry_days'          => $days,

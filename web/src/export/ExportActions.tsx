@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import type { ReactNode, RefObject } from 'react'
+import { createPortal } from 'react-dom'
 import { Download, FileSpreadsheet, FileText, Printer, RefreshCw, Table2 } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { errorMessage } from '../services/api'
 import type { FetchAllResult } from '../services/listAll'
-import { formatInt } from '../utils/format'
+import { formatGeneratedStamp, formatInt } from '../utils/format'
 import type { ExportableColumn } from '../registers/registerCells'
 import { notify } from '../ui/notify'
 import type { ExportFormat, TabularExportRequest } from './exportActions'
@@ -22,7 +23,18 @@ import type { Orientation, SheetIdentity, SheetSummaryCard } from './sheetHtml'
  * Every action walks the **whole filtered result** through `fetchAll`, not the
  * page on screen. A register exported from page 1 of 17 whose footer says
  * "Total (4,182 movements)" would be a document that contradicts itself.
+ *
+ * The menu is portalled to `document.body` and positioned against the viewport
+ * rather than the toolbar, so it cannot be clipped by an ancestor's `overflow`
+ * (the register shell is `tall:overflow-hidden`) and cannot run off the left
+ * edge of a phone once the toolbar wraps.
  */
+
+/** Figures re-derived over the rows an export actually writes. */
+export interface ExportRowScopedFigures {
+  summaryCards?: readonly SheetSummaryCard[]
+  totalsText?: readonly string[] | null
+}
 
 export interface ExportActionsProps<T> {
   /** The visible columns — exactly what the table renders. */
@@ -41,8 +53,18 @@ export interface ExportActionsProps<T> {
   /** Totals as text, in column order — the server's, not the page's. */
   totalsText?: readonly string[] | null
   totalsLabel?: string
+  /**
+   * Re-derive the summary and the totals over the rows the export writes.
+   *
+   * A register whose figures are the served page (configs/pageSummary.ts) must
+   * total the whole export, or the sheet carries 10,000 rows under a footer
+   * that speaks for 100 and still says "this page only". Registers backed by a
+   * real server aggregate leave this out; their figures already cover the set.
+   */
+  forExportedRows?: (rows: readonly T[]) => ExportRowScopedFigures
   footerNotes?: readonly string[]
   orientation?: Orientation
+  /** Defaults to the local clock at the moment the export runs. */
   generatedAt?: string
   onRefresh?: () => void
   refreshing?: boolean
@@ -50,9 +72,47 @@ export interface ExportActionsProps<T> {
   /** Hide formats a screen cannot support. All four are on by default. */
   formats?: readonly ExportFormat[]
   size?: 'xs' | 'sm'
+  /**
+   * Filled with the print action so the page can bind Ctrl+P to the sheet.
+   * Without it the browser prints the app's own DOM — the on-screen page of
+   * rows, no letterhead, no totals — which is the failure the sheet builder
+   * exists to prevent.
+   */
+  printRef?: RefObject<(() => void) | null>
 }
 
 const ALL_FORMATS: readonly ExportFormat[] = ['csv', 'excel', 'pdf', 'print']
+
+const MENU_WIDTH = 208
+const MENU_GAP = 4
+const VIEWPORT_MARGIN = 8
+
+interface MenuStyle {
+  top: number
+  left: number
+  width: number
+}
+
+/**
+ * Anchor the menu to the viewport: flip it above the trigger when there is no
+ * room below, and clamp it inside both edges. Books' VoucherExportMenu does the
+ * same, and for the same reason — at ~400px the Export button sits near the
+ * left edge and a right-aligned menu would hang off the screen.
+ */
+function computeMenuStyle(anchor: HTMLElement | null, menuHeight: number): MenuStyle | null {
+  if (!anchor) return null
+  const rect = anchor.getBoundingClientRect()
+  const openUpward = window.innerHeight - rect.bottom < menuHeight + MENU_GAP + VIEWPORT_MARGIN
+  const top = openUpward ? rect.top - menuHeight - MENU_GAP : rect.bottom + MENU_GAP
+  return {
+    top: Math.max(VIEWPORT_MARGIN, Math.min(top, window.innerHeight - menuHeight - VIEWPORT_MARGIN)),
+    left: Math.max(
+      VIEWPORT_MARGIN,
+      Math.min(rect.right - MENU_WIDTH, window.innerWidth - MENU_WIDTH - VIEWPORT_MARGIN),
+    ),
+    width: MENU_WIDTH,
+  }
+}
 
 export function ExportActions<T>({
   columns,
@@ -66,6 +126,7 @@ export function ExportActions<T>({
   summaryCards,
   totalsText,
   totalsLabel,
+  forExportedRows,
   footerNotes,
   orientation = 'landscape',
   generatedAt,
@@ -74,18 +135,77 @@ export function ExportActions<T>({
   disabled = false,
   formats = ALL_FORMATS,
   size = 'xs',
+  printRef,
 }: ExportActionsProps<T>) {
   const [open, setOpen] = useState(false)
+  const [menuStyle, setMenuStyle] = useState<MenuStyle | null>(null)
   const [busy, setBusy] = useState<ExportFormat | null>(null)
+  const anchorRef = useRef<HTMLDivElement | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setMenuStyle(null)
+      return undefined
+    }
+    const update = () => {
+      setMenuStyle(computeMenuStyle(anchorRef.current, menuRef.current?.offsetHeight || 132))
+    }
+    update()
+    window.addEventListener('resize', update)
+    window.addEventListener('scroll', update, true)
+    return () => {
+      window.removeEventListener('resize', update)
+      window.removeEventListener('scroll', update, true)
+    }
+  }, [open])
+
+  // A menu that announces itself as a menu owes the reader the keyboard
+  // contract that goes with it: focus lands inside on open, arrows move within
+  // it, and Escape puts focus back where it came from.
+  const items = useCallback(
+    (): HTMLButtonElement[] =>
+      Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? []),
+    [],
+  )
+
+  const close = useCallback((restoreFocus: boolean) => {
+    setOpen(false)
+    if (restoreFocus) anchorRef.current?.querySelector('button')?.focus()
+  }, [])
 
   useEffect(() => {
     if (!open) return undefined
+    items()[0]?.focus()
     const onDocClick = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) setOpen(false)
+      const target = event.target as Node
+      if (menuRef.current?.contains(target) || anchorRef.current?.contains(target)) return
+      setOpen(false)
     }
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false)
+      const all = items()
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        close(true)
+        return
+      }
+      if (event.key === 'Tab') {
+        close(false)
+        return
+      }
+      const index = all.indexOf(document.activeElement as HTMLButtonElement)
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault()
+        if (!all.length) return
+        const step = event.key === 'ArrowDown' ? 1 : -1
+        all[(index + step + all.length) % all.length].focus()
+      } else if (event.key === 'Home') {
+        event.preventDefault()
+        all[0]?.focus()
+      } else if (event.key === 'End') {
+        event.preventDefault()
+        all[all.length - 1]?.focus()
+      }
     }
     document.addEventListener('mousedown', onDocClick)
     document.addEventListener('keydown', onKey)
@@ -93,7 +213,7 @@ export function ExportActions<T>({
       document.removeEventListener('mousedown', onDocClick)
       document.removeEventListener('keydown', onKey)
     }
-  }, [open])
+  }, [open, items, close])
 
   const run = async (format: ExportFormat) => {
     setOpen(false)
@@ -107,6 +227,8 @@ export function ExportActions<T>({
         ? `Only the first ${formatInt(result.rows.length)} rows are included — narrow the filters for the rest.`
         : undefined
 
+      const scoped = forExportedRows?.(result.rows)
+
       const request: TabularExportRequest<T> = {
         columns,
         rows: result.rows,
@@ -114,14 +236,14 @@ export function ExportActions<T>({
         title,
         description,
         metaLines: [...(metaLines ?? []), `Rows: ${formatInt(result.rows.length)}`],
-        summaryCards,
-        totalsText,
+        summaryCards: scoped?.summaryCards ?? summaryCards,
+        totalsText: scoped ? scoped.totalsText : totalsText,
         totalsLabel,
         footerNotes,
         warningNote,
         orientation,
         filenameBase: filename,
-        generatedAt,
+        generatedAt: generatedAt ?? formatGeneratedStamp(),
       }
       await runTabularExport(format, request)
     } catch (err) {
@@ -134,6 +256,54 @@ export function ExportActions<T>({
   const enabled = (format: ExportFormat) => formats.includes(format)
   const menuFormats = (['csv', 'excel', 'pdf'] as const).filter(enabled)
   const anyBusy = busy !== null
+
+  // Deliberately not memoised: `run` closes over every prop the sheet is built
+  // from, so the handle the page holds has to be this render's. It honours the
+  // same guard as the button, so Ctrl+P and the button never disagree.
+  const runPrint = () => {
+    if (disabled || anyBusy || !enabled('print')) return
+    void run('print')
+  }
+  if (printRef) printRef.current = runPrint
+
+  const menu = open ? (
+    <div
+      ref={menuRef}
+      role="menu"
+      aria-label={`Export ${title}`}
+      className="fixed z-50 overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-overlay print:hidden"
+      style={
+        menuStyle
+          ? { top: menuStyle.top, left: menuStyle.left, width: menuStyle.width }
+          : { top: -9999, left: -9999, width: MENU_WIDTH }
+      }
+    >
+      {enabled('csv') ? (
+        <MenuItem
+          icon={<Table2 className="h-4 w-4 text-sky-600" />}
+          label="CSV (.csv)"
+          hint="Raw values"
+          onClick={() => void run('csv')}
+        />
+      ) : null}
+      {enabled('excel') ? (
+        <MenuItem
+          icon={<FileSpreadsheet className="h-4 w-4 text-emerald-600" />}
+          label="Excel (.xlsx)"
+          hint="Formatted, with totals"
+          onClick={() => void run('excel')}
+        />
+      ) : null}
+      {enabled('pdf') ? (
+        <MenuItem
+          icon={<FileText className="h-4 w-4 text-red-600" />}
+          label="PDF (.pdf)"
+          hint="Letterhead, paginated"
+          onClick={() => void run('pdf')}
+        />
+      ) : null}
+    </div>
+  ) : null
 
   return (
     <div className="flex flex-wrap items-center gap-1.5 print:hidden">
@@ -151,7 +321,7 @@ export function ExportActions<T>({
       ) : null}
 
       {menuFormats.length ? (
-        <div className="relative" ref={menuRef}>
+        <div className="relative" ref={anchorRef}>
           <Button
             variant="secondary"
             size={size}
@@ -164,37 +334,7 @@ export function ExportActions<T>({
           >
             Export
           </Button>
-          {open ? (
-            <div
-              role="menu"
-              className="absolute right-0 top-full z-50 mt-1 min-w-[196px] overflow-hidden rounded-lg border border-gray-200 bg-white py-1 shadow-overlay"
-            >
-              {enabled('csv') ? (
-                <MenuItem
-                  icon={<Table2 className="h-4 w-4 text-sky-600" />}
-                  label="CSV (.csv)"
-                  hint="Raw values"
-                  onClick={() => void run('csv')}
-                />
-              ) : null}
-              {enabled('excel') ? (
-                <MenuItem
-                  icon={<FileSpreadsheet className="h-4 w-4 text-emerald-600" />}
-                  label="Excel (.xlsx)"
-                  hint="Formatted, with totals"
-                  onClick={() => void run('excel')}
-                />
-              ) : null}
-              {enabled('pdf') ? (
-                <MenuItem
-                  icon={<FileText className="h-4 w-4 text-red-600" />}
-                  label="PDF (.pdf)"
-                  hint="Letterhead, paginated"
-                  onClick={() => void run('pdf')}
-                />
-              ) : null}
-            </div>
-          ) : null}
+          {menu && typeof document !== 'undefined' ? createPortal(menu, document.body) : null}
         </div>
       ) : null}
 
@@ -203,7 +343,7 @@ export function ExportActions<T>({
           variant="secondary"
           size={size}
           icon={Printer}
-          onClick={() => void run('print')}
+          onClick={runPrint}
           loading={busy === 'print'}
           disabled={disabled || anyBusy}
           title="Print the register (Ctrl+P)"
@@ -230,7 +370,7 @@ function MenuItem({
     <button
       type="button"
       role="menuitem"
-      className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-primary-light/50"
+      className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-primary-light/50 focus-visible:bg-primary-light/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
       onClick={onClick}
     >
       <span className="shrink-0">{icon}</span>

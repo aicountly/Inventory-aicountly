@@ -20,6 +20,7 @@ import { expiryTone } from '../helpers'
 import type { ReportFilter } from '../types'
 import {
   DASH,
+  batchFilter,
   dateColumn,
   itemColumn,
   itemFilter,
@@ -196,6 +197,7 @@ export const batchStockConfig: RegisterConfig<BatchStockRow, BatchStockSummary> 
   filters: [
     itemFilter,
     warehouseFilter,
+    batchFilter,
     itemGroupFilter,
     stockCategoryFilter,
     {
@@ -278,6 +280,7 @@ export const serialStockConfig: RegisterConfig<SerialStockRow, SerialStockSummar
     { key: 'q', kind: 'text', label: 'Serial', placeholder: 'Serial number…' },
     itemFilter,
     warehouseFilter,
+    batchFilter,
     {
       key: 'status',
       kind: 'select',

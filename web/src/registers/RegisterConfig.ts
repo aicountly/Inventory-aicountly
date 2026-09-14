@@ -41,6 +41,24 @@ export interface StatCardSpec {
 /** Sections of the registers hub. */
 export type RegisterGroup = 'stock' | 'movement' | 'valuation' | 'compliance' | 'analysis'
 
+/**
+ * An in-table grouping a register offers.
+ *
+ * Grouping is a view of the rows on screen, so the subtotal is of those rows —
+ * the pinned footer stays the authority on the whole filtered set. Say so in
+ * the subtotal's own label rather than leaving a reader to assume otherwise.
+ */
+export interface RegisterGrouping<T> {
+  /** URL-free identifier, unique within the register. */
+  key: string
+  /** What the "Group by" control calls it. */
+  label: string
+  /** Which group a row belongs to, and the heading that group gets. */
+  of: (row: T) => { key: string; label: string }
+  /** Subtotal cells for one group, keyed by column key (see buildTotalsRow). */
+  subtotal?: (rows: readonly T[], group: { key: string; label: string }) => Record<string, ReactNode>
+}
+
 export interface RegisterFetchArgs {
   query: ListQuery
   signal?: AbortSignal
@@ -74,8 +92,29 @@ export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
    */
   totals?: (summary: S, rows: readonly T[]) => Record<string, ReactNode>
 
+  /**
+   * Re-derive the summary over a different set of rows.
+   *
+   * Only for the endpoints that send no aggregate, whose `summary` is the
+   * served page (`configs/pageSummary.ts`). An export walks every page, so its
+   * footer and its KPI cards have to be totalled over what it actually wrote —
+   * a printed register carrying 10,000 rows under "Total (100 movements) —
+   * this page only" is worse than one with no footer at all.
+   *
+   * Registers backed by a real server aggregate leave this undefined: their
+   * summary already speaks for the whole filtered set.
+   */
+  summaryForRows?: (summary: S, rows: readonly T[]) => S
+
   /** Clickable KPI cards above the table. Falls back to `summary` when absent. */
   kpis?: (summary: S, response: ReportResponse<T, S>) => StatCardSpec[]
+
+  /**
+   * Groupings the reader can switch between, with per-group subtotals. The
+   * engine offers "No grouping" plus one entry per item; a register with none
+   * shows no control at all.
+   */
+  groupBy?: readonly RegisterGrouping<T>[]
 
   /** Column-preference key. Defaults to `slug`. */
   columnPrefsKey?: string

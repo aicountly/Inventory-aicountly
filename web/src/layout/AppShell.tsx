@@ -36,6 +36,17 @@ export function AppShell() {
     setMobileOpen(false)
   }, [location.pathname])
 
+  // The drawer covers the page behind a scrim, and a scrim is a pointer
+  // affordance only — Escape is the keyboard's way back out.
+  useEffect(() => {
+    if (!mobileOpen) return undefined
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMobileOpen(false)
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [mobileOpen])
+
   const toggleCollapsed = useCallback(() => {
     setCollapsed((v) => {
       writeSidebarCollapsed(!v)

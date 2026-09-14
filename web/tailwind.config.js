@@ -34,6 +34,12 @@ export default {
       colors: {
         primary: 'rgb(var(--color-primary) / <alpha-value>)',
         'primary-hover': 'rgb(var(--color-primary-hover) / <alpha-value>)',
+        // The 12% wash of the primary that marks a selected or hovered surface.
+        // It is registered here, rather than hand-written in tokens.css, so that
+        // `hover:bg-primary-light/40` scales the wash instead of generating
+        // nothing at all: the modifier lands inside the calc, leaving a bare
+        // `bg-primary-light` at exactly the 0.12 it has always been.
+        'primary-light': 'rgb(var(--color-primary) / calc(0.12 * <alpha-value>))',
         nav: 'rgb(var(--color-nav) / <alpha-value>)',
         workspace: {
           bg: 'rgb(var(--workspace-bg) / <alpha-value>)',

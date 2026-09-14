@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildQuery, drill } from './kpiNavigation'
 import { REPORT_CONFIGS } from '../reports/configs'
+import { REGISTER_CONFIGS } from '../registers/configs'
 
 /**
  * The point of these tests is not that the strings look right — it is that
@@ -29,6 +30,18 @@ function assertReportLink(url: string, reportPath: string) {
   }
 }
 
+/** Same check for a native register: /registers/<path> renders through the same engine. */
+function assertRegisterLink(url: string, registerPath: string) {
+  const { path, params } = parse(url)
+  expect(path).toBe(`/registers/${registerPath}`)
+  const config = REGISTER_CONFIGS.find((c) => (c.routePath ?? c.path) === registerPath)
+  expect(config, `no register config for ${registerPath}`).toBeTruthy()
+  const allowed = new Set([...REPORT_BASE_PARAMS, ...config!.filters.map((f) => f.key)])
+  for (const key of params.keys()) {
+    expect(allowed.has(key), `${registerPath} would ignore ?${key}`).toBe(true)
+  }
+}
+
 describe('buildQuery', () => {
   it('drops empty values so a cleared filter leaves no trace', () => {
     expect(buildQuery({ a: 1, b: '', c: null, d: undefined })).toBe('?a=1')
@@ -54,7 +67,12 @@ describe('report drill-downs only use filters the report declares', () => {
     assertReportLink(drill.stockValue({ asOf }), 'stock-summary')
     assertReportLink(drill.stockQty({ asOf }), 'stock-summary')
     assertReportLink(drill.itemsInStock({ asOf }), 'stock-summary')
-    assertReportLink(drill.negativeStock({ asOf }), 'stock-summary')
+  })
+
+  it('sends negative stock to the register built on the table the card counts', () => {
+    // The card counts inv_stock_balances; the movement-derived stock summary is
+    // a different computation and would show a different set of rows.
+    assertRegisterLink(drill.negativeStock(), 'stock-balances')
   })
 
   it('warehouse stock links', () => {
@@ -73,7 +91,7 @@ describe('report drill-downs only use filters the report declares', () => {
 
   it('expiry links', () => {
     assertReportLink(drill.nearExpiry({ days: 30 }), 'near-expiry')
-    assertReportLink(drill.expiredBatches({ days: 30 }), 'near-expiry')
+    assertReportLink(drill.expiredBatches(), 'near-expiry')
   })
 
   it('replenishment links', () => {
@@ -97,16 +115,20 @@ describe('the figure and its destination agree', () => {
     expect(parse(drill.stockQty({ asOf })).params.get('sort')).toBe('closing_qty')
   })
 
-  it('puts the most negative item at the top of the negative-stock drill-down', () => {
-    const { params } = parse(drill.negativeStock({ asOf }))
-    expect(params.get('sort')).toBe('closing_qty')
+  it('filters the negative-stock drill-down to the rows below zero, most negative first', () => {
+    const { params } = parse(drill.negativeStock())
+    expect(params.get('negative')).toBe('1')
+    expect(params.get('sort')).toBe('on_hand_qty')
     expect(params.get('order')).toBe('asc')
   })
 
-  it('separates "expiring" from "expired" by the include_expired toggle', () => {
+  it('separates "expiring" from "expired": a window for one, expired-only for the other', () => {
     expect(parse(drill.nearExpiry({ days: 45 })).params.get('include_expired')).toBe('0')
     expect(parse(drill.nearExpiry({ days: 45 })).params.get('days')).toBe('45')
-    expect(parse(drill.expiredBatches({ days: 45 })).params.get('include_expired')).toBe('1')
+    // Not include_expired=1, which lists everything expiring in the window too
+    // and leaves the register unable to reproduce the card's count.
+    expect(parse(drill.expiredBatches()).params.get('expired_only')).toBe('1')
+    expect(parse(drill.expiredBatches()).params.get('days')).toBeNull()
   })
 
   it('narrows movement analysis to the class that was clicked', () => {
@@ -125,12 +147,18 @@ describe('list-screen drill-downs use each page FILTER_KEYS vocabulary', () => {
     expect(drill.document(42)).toBe('/documents/42')
   })
 
-  it('stock ledger and movements', () => {
+  it('stock ledger, movements and balances — the registers, not the retired pages', () => {
     expect(drill.itemLedger(9, { from: '2026-04-01', to: '2026-09-14' })).toBe(
-      '/stock/ledger?item_id=9&from=2026-04-01&to=2026-09-14',
+      '/registers/stock-ledger?item_id=9&from=2026-04-01&to=2026-09-14',
     )
-    expect(drill.stockMovements({ itemId: 9 })).toBe('/stock/movements?item_id=9')
-    expect(drill.stockBalances({ warehouseId: 3 })).toBe('/stock?warehouse_id=3&nonzero=1')
+    expect(drill.stockMovements({ itemId: 9 })).toBe('/registers/movement-register?item_id=9')
+    expect(drill.stockBalances({ warehouseId: 3 })).toBe(
+      '/registers/stock-balances?warehouse_id=3&nonzero=1',
+    )
+    // Every key above has to be one the destination register declares.
+    assertRegisterLink(drill.itemLedger(9, { from: '2026-04-01', to: '2026-09-14', warehouseId: 3 }), 'stock-ledger')
+    assertRegisterLink(drill.stockMovements({ itemId: 9, documentId: 44, warehouseId: 3 }), 'movement-register')
+    assertRegisterLink(drill.stockBalances({ warehouseId: 3, itemId: 9 }), 'stock-balances')
   })
 
   it('integration, valuation and reconciliation', () => {
@@ -141,8 +169,9 @@ describe('list-screen drill-downs use each page FILTER_KEYS vocabulary', () => {
   })
 
   it('pending quantities by kind', () => {
-    expect(drill.pendingQuantities('challan')).toBe('/pending-quantities?kind=challan')
-    expect(drill.pendingQuantities()).toBe('/pending-quantities')
+    expect(drill.pendingQuantities('challan')).toBe('/registers/pending-quantities?kind=challan')
+    expect(drill.pendingQuantities()).toBe('/registers/pending-quantities')
+    assertRegisterLink(drill.pendingQuantities('challan'), 'pending-quantities')
   })
 
   it('does not attach an item status filter the items list would ignore', () => {

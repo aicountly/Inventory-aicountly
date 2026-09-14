@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef } from 'react'
 import type { ReactNode } from 'react'
 import { X } from 'lucide-react'
+import { useModalKeyboard } from '../keyboard/useModalKeyboard'
 import { cx } from '../ui/cx'
 
 interface ModalProps {
@@ -26,11 +27,11 @@ const SIZE: Record<NonNullable<ModalProps['size']>, string> = {
  * Shared dialog.
  *
  * Re-skinned onto the Books design language in place — the behaviour is the
- * one Inventory already had and it is the better of the two: Escape to close,
- * body-scroll lock that restores the previous value, backdrop dismiss, a
- * `busy` guard so a save in flight cannot be interrupted, and focus moved to
- * the first control once per opening (never on a re-render, which would yank
- * focus away mid-typing). ConfirmDialog upgrades with it.
+ * one Inventory already had and it is the better of the two: backdrop dismiss,
+ * a scroll lock that restores the previous value, and a `busy` guard so a save
+ * in flight cannot be interrupted. Escape, initial focus, the Tab trap that
+ * `aria-modal` promises, and returning focus on close all come from the shared
+ * useModalKeyboard. ConfirmDialog upgrades with it.
  */
 export function Modal({
   open,
@@ -46,31 +47,20 @@ export function Modal({
   const descriptionId = useId()
   const panelRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    if (!open) return undefined
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !busy) onClose()
-    }
-    document.addEventListener('keydown', onKey)
-    const previousOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => {
-      document.removeEventListener('keydown', onKey)
-      document.body.style.overflow = previousOverflow
-    }
-  }, [open, busy, onClose])
+  // Withholding onClose is what makes `busy` hold Escape off; the trap itself
+  // must keep working, or a save in flight becomes a way out of the dialog.
+  useModalKeyboard(open, busy ? undefined : onClose, panelRef)
 
-  // Focus the first control once per opening — not on every re-render, which
-  // would yank focus away while the user is typing.
   useEffect(() => {
     if (!open) return undefined
-    const id = requestAnimationFrame(() => {
-      const first = panelRef.current?.querySelector<HTMLElement>(
-        'input:not([type=hidden]), select, textarea, button:not([data-modal-close])',
-      )
-      first?.focus()
-    })
-    return () => cancelAnimationFrame(id)
+    // The shell scrolls `main`, not the window (AppShell: `app-main … overflow-auto`),
+    // so locking the body leaves the page rolling behind the dialog.
+    const scroller = document.querySelector<HTMLElement>('.app-main') ?? document.body
+    const previousOverflow = scroller.style.overflow
+    scroller.style.overflow = 'hidden'
+    return () => {
+      scroller.style.overflow = previousOverflow
+    }
   }, [open])
 
   if (!open) return null

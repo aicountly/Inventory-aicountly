@@ -9,6 +9,7 @@ import { KpiStrip } from './components/KpiStrip'
 import { MiniTable } from './components/MiniTable'
 import type { MiniColumn } from './components/MiniTable'
 import { WidgetCard } from './components/WidgetCard'
+import { DocumentsWidget, IntegrationWidget } from './widgets/OpsWidgets'
 import { buildKpiCards } from './model'
 import type { SeriesItem } from './model'
 
@@ -153,23 +154,91 @@ describe('MiniTable', () => {
     { id: 2, name: 'Gadget' },
   ]
 
-  it('makes rows keyboard-reachable when they lead somewhere', () => {
+  it('puts a real link in each row that leads somewhere', () => {
     const html = render(
       createElement(MiniTable<Row>, { columns, rows, rowKey: (r) => r.id, to: (r) => `/stock/ledger?item_id=${r.id}` }),
     )
-    expect((html.match(/role="link"/g) ?? []).length).toBe(2)
-    expect((html.match(/tabindex="0"/gi) ?? []).length).toBe(2)
+    // An <a href> is what middle-click, Ctrl-click and the status bar need; a
+    // <tr role="link"> gives none of them.
+    expect(hrefs(html)).toEqual(['/stock/ledger?item_id=1', '/stock/ledger?item_id=2'])
+    // The row keeps its implicit row role, so the table still reads as a table.
+    expect(html).not.toContain('role="link"')
+  })
+
+  it('names each link after the row, never after its position', () => {
+    const html = render(
+      createElement(MiniTable<Row>, {
+        columns,
+        rows,
+        rowKey: (r) => r.id,
+        to: (r) => `/stock/ledger?item_id=${r.id}`,
+        rowLabel: (r) => `${r.name} — stock ledger`,
+      }),
+    )
+    expect(html).toContain('aria-label="Widget — stock ledger"')
+    expect(html).toContain('aria-label="Gadget — stock ledger"')
+    expect(html).not.toContain('Open row')
   })
 
   it('leaves rows inert when there is nowhere to go', () => {
     const html = render(createElement(MiniTable<Row>, { columns, rows, rowKey: (r) => r.id }))
     expect(html).not.toContain('role="link"')
+    expect(hrefs(html)).toEqual([])
   })
 
   it('keeps the header sticky and right-aligns numeric columns', () => {
     const html = render(createElement(MiniTable<Row>, { columns, rows, rowKey: (r) => r.id }))
     expect(html).toContain('sticky top-0')
     expect(html).toContain('text-right tabular-nums')
+  })
+})
+
+describe('the ops widgets render the whole payload', () => {
+  const payload = {
+    as_of: '2026-09-14',
+    fy_id: 3,
+    bo_id: 0,
+    masters: { items: { total: 120, active: 110 }, warehouses: { total: 4, active: 4 } },
+    documents: {
+      total: 42,
+      by_status: { POSTED: 30, FAILED: 4 },
+      pending_approval: 5,
+      failed: 4,
+      posted_by_type: { SALES_ISSUE: 20, PURCHASE_RECEIPT: 10 },
+    },
+    stock: {
+      negative_stock_items: 2,
+      negative_stock_warehouse_rows: 3,
+      near_expiry_batches: 7,
+      expired_batches: 1,
+      near_expiry_days: 30,
+      pending_quantities: { challan: 4 },
+    },
+    integration: {
+      outbox: { PENDING: 6, ACKED: 38 },
+      outbox_pending: 6,
+      outbox_failed: 0,
+      inbound: { RECEIVED: 10, PROCESSED: 9, FAILED: 1, IGNORED: 0 },
+      unacknowledged_revisions: { count: 0, delta_total: 0 },
+      recalculations_in_progress: 0,
+    },
+    last_reconciliation: null,
+  }
+  const query = { data: payload, loading: false, error: null, reload: () => {} }
+
+  it('keeps "Posted, by type" on the documents card', () => {
+    /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+    const html = render(createElement(DocumentsWidget, { query } as any))
+    expect(html).toContain('Posted, by type')
+    expect(hrefs(html)).toContain('/documents?document_type=SALES_ISSUE')
+  })
+
+  it('shows both directions of the Books sync, not just the outbox', () => {
+    /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+    const html = render(createElement(IntegrationWidget, { query } as any))
+    expect(html).toContain('Outbound to Books')
+    expect(html).toContain('Inbound from Books')
+    expect(html).toContain('Processed')
   })
 })
 

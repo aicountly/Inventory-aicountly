@@ -1,8 +1,9 @@
-import { useCallback, useMemo, useRef } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { FileSearch, ListFilter } from 'lucide-react'
 import { useAccess } from '../access/AccessContext'
 import { useCompany } from '../company/CompanyContext'
+import { useScopeLabel } from '../company/useScopeLabel'
 import { RequirePermission } from '../components/RequirePermission'
 import { ConfigureColumns } from '../registers/ConfigureColumns'
 import { RegisterFilterBar } from '../registers/RegisterFilterBar'
@@ -14,7 +15,7 @@ import {
   registerColumnPrefsKey,
   registerPermission,
 } from '../registers/RegisterConfig'
-import type { RegisterConfig } from '../registers/RegisterConfig'
+import type { RegisterConfig, StatCardSpec } from '../registers/RegisterConfig'
 import { useListParams } from '../hooks/useListParams'
 import { useQuery } from '../hooks/useQuery'
 import type { ListQuery } from '../services/api'
@@ -22,16 +23,44 @@ import { fetchAllRows } from '../services/listAll'
 import { fetchReport } from '../services/reportsApi'
 import type { ReportResponse } from '../services/reportsApi'
 import { EmptyState } from '../ui/EmptyState'
+import { FilterField } from '../ui/shell/FilterBar'
+import { Select } from '../ui/Select'
 import { ExportActions } from '../export/ExportActions'
+import type { SheetSummaryCard } from '../export/sheetHtml'
 import { slugifyExportFilename } from '../export/exportActions'
 import { useExportIdentity } from '../export/useExportIdentity'
 import { ReportListShell } from '../ui/shell/ReportListShell'
 import { ServerTablePagination } from '../ui/shell/TablePagination'
 import { SmartTable } from '../ui/shell/SmartTable'
 import { REPORT_TABLE_PROPS } from '../styles/designTokens'
-import { formatDateTime, todayIso } from '../utils/format'
+import type { IconTone } from '../ui/IconTile'
+import { todayIso } from '../utils/format'
 import { filterUrlKeys, resolveFilterValues } from './helpers'
 import type { FilterContext } from './types'
+
+/**
+ * The emphasis a KPI carries, in the vocabulary the sheet understands.
+ *
+ * A Negative stock or Expiry register puts its one alarming figure in red, and
+ * that is the figure the reader is meant to find. Dropping the tone on the way
+ * to paper prints it in the same black as everything else.
+ */
+const SHEET_TONE: Partial<Record<IconTone, SheetSummaryCard['tone']>> = {
+  danger: 'credit',
+  rose: 'credit',
+  warning: 'warn',
+}
+
+function toSheetCards(cards: readonly StatCardSpec[]): SheetSummaryCard[] {
+  return cards
+    .filter((card) => typeof card.value === 'string' || typeof card.value === 'number')
+    .map((card) => ({
+      label: card.label,
+      value: String(card.value),
+      hint: typeof card.hint === 'string' ? card.hint : undefined,
+      tone: (card.tone && SHEET_TONE[card.tone]) || undefined,
+    }))
+}
 
 /**
  * The register engine.
@@ -58,6 +87,12 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
   const { can } = useAccess()
   const navigate = useNavigate()
   const searchInputRef = useRef<HTMLInputElement | null>(null)
+
+  const scopeLabel = useScopeLabel()
+  // Filled by ExportActions so Ctrl+P prints the letterheaded sheet rather than
+  // whatever slice of the app DOM happens to be on screen.
+  const printRef = useRef<(() => void) | null>(null)
+  const runPrint = useCallback(() => printRef.current?.(), [])
 
   const permission = useMemo(() => registerPermission(config), [config])
   const allowed = can(permission)
@@ -118,6 +153,30 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
   )
 
   const rows = useMemo(() => result.data?.data ?? [], [result.data])
+
+  // ---- grouping ------------------------------------------------------------
+  // A view of the rows on screen, not a second query: the reader picks it, the
+  // page keeps it, and nothing about the request changes. Kept out of the URL
+  // for that reason — it is not part of the question the server was asked.
+  const [groupKey, setGroupKey] = useState('')
+  const grouping = useMemo(
+    () => config.groupBy?.find((g) => g.key === groupKey) ?? null,
+    [config.groupBy, groupKey],
+  )
+
+  // Group rows have to be adjacent to be a group. Sorting here, rather than in
+  // the table, keeps the reader's sort column intact inside each group.
+  const tableRows = useMemo(() => {
+    if (!grouping) return rows
+    const order = new Map<string, number>()
+    for (const row of rows) {
+      const g = grouping.of(row)
+      if (!order.has(g.key)) order.set(g.key, order.size)
+    }
+    return [...rows].sort(
+      (a, b) => (order.get(grouping.of(a).key) ?? 0) - (order.get(grouping.of(b).key) ?? 0),
+    )
+  }, [rows, grouping])
   const summary = result.data?.summary
 
   // ---- columns -------------------------------------------------------------
@@ -192,22 +251,32 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
     [visibleColumns, totals],
   )
 
-  const printSummaryCards = useMemo(
-    () =>
-      kpiCards
-        .filter((card) => typeof card.value === 'string' || typeof card.value === 'number')
-        .map((card) => ({
-          label: card.label,
-          value: String(card.value),
-          hint: typeof card.hint === 'string' ? card.hint : undefined,
-        })),
-    [kpiCards],
+  // Registers whose figures are the served page have to re-total whatever the
+  // export walked, or the sheet carries every row under a footer that speaks
+  // for one page — and still labels it "this page only".
+  const summaryForRows = config.summaryForRows
+  const forExportedRows = useCallback(
+    (all: readonly T[]) => {
+      if (!summaryForRows || summary === undefined || !result.data) return {}
+      const rescoped = summaryForRows(summary, all)
+      const response: ReportResponse<T, S> = { ...result.data, data: [...all], summary: rescoped }
+      const cards = config.kpis
+        ? config.kpis(rescoped, response)
+        : summaryItemsToCards(config.summary(rescoped, response))
+      return {
+        summaryCards: toSheetCards(cards),
+        totalsText: config.totals ? totalsRowToText(visibleColumns, config.totals(rescoped, all)) : null,
+      }
+    },
+    [summaryForRows, summary, config, result.data, visibleColumns],
   )
+
+  const printSummaryCards = useMemo(() => toSheetCards(kpiCards), [kpiCards])
 
   const filenameBase = config.filenameBase ?? config.slug
 
-  // The identity the exported letterhead carries: company, scope, and (once
-  // the Manage relay carries them) address, GSTIN and logo.
+  // Company, scope, registered office, GSTIN and logo — the letterhead every
+  // export and every printed sheet carries.
   const identity = useExportIdentity()
 
   // Label for the printed totals row when the register's own totals map leaves
@@ -242,8 +311,9 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
         summaryCards={printSummaryCards}
         totalsText={printTotals}
         totalsLabel={totalsLabel}
+        forExportedRows={summaryForRows ? forExportedRows : undefined}
         orientation={config.printOrientation ?? 'landscape'}
-        generatedAt={formatDateTime(new Date().toISOString().replace('T', ' '))}
+        printRef={printRef}
         onRefresh={result.reload}
         refreshing={result.loading}
         disabled={!result.data || result.data.meta.total === 0}
@@ -260,7 +330,9 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
       headerActions={headerActions}
       searchInputRef={searchInputRef}
       onRefresh={result.reload}
+      onPrint={runPrint}
       backTo="/registers"
+      scope={scopeLabel}
       filters={
         <RegisterFilterBar
           filters={config.filters}
@@ -272,6 +344,25 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
           showReset={Object.keys(state.filters).length > 0}
           ctx={ctx}
           searchInputRef={searchInputRef}
+          trailing={
+            config.groupBy?.length ? (
+              <FilterField label="Group by">
+                <Select
+                  value={groupKey}
+                  onChange={(e) => setGroupKey(e.target.value)}
+                  aria-label="Group by"
+                  className="w-auto min-w-[9rem]"
+                >
+                  <option value="">No grouping</option>
+                  {config.groupBy.map((g) => (
+                    <option key={g.key} value={g.key}>
+                      {g.label}
+                    </option>
+                  ))}
+                </Select>
+              </FilterField>
+            ) : undefined
+          }
         />
       }
       summary={kpiCards.length ? <RegisterKpis cards={kpiCards} /> : undefined}
@@ -291,15 +382,17 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
           <SmartTable
             {...REPORT_TABLE_PROPS}
             columns={visibleColumns}
-            rows={rows}
+            rows={tableRows}
             rowKey={config.rowKey}
+            rowGroup={grouping ? (row) => grouping.of(row) : undefined}
+            groupSubtotal={grouping?.subtotal}
             loading={result.loading}
             error={result.error}
             sort={{ key: state.sort, order: state.order }}
             onSort={params.toggleSort}
             onRowActivate={onRowActivate}
             isRowActivatable={isRowActivatable}
-            keyboardResetKey={[state.page, state.sort, state.order, columnsKey]}
+            keyboardResetKey={[state.page, state.sort, state.order, columnsKey, groupKey]}
             searchInputRef={searchInputRef}
             rowClassName={config.rowClassName ? (row) => config.rowClassName?.(row) : undefined}
             totals={totals}

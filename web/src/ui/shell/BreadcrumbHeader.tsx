@@ -21,6 +21,8 @@ export interface BreadcrumbHeaderProps {
   /** Esc navigates to backTo, else the breadcrumb parent. */
   escBack?: boolean
   escOnBack?: () => void
+  /** Unsaved edits on the page: Esc asks before leaving instead of discarding. */
+  escDirty?: boolean
   /** One row — breadcrumbs · toolbar · actions. What every register uses. */
   compact?: boolean
   className?: string
@@ -39,6 +41,7 @@ export function BreadcrumbHeader({
   backLabel,
   escBack = true,
   escOnBack,
+  escDirty = false,
   compact = false,
   className,
 }: BreadcrumbHeaderProps) {
@@ -47,6 +50,7 @@ export function BreadcrumbHeader({
     breadcrumbs,
     onBack: escOnBack,
     enabled: escBack !== false,
+    dirty: escDirty,
   })
 
   if (compact) {
@@ -59,6 +63,7 @@ export function BreadcrumbHeader({
             <h1 className="text-lg font-semibold text-gray-900 truncate">{title}</h1>
           )}
         </div>
+        {badge ? <span className="shrink-0">{badge}</span> : null}
         {toolbar ? (
           <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[12rem]">{toolbar}</div>
         ) : null}

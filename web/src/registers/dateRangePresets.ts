@@ -18,7 +18,7 @@
  * agent lands theirs later, delete one and re-point the import.
  */
 
-export type DateRangePresetGroup = 'quick' | 'month' | 'quarter' | 'year' | 'special'
+export type DateRangePresetGroup = 'quick' | 'month' | 'quarter' | 'half' | 'year' | 'special'
 
 export interface DateRangePreset {
   id: string
@@ -44,19 +44,38 @@ export const CUSTOM_PRESET_ID = 'custom'
 export const ALL_DATES_PRESET_ID = 'all'
 export const DEFAULT_DATE_PRESET_ID = 'fy'
 
+/**
+ * The same vocabulary, in the same order and the same Title Case, as
+ * books-react-app/web/src/utils/dateRangePresets.js — the period dropdown is
+ * the most-used control on a register, and a reader moving between the two
+ * products must not have to learn a second set of names.
+ *
+ * The three additions Books does not have (Last 7 / 30 / 90 Days) are kept:
+ * they answer "what moved lately", which is a stock question rather than an
+ * accounting one.
+ */
 export const DATE_RANGE_PRESETS: readonly DateRangePreset[] = [
   { id: 'today', label: 'Today', group: 'quick' },
   { id: 'yesterday', label: 'Yesterday', group: 'quick' },
-  { id: 'last_7', label: 'Last 7 days', group: 'quick' },
-  { id: 'last_30', label: 'Last 30 days', group: 'quick' },
-  { id: 'last_90', label: 'Last 90 days', group: 'quick' },
-  { id: 'this_month', label: 'This month', group: 'month' },
-  { id: 'last_month', label: 'Last month', group: 'month' },
-  { id: 'this_quarter', label: 'This quarter', group: 'quarter' },
-  { id: 'last_quarter', label: 'Last quarter', group: 'quarter' },
+  { id: 'this_week', label: 'This Week', group: 'quick' },
+  { id: 'this_week_to_date', label: 'This Week-to-date', group: 'quick' },
+  { id: 'last_week', label: 'Last Week', group: 'quick' },
+  { id: 'last_7', label: 'Last 7 Days', group: 'quick' },
+  { id: 'last_30', label: 'Last 30 Days', group: 'quick' },
+  { id: 'last_90', label: 'Last 90 Days', group: 'quick' },
+  { id: 'this_month', label: 'This Month', group: 'month' },
+  { id: 'this_month_to_date', label: 'This Month-to-date', group: 'month' },
+  { id: 'last_month', label: 'Last Month', group: 'month' },
+  { id: 'this_quarter', label: 'This Quarter (FY)', group: 'quarter' },
+  { id: 'this_quarter_to_date', label: 'This Quarter-to-date (FY)', group: 'quarter' },
+  { id: 'last_quarter', label: 'Last Quarter (FY)', group: 'quarter' },
+  { id: 'this_half_year', label: 'This Half Year (FY)', group: 'half' },
+  { id: 'this_half_year_to_date', label: 'This Half Year-to-date (FY)', group: 'half' },
+  { id: 'last_half_year', label: 'Last Half Year (FY)', group: 'half' },
   { id: DEFAULT_DATE_PRESET_ID, label: 'This FY', group: 'year' },
-  { id: 'fy_to_date', label: 'FY to date', group: 'year' },
-  { id: ALL_DATES_PRESET_ID, label: 'All dates', group: 'special' },
+  { id: 'fy_to_date', label: 'This FY-to-date', group: 'year' },
+  { id: 'last_fy', label: 'Last FY', group: 'year' },
+  { id: ALL_DATES_PRESET_ID, label: 'All Dates', group: 'special' },
   { id: CUSTOM_PRESET_ID, label: 'Custom…', group: 'special' },
 ]
 
@@ -112,18 +131,47 @@ export function endOfMonth(iso: string): string {
   return p ? build(p.y, p.m, daysInMonth(p.y, p.m)) : ''
 }
 
-/** Calendar quarters (Jan-Mar, Apr-Jun, …), not financial ones. */
-export function startOfQuarter(iso: string): string {
-  const p = parts(iso)
-  if (!p) return ''
-  return build(p.y, Math.floor((p.m - 1) / 3) * 3 + 1, 1)
+/** Whole months from `from` to `iso`, signed. */
+function monthsBetween(from: string, iso: string): number | null {
+  const a = parts(from)
+  const b = parts(iso)
+  if (!a || !b) return null
+  return (b.y - a.y) * 12 + (b.m - a.m)
 }
 
-export function endOfQuarter(iso: string): string {
-  const p = parts(iso)
-  if (!p) return ''
-  const m = Math.floor((p.m - 1) / 3) * 3 + 3
-  return build(p.y, m, daysInMonth(p.y, m))
+/**
+ * The start of the financial period of `size` months that `iso` falls in,
+ * counted from the financial year's own first month.
+ *
+ * Anchored to `fyFrom` and never to January: Manage owns the financial year, and
+ * for a company whose year starts in July "this quarter" is Jul-Sep, not the
+ * calendar Jul-Sep that only coincides by accident. Books labels these "(FY)"
+ * for the same reason; it can hardcode April because it is India-only, this
+ * cannot because Manage says what the year is.
+ */
+function startOfFyPeriod(iso: string, fyFrom: string, size: number): string {
+  const k = monthsBetween(fyFrom, startOfMonth(iso))
+  if (k === null) return ''
+  return startOfMonth(shiftMonths(fyFrom, Math.floor(k / size) * size))
+}
+
+function endOfFyPeriod(iso: string, fyFrom: string, size: number): string {
+  const start = startOfFyPeriod(iso, fyFrom, size)
+  return start ? endOfMonth(shiftMonths(start, size - 1)) : ''
+}
+
+/** Monday-start weeks, as Books uses. */
+export function startOfWeek(iso: string): string {
+  const day = toDayNumber(iso)
+  if (day === null) return ''
+  // Day 0 of the epoch was a Thursday, so +4 puts Sunday at 0.
+  const dow = (((day + 4) % 7) + 7) % 7
+  return fromDayNumber(day + (dow === 0 ? -6 : 1 - dow))
+}
+
+export function endOfWeek(iso: string): string {
+  const start = startOfWeek(iso)
+  return start ? addDays(start, 6) : ''
 }
 
 function shiftMonths(iso: string, months: number): string {
@@ -174,17 +222,37 @@ export function getDateRangeForPreset(
       return { from: addDays(today, -29), to: today }
     case 'last_90':
       return { from: addDays(today, -89), to: today }
+    case 'this_week':
+      return { from: startOfWeek(today), to: endOfWeek(today) }
+    case 'this_week_to_date':
+      return { from: startOfWeek(today), to: today }
+    case 'last_week': {
+      const prev = addDays(startOfWeek(today), -1)
+      return { from: startOfWeek(prev), to: endOfWeek(prev) }
+    }
     case 'this_month':
       return { from: startOfMonth(today), to: endOfMonth(today) }
+    case 'this_month_to_date':
+      return { from: startOfMonth(today), to: today }
     case 'last_month': {
       const prev = shiftMonths(startOfMonth(today), -1)
       return { from: startOfMonth(prev), to: endOfMonth(prev) }
     }
     case 'this_quarter':
-      return { from: startOfQuarter(today), to: endOfQuarter(today) }
+      return { from: startOfFyPeriod(today, fyFrom, 3), to: endOfFyPeriod(today, fyFrom, 3) }
+    case 'this_quarter_to_date':
+      return { from: startOfFyPeriod(today, fyFrom, 3), to: today }
     case 'last_quarter': {
-      const prev = shiftMonths(startOfQuarter(today), -3)
-      return { from: startOfQuarter(prev), to: endOfQuarter(prev) }
+      const prev = addDays(startOfFyPeriod(today, fyFrom, 3), -1)
+      return { from: startOfFyPeriod(prev, fyFrom, 3), to: endOfFyPeriod(prev, fyFrom, 3) }
+    }
+    case 'this_half_year':
+      return { from: startOfFyPeriod(today, fyFrom, 6), to: endOfFyPeriod(today, fyFrom, 6) }
+    case 'this_half_year_to_date':
+      return { from: startOfFyPeriod(today, fyFrom, 6), to: today }
+    case 'last_half_year': {
+      const prev = addDays(startOfFyPeriod(today, fyFrom, 6), -1)
+      return { from: startOfFyPeriod(prev, fyFrom, 6), to: endOfFyPeriod(prev, fyFrom, 6) }
     }
     case DEFAULT_DATE_PRESET_ID:
       return { from: fyFrom, to: fyTo }
@@ -192,6 +260,10 @@ export function getDateRangeForPreset(
       // Never past today: a register that runs to the end of a future FY reads
       // as though the missing months had no movements, which is a lie.
       return { from: fyFrom, to: min(fyTo, today) || fyTo }
+    case 'last_fy':
+      // The year-on-year comparison, off the real year Manage gave us rather
+      // than a guess at where April falls.
+      return { from: shiftMonths(fyFrom, -12), to: shiftMonths(fyTo, -12) }
     default:
       return null
   }

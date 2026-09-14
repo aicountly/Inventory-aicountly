@@ -83,8 +83,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={api}>
       {children}
+      {/* Clears the sticky topbar (h-12) rather than covering the dark toggle,
+          the appearance button and the user menu for the four and a half
+          seconds a toast lives. `pointer-events-none` is what keeps the gaps
+          between stacked toasts from swallowing clicks on whatever is under
+          them; each toast turns pointer events back on for itself. */}
       <div
-        className="aic toast-viewport fixed top-3 right-3 z-[120] flex w-[min(24rem,calc(100vw-1.5rem))] flex-col gap-2 print:hidden"
+        className="aic toast-viewport pointer-events-none fixed top-14 right-3 z-[120] flex w-[min(24rem,calc(100vw-1.5rem))] flex-col gap-2 print:hidden"
         aria-live="polite"
         aria-atomic="false"
       >

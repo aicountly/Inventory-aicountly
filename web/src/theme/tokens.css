@@ -9,14 +9,10 @@
  * Every colour is a space-separated RGB triple consumed as
  * `rgb(var(--x) / <alpha>)`. Never put a hex value in a component.
  *
- * Two deliberate differences from the Books original, both marked below:
- *   1. `--font-size-base` is still 16px here. Books rem-scales its whole app off
- *      13px; Inventory's legacy stylesheets are written against a 16px root, so
- *      flipping it now would shrink every un-converted screen. One-line change
- *      when the last legacy stylesheet retires.
- *   2. Tailwind preflight is off (see tailwind.config.js). The equivalent reset
- *      lives at the bottom of this file, scoped under `.aic` and written with
- *      :where() so it carries zero specificity and every utility still wins.
+ * One deliberate difference from the Books original: Tailwind preflight is off
+ * (see tailwind.config.js). The equivalent reset lives at the bottom of this
+ * file, scoped under `.aic` and written with :where() so it carries zero
+ * specificity and every utility still wins.
  */
 :root,
 [data-theme='default'] {
@@ -42,8 +38,10 @@
   --color-border-strong: 203 213 225;
 
   --font-family: 'Nunito', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  /* Books: 13px. See note 1 above. */
-  --font-size-base: 16px;
+  /* This is the first paint, before any script runs, so it has to be the size
+     ThemeProvider's default zoom resolves to — otherwise the whole app is
+     painted at one size and reflowed to another the moment React mounts. */
+  --font-size-base: 13px;
   --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04);
   --shadow-overlay: 0 16px 40px -12px rgba(15, 23, 42, 0.18), 0 4px 12px rgba(15, 23, 42, 0.08);
   --shadow-sticky: 0 -1px 2px rgba(15, 23, 42, 0.04);
@@ -250,12 +248,6 @@ body {
   .border-primary {
     border-color: rgb(var(--color-primary));
   }
-  .bg-primary-light {
-    background-color: rgb(var(--color-primary) / 0.12);
-  }
-  .hover\:bg-primary-light:hover {
-    background-color: rgb(var(--color-primary) / 0.12);
-  }
   .bg-brand-surface {
     background-color: rgb(var(--color-primary-light));
   }
@@ -418,6 +410,13 @@ body {
     border: 0 solid rgb(var(--color-border));
   }
 
+  /* Preflight's `html` leading, which Books gets from the real preflight. On
+     the reset root only: on every element it would override the leading a
+     parent's type scale hands down to its children. */
+  :where(.aic) {
+    line-height: 1.5;
+  }
+
   :where(.aic) :where(h1, h2, h3, h4, h5, h6) {
     font-size: inherit;
     font-weight: inherit;
@@ -512,15 +511,81 @@ body {
     background: #fff !important;
   }
 
+  /* Only a row may refuse to break. Asking a 500-row register table to stay on
+     one page is asking for one page of rows and 499 lost ones. */
   .print-break-inside-avoid,
-  .aic table,
   .aic tr {
     break-inside: avoid;
     page-break-inside: avoid;
   }
 
-  * {
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
+  .aic thead {
+    display: table-header-group;
+  }
+
+  .aic tfoot {
+    display: table-footer-group;
+  }
+
+  /* A scrolling body is a screen affordance. Paper has no viewport, so every
+     box that clips or caps its height opens up — otherwise a printed register
+     is whichever screenful happened to be visible when Ctrl+P was pressed. */
+  [class*='overflow-'],
+  [class*='max-h-'],
+  [class*='h-full'],
+  [class*='h-[calc'],
+  .print-expand {
+    overflow: visible !important;
+    max-height: none !important;
+    height: auto !important;
+  }
+
+  /* Paper has no dark mode. The dark palette would print near-black surfaces
+     under near-white text, so every neutral goes back to its light value for
+     the duration of the print — the nav colour with them, because on screen it
+     is a pale blue that white paper swallows. */
+  :root,
+  .dark {
+    color-scheme: light;
+    --workspace-bg: 245 247 250;
+    --color-nav: 0 63 133;
+
+    --color-surface: 255 255 255;
+    --color-surface-2: 246 248 250;
+    --color-surface-3: 238 242 245;
+    --color-fg: 15 23 42;
+    --color-fg-strong: 2 6 23;
+    --color-fg-muted: 100 116 139;
+    --color-fg-subtle: 148 163 184;
+    --color-border: 226 232 240;
+    --color-border-strong: 203 213 225;
+
+    --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04);
+    --shadow-overlay: 0 16px 40px -12px rgba(15, 23, 42, 0.18), 0 4px 12px rgba(15, 23, 42, 0.08);
+    --shadow-sticky: 0 -1px 2px rgba(15, 23, 42, 0.04);
+  }
+
+  /* The accent the reader picked does travel to paper, so the accent tokens are
+     left alone above — every [data-theme] already supplies a light wash, and a
+     reset at `.dark` level would win on source order and print a red company's
+     register in green. Only the default palette still holds a dark wash in dark
+     mode, and `:not([data-theme])` keeps this rule to exactly that case. */
+  .dark:not([data-theme]),
+  .dark[data-theme='default'] {
+    --color-primary-light: 233 252 233;
+    --color-secondary: 21 128 61;
+  }
+
+  /* Ink the parts that carry meaning — a status badge, a totals row, a KPI
+     accent — rather than every element on the sheet. */
+  .aic thead th,
+  .aic tfoot td,
+  .badge,
+  .status-badge,
+  [class*='bg-'],
+  [class*='text-'],
+  [class*='border-'] {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 }

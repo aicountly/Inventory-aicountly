@@ -47,6 +47,22 @@ export function formatDateTime(value: unknown, empty = '—'): string {
   return `${formatDate(value, empty)}, ${m[4]}:${m[5]}`
 }
 
+/**
+ * `15 Sep 2026, 09:00` — *now*, on the reader's own clock.
+ *
+ * Everything else here formats a timestamp the server already sent in company
+ * time. This one stamps the moment a document is printed, signed and handed
+ * over, so it has to read as the clock on the wall: taken from the UTC instant
+ * it is 5h30m out in India, and anything printed after 18:30 IST carries
+ * yesterday's date on paper.
+ */
+export function formatGeneratedStamp(now: Date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return formatDateTime(
+    `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`,
+  )
+}
+
 /** `physical_adjustment` → `Physical adjustment`. */
 export function humanize(value: unknown): string {
   const s = value === null || value === undefined ? '' : String(value).trim()

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { FileStack, Scale, Send } from 'lucide-react'
 import { Badge } from '../../ui/Badge'
@@ -9,8 +10,9 @@ import { WidgetCard } from '../components/WidgetCard'
 import type { WidgetState } from '../components/WidgetCard'
 import { formatCount, formatCurrencyCompact, plural } from '../formatters'
 import { drill } from '../kpiNavigation'
-import { documentStatusSeries, outboxSeries, pendingSeries } from '../model'
+import { documentStatusSeries, inboundSeries, outboxSeries, pendingSeries, postedTypeSeries } from '../model'
 import type { DashboardData, DashboardReconciliationRun } from '../../services/dashboard'
+import { RECALC_IN_PROGRESS } from '../../services/valuationApi'
 
 interface Loadable<T> {
   data: T | null
@@ -35,6 +37,13 @@ function state<T>(q: Loadable<T>, empty: boolean): WidgetState {
   }
 }
 
+/** Caption over one half of a two-part widget body. */
+function SectionLabel({ children }: { children: ReactNode }) {
+  return (
+    <p className="text-label-xs uppercase tracking-wide text-gray-400 mb-1">{children}</p>
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Documents
 // ---------------------------------------------------------------------------
@@ -42,6 +51,7 @@ function state<T>(q: Loadable<T>, empty: boolean): WidgetState {
 export function DocumentsWidget({ query }: { query: Loadable<DashboardData> }) {
   const data = query.data
   const statuses = documentStatusSeries(data?.documents.by_status)
+  const postedTypes = postedTypeSeries(data?.documents.posted_by_type)
   const pending = pendingSeries(data?.stock.pending_quantities)
   const failed = data?.documents.failed ?? 0
 
@@ -83,6 +93,14 @@ export function DocumentsWidget({ query }: { query: Loadable<DashboardData> }) {
           </Link>
         ) : null}
         <BarList items={statuses} />
+        {/* What was actually raised, not merely where it got stuck — the old
+            dashboard's "Posted, by type" card, which the payload still sends. */}
+        {postedTypes.length > 0 ? (
+          <div className="mt-3 border-t border-gray-100 pt-2">
+            <SectionLabel>Posted, by type</SectionLabel>
+            <BarList items={postedTypes} />
+          </div>
+        ) : null}
       </>
     </WidgetCard>
   )
@@ -95,17 +113,18 @@ export function DocumentsWidget({ query }: { query: Loadable<DashboardData> }) {
 export function IntegrationWidget({ query }: { query: Loadable<DashboardData> }) {
   const data = query.data
   const outbox = outboxSeries(data?.integration.outbox)
+  const inbound = inboundSeries(data?.integration.inbound)
   const revisions = data?.integration.unacknowledged_revisions
   const recalcs = data?.integration.recalculations_in_progress ?? 0
 
   return (
     <WidgetCard
       title="Books integration"
-      description="Outbound events, revisions and recalculations"
+      description="Events both ways, revisions and recalculations"
       icon={Send}
       tone="teal"
       viewAll={{ to: drill.outbox() }}
-      state={state(query, outbox.length === 0 && !revisions?.count && recalcs === 0)}
+      state={state(query, outbox.length === 0 && inbound.length === 0 && !revisions?.count && recalcs === 0)}
       skeleton={<SkeletonRows rows={4} />}
       emptyIcon={Send}
       emptyTitle="Nothing queued for Books"
@@ -122,7 +141,7 @@ export function IntegrationWidget({ query }: { query: Loadable<DashboardData> })
                 <span className="text-gray-400"> (Δ {formatMoney(revisions.delta_total)})</span>
               ) : null}
             </Link>
-            <Link to={drill.recalculations(recalcs > 0 ? 'RUNNING' : null)} className="hover:text-primary">
+            <Link to={drill.recalculations(recalcs > 0 ? RECALC_IN_PROGRESS : null)} className="hover:text-primary">
               Recalculations running:{' '}
               <span className={`font-semibold ${recalcs > 0 ? 'text-sky-600' : 'text-gray-700'}`}>
                 {formatCount(recalcs)}
@@ -132,7 +151,19 @@ export function IntegrationWidget({ query }: { query: Loadable<DashboardData> })
         ) : null
       }
     >
-      <BarList items={outbox} />
+      <>
+        <SectionLabel>Outbound to Books</SectionLabel>
+        <BarList items={outbox} />
+        {/* The sync is two-way: a widget showing only the outbox reports half
+            the health of it. Inbound events have no screen of their own, so
+            these are figures rather than links. */}
+        {inbound.length > 0 ? (
+          <div className="mt-3 border-t border-gray-100 pt-2">
+            <SectionLabel>Inbound from Books</SectionLabel>
+            <BarList items={inbound} />
+          </div>
+        ) : null}
+      </>
     </WidgetCard>
   )
 }

@@ -58,18 +58,24 @@
 
           var font = FONTS[saved.fontId]
           if (font) root.style.setProperty('--font-family', font)
-          var size = SIZES[saved.sizeId]
-          if (size) {
-            root.style.setProperty('--font-size-base', size)
-            root.style.fontSize = size
-          }
+          // Falling back is the point: with nothing stored ThemeProvider will
+          // still apply its own default on mount, so skipping it here is what
+          // makes a first load paint at one size and reflow to another.
+          var size = SIZES[saved.sizeId] || SIZES.zoomcompact
+          root.style.setProperty('--font-size-base', size)
+          root.style.fontSize = size
         } catch (e) {
           /* a blocked or corrupt localStorage must never stop the app booting */
         }
       })()
     </script>
   </head>
-  <body>
+  <!-- Tailwind's preflight is off (see tailwind.config.js), so the equivalent
+       reset is scoped to `.aic`. It sits on the document body: a subtree that
+       forgets the class — a portal, a new shell, a screen mounted outside
+       AppShell — renders borderless and with UA button chrome, and nothing in
+       the build, the types or the tests would say so. -->
+  <body class="aic">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

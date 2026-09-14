@@ -40,7 +40,7 @@ export function DashboardHeader({
   return (
     <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
       <div className="min-w-0">
-        <h1 className="text-lg md:text-xl font-bold text-gray-900 truncate">
+        <h1 className="text-xl md:text-2xl font-bold text-gray-900 truncate">
           {greetingFor()}
           {userName ? `, ${userName}` : ''}
           <span aria-hidden className="ml-1">

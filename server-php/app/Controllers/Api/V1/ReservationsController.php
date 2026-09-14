@@ -19,6 +19,24 @@ class ReservationsController extends BaseController
     protected ReservationService $reservations;
     protected IdempotencyService $idempotency;
 
+    /**
+     * Columns the reservation register can order by; it renders a sort header
+     * for exactly these. `open_qty` is derived, so it is ordered by its own
+     * expression rather than silently falling back to created_at.
+     */
+    public const SORTABLE = [
+        'created_at'     => 'r.created_at',
+        'updated_at'     => 'r.updated_at',
+        'expires_at'     => 'r.expires_at',
+        'reservation_id' => 'r.reservation_id',
+        'qty'            => 'r.qty',
+        'fulfilled_qty'  => 'r.fulfilled_qty',
+        'open_qty'       => '(r.qty - r.fulfilled_qty)',
+        'status'         => 'r.status',
+        'item_name'      => 'i.item_name',
+        'warehouse_name' => 'w.warehouse_name',
+    ];
+
     public function __construct()
     {
         parent::__construct();
@@ -62,8 +80,7 @@ class ReservationsController extends BaseController
             $b->whereIn('r.status', ReservationService::OPEN_STATUSES)->where('r.expires_at <', date('Y-m-d H:i:s'));
         }
         $total = (clone $b)->countAllResults(false);
-        $sortMap = ['created_at' => 'r.created_at', 'updated_at' => 'r.updated_at', 'expires_at' => 'r.expires_at', 'reservation_id' => 'r.reservation_id', 'qty' => 'r.qty', 'status' => 'r.status', 'item_name' => 'i.item_name', 'warehouse_name' => 'w.warehouse_name'];
-        $rows = $b->orderBy($sortMap[$p['sort']] ?? 'r.created_at', $p['sort'] === '' ? 'DESC' : $p['order'])->orderBy('r.reservation_id', 'DESC')
+        $rows = $b->orderBy(self::SORTABLE[$p['sort']] ?? 'r.created_at', $p['sort'] === '' ? 'DESC' : $p['order'], false)->orderBy('r.reservation_id', 'DESC')
             ->limit($p['limit'], $p['offset'])->get()->getResultArray();
 
         return $this->respondList(array_map([$this->reservations, 'present'], $rows), $total, $p['limit'], $p['offset']);

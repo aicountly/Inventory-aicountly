@@ -59,13 +59,19 @@ export function ReportCompactShell({
 }: ReportCompactShellProps) {
   usePageKeyboard({ searchInputRef, onRefresh, onPrint })
 
+  // Only advertise what is wired. A chip promising Ctrl+P on a page with no
+  // print handler sends the reader to the browser's own dialog, which prints
+  // the app's DOM instead of the sheet.
+  const hintKeys = shortcutKeys ?? ['/', 'Ctrl+R', ...(onPrint ? ['Ctrl+P'] : []), 'Esc']
+  const hintLabel = shortcutLabel ?? `Search · Refresh${onPrint ? ' · Print' : ''} · Back`
+
   const showHint = Boolean(onRefresh || onPrint || searchInputRef)
   const actions = (
     <>
       {showHint ? (
         <KeyboardShortcutHint
-          keys={shortcutKeys ?? ['/', 'Ctrl+R', 'Ctrl+P', 'Esc']}
-          label={shortcutLabel ?? 'Search · Refresh · Print · Back'}
+          keys={hintKeys}
+          label={hintLabel}
           className="hidden xl:inline-flex"
         />
       ) : null}

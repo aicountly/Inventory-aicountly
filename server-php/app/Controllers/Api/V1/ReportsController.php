@@ -36,6 +36,15 @@ class ReportsController extends BaseController
         }, 100, 1000, 'item_name');
     }
 
+    /**
+     * The only column the stock ledger can be ordered by.
+     *
+     * Its balance column is a running total accumulated in movement sequence, so re-ordering the
+     * rows by rate or value would leave a "balance" that is the sum of no particular thing. The
+     * register therefore offers one sort header — the date — and it only flips direction.
+     */
+    public const STOCK_LEDGER_SORTABLE = ['movement_date' => 'm.movement_date'];
+
     /** GET reports/stock-ledger — one item's movements with running balance (item_id required). */
     public function stockLedger()
     {
@@ -131,6 +140,10 @@ class ReportsController extends BaseController
             $f = $this->commonFilters($p) + $this->dates(['as_of']) + [
                 'days'            => $this->int('days') ?? 30,
                 'include_expired' => $this->flag('include_expired', true),
+                // The dashboard's "Expired batches" card drills in with this: expired stock is
+                // a different job from stock about to expire, and the card's figure has to be
+                // reproducible on the register it opens.
+                'expired_only'    => $this->flag('expired_only', false),
                 'by_warehouse'    => $this->flag('by_warehouse', false),
             ];
 

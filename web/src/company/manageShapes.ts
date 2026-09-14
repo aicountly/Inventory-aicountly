@@ -40,6 +40,10 @@ export interface CompanyInfo {
   fyList: FyOption[]
   branches: BranchOption[]
   hoId: number | null
+  /** Registered office, one letterhead line per entry. Empty when Manage has none. */
+  addressLines: string[]
+  /** GSTIN as Manage holds it, '' when unregistered or unknown. */
+  gstin: string
 }
 
 type Row = Record<string, unknown>
@@ -203,6 +207,105 @@ export function parseBranchList(body: unknown): BranchOption[] {
   return out
 }
 
+/*
+ * Letterhead fields.
+ *
+ * A printed challan or register carries the registered office and the GSTIN —
+ * in India that is what makes the paper a document rather than a screenshot.
+ * Manage has grown three shapes for the address over the years (a free-text
+ * block, a structured object, flat `ro_*` / `co_*` fields on the root) and
+ * half a dozen spellings for the GSTIN, so all of them are read here.
+ */
+
+const ADDRESS_KEYS = [
+  'ro_address',
+  'registered_office',
+  'registered_office_address',
+  'registered_address',
+  'address',
+  'cmp_address',
+  'comp_address',
+  'company_address',
+  'office_address',
+] as const
+
+const GSTIN_KEYS = ['gstin', 'gst_no', 'gst_number', 'company_gstin', 'comp_gstin', 'cmp_gstin'] as const
+
+const ADDRESS_FIELDS = [
+  'addr1', 'addr2', 'address_line1', 'address_line2', 'line1', 'line2', 'street',
+  'city', 'district', 'state_name', 'state', 'country_name', 'country', 'pincode', 'pin', 'zip',
+] as const
+
+/** A bare 1-3 digit value is a Manage master id, not a place name. */
+function addressText(v: unknown): string {
+  if (isRow(v)) return addressText(v.name ?? v.state_name ?? v.country_name ?? v.label ?? '')
+  const text = str(v)
+  return /^\d{1,3}$/.test(text) ? '' : text
+}
+
+/** Pull `ro_city` / `co_pincode` up to `city` / `pincode` when the plain key is absent. */
+function flattenAddress(row: Row): Row {
+  const out: Row = {}
+  for (const field of ADDRESS_FIELDS) {
+    out[field] = row[field] ?? row[`ro_${field}`] ?? row[`co_${field}`]
+  }
+  return out
+}
+
+function structuredAddressLines(a: Row): string[] {
+  const street = [a.addr1, a.addr2, a.address_line1, a.address_line2, a.line1, a.line2, a.street]
+    .map(addressText)
+    .filter(Boolean)
+  const locality = [a.city, a.district, a.state_name ?? a.state, a.pincode ?? a.pin ?? a.zip]
+    .map(addressText)
+    .filter(Boolean)
+  const country = addressText(a.country_name ?? a.country)
+  return [street.join(', '), locality.join(', '), country].filter(Boolean)
+}
+
+/** The registered office as letterhead lines, from whichever shape Manage sent. */
+export function parseCompanyAddress(body: unknown): string[] {
+  for (const source of companySources(body)) {
+    for (const key of ADDRESS_KEYS) {
+      const value = source[key]
+      if (typeof value === 'string' && value.trim()) {
+        return value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+      }
+      if (isRow(value)) {
+        const lines = structuredAddressLines({ ...flattenAddress(source), ...flattenAddress(value), ...value })
+        if (lines.length) return lines
+      }
+    }
+    const lines = structuredAddressLines(flattenAddress(source))
+    if (lines.length) return lines
+  }
+
+  return []
+}
+
+export function parseCompanyGstin(body: unknown): string {
+  for (const source of companySources(body)) {
+    for (const key of GSTIN_KEYS) {
+      const value = str(source[key])
+      if (value) return value
+    }
+  }
+
+  return ''
+}
+
+/** The nested objects a companyinfo payload may keep the profile fields in. */
+function companySources(body: unknown): Row[] {
+  const root = isRow(body) && isRow(body.data) ? body.data : isRow(body) ? body : {}
+  const candidates = [root, root.company, root.profile, root.general_info, root.company_details]
+  const out: Row[] = []
+  for (const candidate of candidates) {
+    if (isRow(candidate) && !out.includes(candidate)) out.push(candidate)
+  }
+
+  return out
+}
+
 /** `/manage/companyinfo?comp_id=` → name, financial years (latest first) and branches. */
 export function parseCompanyInfo(body: unknown): CompanyInfo {
   const data = isRow(body) && isRow(body.data) ? body.data : isRow(body) ? body : {}
@@ -225,6 +328,8 @@ export function parseCompanyInfo(body: unknown): CompanyInfo {
     fyList,
     branches,
     hoId: num(data.ho_id),
+    addressLines: parseCompanyAddress(body),
+    gstin: parseCompanyGstin(body),
   }
 }
 

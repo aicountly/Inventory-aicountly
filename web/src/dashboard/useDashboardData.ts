@@ -38,7 +38,9 @@ import type { ExpirySnapshot, ReplenishmentSnapshot, StockValueSnapshot } from '
  * skeleton until then, and a report the user cannot read simply does not appear
  * — the widget is never requested, so no 403 is ever provoked.
  *
- * `nearExpiryDays` re-queries only the two cards that depend on it.
+ * `nearExpiryDays` re-queries only the widget that depends on it: it is not in
+ * the core query's deps, because nothing the core payload carries about expiry
+ * reaches the screen.
  */
 export const NEAR_EXPIRY_CHOICES = [15, 30, 60, 90] as const
 
@@ -52,8 +54,6 @@ export interface DashboardPermissions {
   replenishment: boolean
   movements: boolean
   documents: boolean
-  integration: boolean
-  reconciliation: boolean
 }
 
 export interface DashboardDataState {
@@ -99,8 +99,9 @@ export function useDashboardData(): DashboardDataState {
       replenishment: can(P.report('replenishment')),
       movements: can(P.report('stock_ledger')) || can(P.documentsRead),
       documents: can(P.documentsRead),
-      integration: can(P.integrationRead),
-      reconciliation: can(P.reconciliationRead),
+      // integration.read / reconciliation.read are deliberately absent: the
+      // widgets they used to gate read the /v1/dashboard payload, which the
+      // server authorises on dashboard.read alone.
     }),
     [can],
   )
@@ -108,7 +109,7 @@ export function useDashboardData(): DashboardDataState {
   const ready = scope !== null && !accessLoading
   const scopeKey = `${scope?.cmp_id ?? 0}:${scope?.fy_id ?? 0}:${scope?.bo_id ?? 0}`
 
-  const core = useQuery((signal) => fetchDashboard(nearExpiryDays, signal), [scopeKey, nearExpiryDays], {
+  const core = useQuery((signal) => fetchDashboard(signal), [scopeKey], {
     enabled: ready && perms.dashboard,
   })
   const stock = useQuery((signal) => fetchStockValue(asOf, signal), [scopeKey, asOf], {

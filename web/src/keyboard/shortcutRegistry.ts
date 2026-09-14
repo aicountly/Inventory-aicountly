@@ -22,7 +22,7 @@ export const GLOBAL_SHORTCUTS: readonly GlobalShortcut[] = [
   { id: 'dashboard', combo: 'alt+d', label: 'Dashboard', path: '/dashboard' },
   { id: 'items', combo: 'alt+i', label: 'Items', path: '/items' },
   { id: 'documents', combo: 'alt+o', label: 'Documents', path: '/documents' },
-  { id: 'stock', combo: 'alt+s', label: 'Stock', path: '/stock' },
+  { id: 'stock', combo: 'alt+s', label: 'Stock', path: '/registers/stock-balances' },
   { id: 'reports', combo: 'alt+r', label: 'Reports', path: '/reports' },
 ]
 

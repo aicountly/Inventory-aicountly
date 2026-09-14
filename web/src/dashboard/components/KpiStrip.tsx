@@ -1,5 +1,4 @@
-import { StatCard } from '../../ui/StatCard'
-import { SkeletonCard } from '../../ui/Skeleton'
+import { StatCard, StatCardSkeleton } from '../../ui/StatCard'
 import type { KpiCardSpec } from '../model'
 import { ICON_TONE, KPI_ICONS } from '../visuals'
 
@@ -8,21 +7,24 @@ import { ICON_TONE, KPI_ICONS } from '../visuals'
  *
  * Cards fill in one at a time: the KPIs come from four independent requests, so
  * a card whose source has not landed shows its own skeleton in place while the
- * rest are already usable. The grid geometry is identical in both states, so
+ * rest are already usable. The placeholder is the card's own shell rather than
+ * a block of a measured height, so the geometry is identical in both states and
  * nothing moves when data arrives.
  */
 export interface KpiStripProps {
   cards: readonly KpiCardSpec[]
 }
 
-const GRID = 'grid gap-2.5 grid-cols-2 md:grid-cols-4 xl:grid-cols-8'
+// Books' own KPI strip, literally: the two products share a 13px root, so a
+// tightened gap here would only make the same markup read differently there.
+const GRID = 'grid gap-3 grid-cols-2 md:grid-cols-4 xl:grid-cols-8'
 
 export function KpiStrip({ cards }: KpiStripProps) {
   return (
     <div className={GRID}>
       {cards.map((card) =>
         card.value === null ? (
-          <SkeletonCard key={card.key} className="h-[104px]" />
+          <StatCardSkeleton key={card.key} />
         ) : (
           <StatCard
             key={card.key}

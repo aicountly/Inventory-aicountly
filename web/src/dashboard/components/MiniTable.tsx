@@ -1,18 +1,20 @@
+import { useMemo } from 'react'
 import type { ReactNode } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { TABLE_HEADER, TABLE_STICKY_HEAD } from '../../styles/designTokens'
+import { Link, useNavigate } from 'react-router-dom'
+import { SmartTable } from '../../ui/shell/SmartTable'
+import type { SmartColumn } from '../../ui/shell/SmartTable'
+import { DASHBOARD_TABLE_PROPS } from '../../styles/designTokens'
 
 /**
  * The compact table inside a dashboard card: sticky header, capped scroll, one
  * click per row into the record behind it.
  *
- * This is a deliberate stand-in. The shared `SmartTable` (Books' shell/SmartTable
- * port, with keyboard row activation, totals and column config) is landing in
- * src/ui/shell; when it does, this component should become a thin wrapper over
- * it with DASHBOARD_TABLE_PROPS, exactly as Books' DashboardCompactTable is.
- * Everything that would differ — the design-token class strings, the row-click
- * contract, the sticky head — is already sourced from the shared tokens, so the
- * swap is mechanical and no widget changes.
+ * It is SmartTable with the dashboard prop bundle, exactly as Books'
+ * DashboardCompactTable is — so a widget table and a register table agree on
+ * density, sticky head, totals and the column widths they ask for. Only the
+ * row-link contract is added on top: the first cell of a row with a destination
+ * is a real `<a href>`, which is what middle-click, Ctrl-click and the status
+ * bar need and what a `<tr role="link">` gives none of.
  */
 export interface MiniColumn<T> {
   key: string
@@ -30,10 +32,26 @@ export interface MiniTableProps<T> {
   rowKey: (row: T, index: number) => string | number
   /** Destination for the row; a row with no destination is not clickable. */
   to?: (row: T) => string | null
+  /**
+   * What the link in the first cell is called, e.g. "Blue widget, batch B-102".
+   * Say what the row *is*: a screen reader hearing "row 1, row 2…" learns
+   * nothing, and this table is how a dashboard card is escaped.
+   */
+  rowLabel?: (row: T) => string
   /** Tailwind max-height for the scroll body. */
   maxHeight?: string
   /** Extra classes on a row — used to tint the ones that need attention. */
   rowClassName?: (row: T) => string | undefined
+  /**
+   * What the columns need, not what the card happens to be. A widget card is
+   * about half a register wide, so without this the browser guesses and the
+   * numeric columns collapse into each other; below it the card scrolls.
+   */
+  minWidth?: number
+  /** Pinned totals row, keyed by column key — server figures, not page sums. */
+  totals?: Record<string, ReactNode>
+  /** Names the table for a screen reader. */
+  caption?: string
 }
 
 export function MiniTable<T>({
@@ -41,69 +59,56 @@ export function MiniTable<T>({
   rows,
   rowKey,
   to,
-  maxHeight = 'max-h-64',
+  rowLabel,
+  maxHeight,
   rowClassName,
+  minWidth = 420,
+  totals,
+  caption,
 }: MiniTableProps<T>) {
   const navigate = useNavigate()
 
+  const smartColumns = useMemo<SmartColumn<T>[]>(
+    () =>
+      columns.map((c, colIdx) => ({
+        ...c,
+        render: (row: T) => {
+          const content = c.render(row)
+          const href = colIdx === 0 && to ? to(row) : null
+          if (!href) return content
+          return (
+            <Link to={href} aria-label={rowLabel?.(row)} className="block no-underline text-inherit">
+              {content}
+            </Link>
+          )
+        },
+      })),
+    [columns, to, rowLabel],
+  )
+
   return (
-    <div className={`overflow-auto ${maxHeight} -mx-1`}>
-      <table className="w-full text-xs border-separate border-spacing-0">
-        <thead>
-          <tr>
-            {columns.map((c) => (
-              <th
-                key={c.key}
-                scope="col"
-                className={`${TABLE_STICKY_HEAD} ${TABLE_HEADER} px-1.5 py-1.5 ${
-                  c.align === 'right' ? 'text-right' : 'text-left'
-                } ${c.headerClassName ?? ''}`}
-              >
-                {c.header}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, i) => {
-            const href = to ? to(row) : null
-            return (
-              <tr
-                key={rowKey(row, i)}
-                className={`table-row-hover border-b border-gray-50 ${href ? 'cursor-pointer' : ''} ${
-                  rowClassName?.(row) ?? ''
-                }`}
-                {...(href
-                  ? {
-                      onClick: () => navigate(href),
-                      onKeyDown: (e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault()
-                          navigate(href)
-                        }
-                      },
-                      tabIndex: 0,
-                      role: 'link',
-                      'aria-label': `Open row ${i + 1}`,
-                    }
-                  : {})}
-              >
-                {columns.map((c) => (
-                  <td
-                    key={c.key}
-                    className={`px-1.5 py-1.5 align-middle ${c.align === 'right' ? 'text-right tabular-nums' : 'text-left'} ${
-                      c.cellClassName ?? ''
-                    }`}
-                  >
-                    {c.render(row)}
-                  </td>
-                ))}
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-    </div>
+    <SmartTable<T>
+      {...DASHBOARD_TABLE_PROPS}
+      className={maxHeight ?? DASHBOARD_TABLE_PROPS.className}
+      cardPadding="none"
+      columns={smartColumns}
+      rows={rows}
+      rowKey={rowKey}
+      minWidth={minWidth}
+      totals={totals}
+      caption={caption}
+      rowClassName={rowClassName}
+      // Click anywhere on the row as a convenience, but no keyboard row
+      // navigation: it listens on the window, and a dashboard renders four of
+      // these at once, so Enter would fire in all four and each would grab
+      // focus as its own request landed. The link in the first cell is the
+      // keyboard path here.
+      keyboardNav={false}
+      onRowClick={to ? (row) => {
+        const href = to(row)
+        if (href) navigate(href)
+      } : undefined}
+    />
   )
 }
 

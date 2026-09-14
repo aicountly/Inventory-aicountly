@@ -9,6 +9,8 @@ import type { CsvValue } from '../utils/csv'
 export type FilterKind =
   | 'item'
   | 'warehouse'
+  /** Batch select for the item currently filtered; inert until one is picked. */
+  | 'batch'
   | 'item_group'
   | 'stock_category'
   | 'date'

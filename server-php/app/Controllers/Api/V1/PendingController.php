@@ -37,10 +37,11 @@ class PendingController extends BaseController
         $documentId = (int) $this->request->getGet('document_id') ?: null;
         $p = $this->listParams(100, 1000);
 
-        $rows = (new PendingQuantityService())->listOpen($cmpId, $kind !== '' ? $kind : null, $direction !== '' ? $direction : null, $partyRef, $itemId, $warehouseId);
+        $rows = (new PendingQuantityService())->listOpen($cmpId, $kind !== '' ? $kind : null, $direction !== '' ? $direction : null, $partyRef, $itemId, $warehouseId, (int) $a['ctx']['bo_id']);
         if ($documentId !== null) {
             $rows = array_values(array_filter($rows, static fn ($r) => (int) $r['document_id'] === $documentId));
         }
+        $rows = PendingQuantityService::sortOpenRows($rows, $p['sort'], $p['order']);
         $total = count($rows);
         $page = array_slice($rows, $p['offset'], $p['limit']);
         foreach ($page as &$r) {

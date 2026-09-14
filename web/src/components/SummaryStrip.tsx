@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react'
+import { AlertTriangle, CircleCheck, Info } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { StatCard } from '../ui/StatCard'
 import type { IconTone } from '../ui/IconTile'
 import { SUMMARY_CARD_GRID } from '../styles/designTokens'
@@ -10,13 +12,29 @@ export interface SummaryItem {
   tone?: 'neutral' | 'good' | 'warning' | 'critical'
   /** Drill-down target — the card becomes a link when set. */
   to?: string
+  /** Overrides the tone's default glyph when the figure has a better one. */
+  icon?: LucideIcon
 }
 
-const TONE: Record<NonNullable<SummaryItem['tone']>, IconTone> = {
+export type SummaryTone = NonNullable<SummaryItem['tone']>
+
+/** The one mapping from a summary tone to the KPI palette. */
+export const SUMMARY_TONE: Record<SummaryTone, IconTone> = {
   neutral: 'slate',
   good: 'success',
   warning: 'warning',
   critical: 'danger',
+}
+
+/**
+ * Every KPI card carries a glyph, so a tone that names no icon still has to
+ * resolve to one — an IconTile with nothing in it is a coloured square.
+ */
+export const SUMMARY_ICON: Record<SummaryTone, LucideIcon> = {
+  neutral: Info,
+  good: CircleCheck,
+  warning: AlertTriangle,
+  critical: AlertTriangle,
 }
 
 /**
@@ -37,7 +55,8 @@ export function SummaryStrip({ items }: { items: SummaryItem[] }) {
           label={item.label}
           value={item.value}
           hint={item.hint}
-          tone={TONE[item.tone ?? 'neutral']}
+          icon={item.icon ?? SUMMARY_ICON[item.tone ?? 'neutral']}
+          tone={SUMMARY_TONE[item.tone ?? 'neutral']}
           to={item.to}
         />
       ))}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { CornerDownLeft, Search } from 'lucide-react'
 import { useAccess } from '../access/AccessContext'
@@ -58,6 +58,9 @@ export function CommandPalette() {
   const [activeIndex, setActiveIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLUListElement>(null)
+  const baseId = useId()
+  const listId = `${baseId}-list`
+  const optionId = (index: number) => `${baseId}-option-${index}`
 
   const commands = useMemo<Command[]>(() => {
     return collectNavLeaves()
@@ -172,20 +175,40 @@ export function CommandPalette() {
       >
         <div className="flex shrink-0 items-center gap-2 border-b border-gray-100 px-3 py-2.5">
           <Search className="h-4 w-4 shrink-0 text-gray-400" aria-hidden />
+          {/* Focus never leaves the input — the highlight below is announced
+              through aria-activedescendant, which is the only way a screen
+              reader learns that ArrowDown moved anything. */}
           <input
             ref={inputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Go to a screen…"
             aria-label="Search screens"
+            role="combobox"
+            aria-expanded
+            aria-autocomplete="list"
+            aria-controls={listId}
+            aria-activedescendant={results.length ? optionId(activeIndex) : undefined}
             className="min-w-0 flex-1 bg-transparent text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none"
           />
           <Kbd>Esc</Kbd>
         </div>
 
-        <ul ref={listRef} className="min-h-0 flex-1 overflow-auto scrollbar-thin p-1.5">
+        <p role="status" className="sr-only">
+          {results.length === 0
+            ? 'No screens match'
+            : `${results.length} ${results.length === 1 ? 'screen' : 'screens'}`}
+        </p>
+
+        <ul
+          ref={listRef}
+          id={listId}
+          role="listbox"
+          aria-label="Screens"
+          className="min-h-0 flex-1 overflow-auto scrollbar-thin p-1.5"
+        >
           {results.length === 0 ? (
-            <li className="px-3 py-8 text-center text-sm text-gray-500">
+            <li role="presentation" className="px-3 py-8 text-center text-sm text-gray-500">
               Nothing matches “{query}”.
             </li>
           ) : null}
@@ -193,9 +216,14 @@ export function CommandPalette() {
             const Icon = cmd.icon
             const active = index === activeIndex
             return (
-              <li key={cmd.id} data-index={index}>
+              <li key={cmd.id} role="presentation" data-index={index}>
                 <button
                   type="button"
+                  id={optionId(index)}
+                  role="option"
+                  aria-selected={active}
+                  // Not a tab stop: the input owns focus for the whole widget.
+                  tabIndex={-1}
                   onMouseEnter={() => setActiveIndex(index)}
                   onClick={() => run(cmd)}
                   className={cx(

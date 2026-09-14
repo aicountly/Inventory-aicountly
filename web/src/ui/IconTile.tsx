@@ -26,7 +26,8 @@ const TONE_STYLES: Record<IconTone, string> = {
   teal: 'bg-teal-50 text-teal-600',
 }
 
-const SIZE_STYLES: Record<IconTileSize, string> = {
+/** Exported so a placeholder can reserve exactly the box a tile will occupy. */
+export const ICON_TILE_SIZE: Record<IconTileSize, string> = {
   sm: 'w-8 h-8 rounded-lg',
   md: 'w-10 h-10 rounded-xl',
   lg: 'w-12 h-12 rounded-xl',
@@ -45,19 +46,25 @@ export interface IconTileProps {
   className?: string
 }
 
+/**
+ * The tile is the icon's backing, not a decoration in its own right: with no
+ * icon to hold it would draw an empty coloured square, so it draws nothing and
+ * the layout closes up around it.
+ */
 export function IconTile({ icon: Icon, tone = 'primary', size = 'md', className }: IconTileProps) {
+  if (!Icon) return null
   return (
     <span
       className={cx(
         AIC,
         'inline-flex items-center justify-center shrink-0',
-        SIZE_STYLES[size],
+        ICON_TILE_SIZE[size],
         TONE_STYLES[tone],
         className,
       )}
       aria-hidden
     >
-      {Icon ? <Icon className={GLYPH_SIZE[size]} /> : null}
+      <Icon className={GLYPH_SIZE[size]} />
     </span>
   )
 }

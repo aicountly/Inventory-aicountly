@@ -26,7 +26,7 @@ import {
 } from '../../reports/configs/common'
 import { buildTotalsRow, totalsLabel } from '../registerTotals'
 import { defineRegister } from '../RegisterConfig'
-import { pageHint, withPageSummary } from './pageSummary'
+import { pageHint, summaryOverRows, withPageSummary } from './pageSummary'
 import type { PageSummary } from './pageSummary'
 
 function documentCell(id: number | null | undefined, no: string | null | undefined) {
@@ -199,6 +199,7 @@ export const reservationRegister = defineRegister<Reservation, PageSummary>({
       'reservations',
       RESERVATION_SUM_KEYS,
     ),
+  summaryForRows: (s, rows) => summaryOverRows(s, rows, RESERVATION_SUM_KEYS),
   toQuery: (values) => {
     const { status, ...rest } = values
     // "Open" is the default view and is a different parameter from a status
@@ -365,6 +366,9 @@ export const pendingRegister = defineRegister<PendingRow, PendingSummary>({
     const base = withPageSummary(res, 'pending_quantities', PENDING_SUM_KEYS)
     return { ...base, summary: { ...base.summary, qtyOpenAll: res.summary?.qty_open ?? base.summary.sums.qty_open } }
   },
+  // The server's open-quantity total is already the whole set; only the two
+  // supporting page sums are re-totalled for an export.
+  summaryForRows: (s, rows) => summaryOverRows(s, rows, PENDING_SUM_KEYS),
   filters: [
     {
       key: 'kind',
@@ -547,6 +551,7 @@ export const reconciliationRegister = defineRegister<ReconciliationRun, PageSumm
       'reconciliation_runs',
       RECONCILIATION_SUM_KEYS,
     ),
+  summaryForRows: (s, rows) => summaryOverRows(s, rows, RECONCILIATION_SUM_KEYS),
   filters: [
     {
       key: 'status',

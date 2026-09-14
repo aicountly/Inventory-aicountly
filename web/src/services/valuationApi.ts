@@ -118,6 +118,26 @@ export interface CostLayersQuery extends ListQuery {
 export type RecalcStatus = 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED'
 export const RECALC_STATUSES: RecalcStatus[] = ['QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED']
 
+/**
+ * The two statuses a job is "in progress" in — what the dashboard counts as
+ * `recalculations_in_progress`. `status` is split on commas server-side
+ * (ValuationController::recalcJobs), so this is one filter value, not two.
+ */
+export const RECALC_IN_PROGRESS = 'QUEUED,RUNNING'
+
+/**
+ * The status filter the recalculations register offers.
+ *
+ * It exists so the dashboard cannot link to a filter value the landing page has
+ * no option for: a `<select>` handed a value it does not list renders blank
+ * while the filter is silently active, which reads as a broken page.
+ */
+export const RECALC_STATUS_FILTERS: { value: string; label: string }[] = [
+  { value: '', label: 'All statuses' },
+  { value: RECALC_IN_PROGRESS, label: 'In progress (queued + running)' },
+  ...RECALC_STATUSES.map((status) => ({ value: status, label: status })),
+]
+
 export interface RecalcJob {
   job_id: number
   job_uuid: string

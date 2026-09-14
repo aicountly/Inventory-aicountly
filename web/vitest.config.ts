@@ -24,6 +24,18 @@ export default defineConfig({
         test: {
           name: 'dom',
           environment: 'happy-dom',
+          // The print sheet is a standalone document that links the webfont it
+          // needs. A test that parses one must not go and fetch it: the suite
+          // has to run offline, and a remote stylesheet proves nothing here.
+          environmentOptions: {
+            happyDOM: {
+              settings: {
+                disableCSSFileLoading: true,
+                disableJavaScriptFileLoading: true,
+                handleDisabledFileLoadingAsSuccess: true,
+              },
+            },
+          },
           include: ['src/**/*.test.tsx'],
           setupFiles: ['./src/test/setup.ts'],
         },

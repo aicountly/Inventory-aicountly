@@ -121,9 +121,15 @@ export function OverviewDashboard() {
       </div>
 
       <div className="grid gap-3 grid-cols-1 lg:grid-cols-3">
+        {/* All three read the /v1/dashboard payload, which the server authorises
+            on dashboard.read alone. Gating them on integration.read /
+            reconciliation.read as well hid data the user had already been sent
+            and left a dashboard.read user with one card. Report-backed widgets
+            above stay gated on their own report slug, where the gate really does
+            prevent a 403. */}
         {d.can.dashboard ? <DocumentsWidget query={d.core} /> : null}
-        {d.can.dashboard && d.can.integration ? <IntegrationWidget query={d.core} /> : null}
-        {d.can.dashboard && d.can.reconciliation ? <ReconciliationWidget query={d.core} /> : null}
+        {d.can.dashboard ? <IntegrationWidget query={d.core} /> : null}
+        {d.can.dashboard ? <ReconciliationWidget query={d.core} /> : null}
       </div>
     </div>
   )

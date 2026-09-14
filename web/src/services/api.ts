@@ -292,26 +292,28 @@ async function send(method: Method, url: string, opts: RequestOptions, bodyJson:
   })
 }
 
-async function request<T>(method: Method, path: string, opts: RequestOptions = {}): Promise<T> {
+/** One request, with the 401 re-mint. Callers decide how to read the response. */
+async function exchange(method: Method, path: string, opts: RequestOptions): Promise<Response> {
   const scope = resolveScope(opts.scope)
   const query = { ...scopeToQuery(scope), ...(opts.query ?? {}) }
   const url = `${getApiBaseUrl()}/${path.replace(/^\//, '')}${buildQueryString(query)}`
   const bodyJson = opts.body === undefined ? undefined : JSON.stringify(withScopeInBody(opts.body, scope))
 
-  let res: Response
   try {
-    res = await send(method, url, opts, bodyJson, await ensureSesKey())
-    if (res.status === 401) {
-      // The key may have been revoked before its local expiry: mint once more.
-      clearSession()
-      res = await send(method, url, opts, bodyJson, await ensureSesKey())
-    }
+    const res = await send(method, url, opts, bodyJson, await ensureSesKey())
+    if (res.status !== 401) return res
+    // The key may have been revoked before its local expiry: mint once more.
+    clearSession()
+    return await send(method, url, opts, bodyJson, await ensureSesKey())
   } catch (err) {
     if (err instanceof ApiError) throw err
     if ((err as Error)?.name === 'AbortError' || (err as Error)?.name === 'TimeoutError') throw err
     throw new ApiError(0, 'network_error', errorMessage(err, 'Could not reach the Inventory API.'))
   }
+}
 
+async function request<T>(method: Method, path: string, opts: RequestOptions = {}): Promise<T> {
+  const res = await exchange(method, path, opts)
   if (res.status === 204) return undefined as T
   const body = await readBody(res)
   if (!res.ok) throw parseErrorBody(res.status, body)
@@ -330,6 +332,18 @@ export const api = {
   },
   delete<T>(path: string, opts?: RequestOptions): Promise<T> {
     return request<T>('DELETE', path, opts)
+  },
+  /**
+   * GET a binary resource — the company logo is the only one today.
+   *
+   * It needs the same Bearer key as everything else, so it cannot simply be an
+   * `<img src>`; and a printed sheet needs the bytes, not a URL, because the
+   * print iframe may render before a remote image has loaded.
+   */
+  async blob(path: string, opts?: RequestOptions): Promise<Blob> {
+    const res = await exchange('GET', path, opts ?? {})
+    if (!res.ok) throw parseErrorBody(res.status, await readBody(res))
+    return res.blob()
   },
   /** GET a paginated list. `page` is translated to `offset` client-side. */
   list<T>(path: string, query: ListQuery = {}, opts?: RequestOptions): Promise<ListResponse<T>> {

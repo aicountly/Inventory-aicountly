@@ -117,7 +117,9 @@ export function ReorderWidget({ query }: { query: Loadable<ReplenishmentSnapshot
         rows={rows}
         rowKey={(r) => r.item_id}
         to={(r) => drill.replenishment({ itemId: r.item_id, onlyTriggered: false })}
+        rowLabel={(r) => `${r.item_name ?? `Item ${r.item_id}`} — reorder advice`}
         rowClassName={(r) => (r.projected < 0 ? 'bg-red-50/40' : undefined)}
+        minWidth={480}
       />
     </WidgetCard>
   )
@@ -212,7 +214,11 @@ export function ExpiryWidget({ query, days }: { query: Loadable<ExpirySnapshot>;
         rows={rows}
         rowKey={(r) => r.batch_id}
         to={(r) => drill.nearExpiry({ days, includeExpired: true, itemId: r.item_id })}
+        rowLabel={(r) =>
+          `${r.item_name ?? `Item ${r.item_id}`}, batch ${r.batch_no ?? r.batch_id} — expiring batches`
+        }
         rowClassName={(r) => (r.is_expired ? 'bg-red-50/40' : undefined)}
+        minWidth={480}
       />
     </WidgetCard>
   )
@@ -287,6 +293,12 @@ export function RecentMovementsWidget({ query }: { query: Loadable<StockMovement
         rows={rows}
         rowKey={(r) => r.movement_id}
         to={(r) => (r.document_id ? drill.document(r.document_id) : drill.stockMovements({ itemId: r.item_id }))}
+        rowLabel={(r) =>
+          r.document_no
+            ? `${r.document_no} — ${r.item_name ?? `item ${r.item_id}`}`
+            : `${r.item_name ?? `Item ${r.item_id}`} — movements`
+        }
+        minWidth={480}
       />
     </WidgetCard>
   )

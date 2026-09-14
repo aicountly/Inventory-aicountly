@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { ReactNode } from 'react'
 import { errorMessage, isAbortError, setActiveScope } from '../services/api'
 import type { CompanyScope } from '../services/api'
-import { fetchAllCompanies, fetchCompanyInfo } from '../services/manage'
+import { fetchAllCompanies, fetchCompanyInfo, fetchCompanyLogo } from '../services/manage'
 import { pickFyForDate } from './manageShapes'
 import type { BranchOption, CompanyOption, FyOption } from './manageShapes'
 import { readSelection, writeSelection } from './companyStorage'
@@ -32,6 +32,10 @@ interface CompanyState {
   branches: BranchOption[]
   fyId: number | null
   boId: number
+  /** Letterhead: registered office and GSTIN from Manage, logo as a data URL. */
+  addressLines: string[]
+  gstin: string
+  logo: string | null
 }
 
 export interface CompanyContextValue extends CompanyState {
@@ -62,6 +66,9 @@ const INITIAL: CompanyState = {
   branches: [],
   fyId: null,
   boId: 0,
+  addressLines: [],
+  gstin: '',
+  logo: null,
 }
 
 export function CompanyProvider({ children }: { children: ReactNode }) {
@@ -122,6 +129,8 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
           branches: info.branches,
           fyId,
           boId: rememberedBo,
+          addressLines: info.addressLines,
+          gstin: info.gstin,
         }))
       })
       .catch((err: unknown) => {
@@ -147,6 +156,17 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     return () => controller.abort()
   }, [cmpId, tick])
 
+  // 3. The letterhead logo. Its own request because it is bytes, not JSON, and
+  //    because a company with no logo uploaded must not hold up the app.
+  useEffect(() => {
+    if (!cmpId) return undefined
+    const controller = new AbortController()
+    fetchCompanyLogo(cmpId, controller.signal).then((logo) => {
+      if (!controller.signal.aborted) setState((s) => (s.cmpId === cmpId ? { ...s, logo } : s))
+    })
+    return () => controller.abort()
+  }, [cmpId, tick])
+
   const company = useMemo(() => state.companies.find((c) => c.cmpId === state.cmpId) ?? null, [state.companies, state.cmpId])
   const fy = useMemo(() => state.fyList.find((f) => f.fyId === state.fyId) ?? null, [state.fyList, state.fyId])
   const branch = useMemo(() => (state.boId > 0 ? (state.branches.find((b) => b.boId === state.boId) ?? null) : null), [state.branches, state.boId])
@@ -164,7 +184,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     setState((s) => {
       if (s.cmpId === next || !s.companies.some((c) => c.cmpId === next)) return s
       writeSelection({ cmpId: next, fyId: null, boId: null })
-      return { ...s, cmpId: next, companyName: s.companies.find((c) => c.cmpId === next)?.name ?? '', status: 'loading', error: null, warning: null, fyList: [], branches: [], fyId: null, boId: 0 }
+      return { ...s, cmpId: next, companyName: s.companies.find((c) => c.cmpId === next)?.name ?? '', status: 'loading', error: null, warning: null, fyList: [], branches: [], fyId: null, boId: 0, addressLines: [], gstin: '', logo: null }
     })
   }, [])
 

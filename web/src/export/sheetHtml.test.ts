@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildDocumentPrintHtml, buildTabularPrintHtml, escapeHtml, nameColumnIndex } from './sheetHtml'
 import type { ExportColumn, ExportRow } from './exportColumns'
+import { GOOGLE_FONTS_URL } from './exportTheme'
 
 const COLUMNS: ExportColumn[] = [
   { key: 'movement_date', label: 'Date', format: 'date', align: 'left', excelWidth: 13, pdfWeight: 11 },
@@ -46,12 +47,17 @@ describe('escapeHtml', () => {
 })
 
 describe('buildTabularPrintHtml', () => {
-  it('is a complete standalone document that needs no app stylesheet', () => {
+  it('is a complete standalone document that carries its own webfont', () => {
     const html = buildTabularPrintHtml(BASE)
     expect(html.startsWith('<!doctype html>')).toBe(true)
     expect(html).toContain('<title>Stock movement register</title>')
     expect(html.trimEnd().endsWith('</html>')).toBe(true)
-    expect(html).not.toContain('<link')
+    // The one thing it may not carry in itself: a font face is per-document, so
+    // the sheet has to ask for Nunito and Noto Sans or paper falls back to a
+    // system font while the PDF renders the real ones.
+    expect(html).toContain(`href="${escapeHtml(GOOGLE_FONTS_URL)}" rel="stylesheet"`)
+    expect(html).toContain('rel="preconnect" href="https://fonts.gstatic.com"')
+    expect(html).not.toContain('<link rel="stylesheet" href="/')
   })
 
   it('carries the company, the scope line and every meta pill', () => {

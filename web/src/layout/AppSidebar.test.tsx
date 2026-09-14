@@ -86,6 +86,57 @@ describe('AppSidebar', () => {
     expect(within(nav).queryByText('Dashboard')).toBeNull()
   })
 
+  // The rail is one of the two products' shared geometry: Books' sidebar is
+  // w-60 expanded / w-[4.25rem] collapsed (web/src/components/AppSidebar.jsx:
+  // 552-553), and the two read as one product only if this one matches.
+  it('uses the same rail widths as Books', () => {
+    const { rerender } = renderSidebar()
+    const rail = () => screen.getByLabelText('Primary')
+    expect(rail().className).toContain('w-60')
+
+    rerender(
+      <MemoryRouter initialEntries={['/dashboard']}>
+        <AppSidebar collapsed onToggleCollapsed={() => {}} mobileOpen={false} onNavigate={() => {}} />
+      </MemoryRouter>,
+    )
+    expect(rail().className).toContain('w-[4.25rem]')
+  })
+
+  // The flyout is the rail's SIBLING, so a custom property declared on the rail
+  // never reaches it and `left` falls back to `auto` — the panel then opens at
+  // x=0, on top of the rail it is meant to sit beside. The offset has to arrive
+  // as a resolved value on the panel itself, and it has to equal the rail width.
+  it('opens the mega menu flush against the rail, at the rail width', () => {
+    const { rerender } = renderSidebar()
+    // By href, not by name: a collapsed rail renders the icon only.
+    const openPanel = () => {
+      const rail = screen.getByLabelText('Primary')
+      fireEvent.mouseEnter(rail.querySelector('a[href="/masters"]')?.closest('li') as HTMLElement)
+      return screen
+        .getByRole('link', { name: /Bill of materials/ })
+        .closest('div.fixed') as HTMLElement
+    }
+    expect(openPanel().style.left).toBe('15rem')
+
+    rerender(
+      <MemoryRouter initialEntries={['/dashboard']}>
+        <AppSidebar collapsed onToggleCollapsed={() => {}} mobileOpen={false} onNavigate={() => {}} />
+      </MemoryRouter>,
+    )
+    expect(openPanel().style.left).toBe('4.25rem')
+  })
+
+  it('sizes the mega menu to its columns instead of a fixed three', () => {
+    renderSidebar()
+    fireEvent.mouseEnter(screen.getByRole('link', { name: /Masters/ }).closest('li') as HTMLElement)
+    const grid = screen.getByRole('link', { name: /Bill of materials/ }).closest('div.grid') as HTMLElement
+    expect(grid.getAttribute('style')).toContain('minmax(200px, max-content)')
+    expect(grid.className).not.toContain('grid-cols-')
+    const panel = grid.parentElement as HTMLElement
+    expect(panel.className).toContain('w-max')
+    expect(panel.className).toContain('max-w-[calc(100vw-2rem)]')
+  })
+
   it('offers a collapse control', () => {
     const onToggleCollapsed = vi.fn()
     renderSidebar({ onToggleCollapsed })

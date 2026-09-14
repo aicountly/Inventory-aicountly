@@ -1,6 +1,8 @@
-import { Filter, Search, X } from 'lucide-react'
+import { Filter, X } from 'lucide-react'
 import type { ReactNode, RefObject } from 'react'
 import { ItemFilter } from '../components/ItemFilter'
+import { BatchFilter } from './BatchFilter'
+import { SearchInput } from '../components/SearchInput'
 import { WarehouseSelect } from '../documents/WarehouseSelect'
 import { useReferenceData } from '../documents/useReferenceData'
 import { useFormOptions } from '../hooks/useFormOptions'
@@ -95,6 +97,20 @@ export function RegisterFilterBar({
                   placeholder={f.placeholder ?? `${f.label}…`}
                 />
               </div>
+            )
+
+          case 'batch':
+            return (
+              <BatchFilter
+                key={f.key}
+                label={f.label}
+                value={value}
+                // Batches belong to an item and are stocked in a warehouse, so
+                // the control follows whatever those two filters are set to.
+                itemId={Number(values.item_id) || null}
+                warehouseId={Number(values.warehouse_id) || null}
+                onChange={(id) => onChange(f.key, id)}
+              />
             )
 
           case 'warehouse':
@@ -237,31 +253,15 @@ export function RegisterFilterBar({
             firstText = false
             return (
               <FilterField key={f.key} label={f.label}>
-                <div className="relative">
-                  <Search
-                    className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400"
-                    aria-hidden
-                  />
-                  <Input
-                    ref={isFirst ? searchInputRef : undefined}
-                    type="search"
-                    value={value}
-                    onChange={(e) => onChange(f.key, e.target.value)}
-                    placeholder={f.placeholder ?? f.label}
-                    aria-label={f.label}
-                    className="w-[12rem] pl-7 pr-7"
-                  />
-                  {value ? (
-                    <button
-                      type="button"
-                      onClick={() => onChange(f.key, '')}
-                      className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-gray-400 hover:text-gray-700"
-                      aria-label={`Clear ${f.label}`}
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  ) : null}
-                </div>
+                {/* Debounced: every keystroke here is a navigation and a fetch,
+                    and the value comes back asynchronously through the URL. */}
+                <SearchInput
+                  ref={isFirst ? searchInputRef : undefined}
+                  value={value}
+                  onChange={(next) => onChange(f.key, next)}
+                  placeholder={f.placeholder ?? f.label}
+                  className="w-[12rem]"
+                />
               </FilterField>
             )
           }

@@ -8,6 +8,47 @@ namespace App\Services;
  */
 class StockBalanceService
 {
+    /**
+     * How far below zero an on-hand quantity has to be before it is negative
+     * stock rather than rounding dust from a 4-decimal NUMERIC column.
+     *
+     * One constant because two screens depend on agreeing: the dashboard's
+     * negative-stock card counts with it, and the register that card drills to
+     * filters with it. A card whose register shows a different set of rows is
+     * the failure this is here to prevent.
+     */
+    public const NEGATIVE_ON_HAND_EPSILON = -0.00005;
+
+    /**
+     * Columns the balance register can be ordered by. The register renders a
+     * sort header for exactly these (web/src/registers/configs/stockRegisters.tsx).
+     */
+    public const SORTABLE = [
+        'item_name'        => 'i.item_name',
+        'item_sku'         => 'i.item_sku',
+        'warehouse_id'     => 'w.warehouse_name',
+        'warehouse_name'   => 'w.warehouse_name',
+        'batch_no'         => 'bt.batch_no',
+        'on_hand_qty'      => 'b.on_hand_qty',
+        'reserved_qty'     => 'b.reserved_qty',
+        'committed_qty'    => 'b.committed_qty',
+        'packed_qty'       => 'b.packed_qty',
+        'in_transit_qty'   => 'b.in_transit_qty',
+        'job_worker_qty'   => 'b.job_worker_qty',
+        'quality_hold_qty' => 'b.quality_hold_qty',
+        'damaged_qty'      => 'b.damaged_qty',
+        'blocked_qty'      => 'b.blocked_qty',
+        'expected_qty'     => 'b.expected_qty',
+        'available_qty'    => 'available_qty',
+        'last_movement_at' => 'b.last_movement_at',
+    ];
+
+    /** Is this on-hand quantity below zero, by the tolerance both screens use? */
+    public static function isNegativeOnHand(float $onHandQty): bool
+    {
+        return $onHandQty < self::NEGATIVE_ON_HAND_EPSILON;
+    }
+
     public function __construct(
         protected ?UnitConversionService $units = null,
         protected ?OpeningStockResolver $openings = null,
@@ -184,6 +225,84 @@ class StockBalanceService
         }
 
         return $out;
+    }
+
+    /**
+     * The stock balance register: item x warehouse x batch with every bucket behind "on hand".
+     *
+     * Branch scope travels through the warehouse, because inv_stock_balances has no bo_id of its
+     * own and a warehouse belongs to exactly one branch. A balance with no warehouse, or one in a
+     * warehouse that belongs to no branch, is company-wide and stays in view — the same predicate
+     * the batch, serial and near-expiry registers already apply.
+     *
+     * @param array{warehouse_id?: ?int, item_id?: ?int, batch_id?: ?int, nonzero?: bool, negative?: bool, sort?: string, order?: string} $filters
+     *
+     * @return array{rows: list<array<string, mixed>>, total: int}
+     */
+    public function listBalances(int $cmpId, int $boId, array $filters, int $limit, int $offset): array
+    {
+        $db = \Config\Database::connect();
+        $b = $db->table('inv_stock_balances b')
+            ->select('b.*, i.item_name, i.item_sku, w.warehouse_name, bt.batch_no, (b.on_hand_qty - b.reserved_qty - b.packed_qty - b.quality_hold_qty - b.damaged_qty - b.blocked_qty) AS available_qty', false)
+            ->join('inv_items i', 'i.item_id = b.item_id', 'left')
+            ->join('inv_warehouses w', 'w.warehouse_id = b.warehouse_id', 'left')
+            ->join('inv_batches bt', 'bt.batch_id = b.batch_id', 'left')
+            ->where('b.cmp_id', $cmpId);
+        if ($boId > 0) {
+            $b->groupStart()->where('b.warehouse_id', null)->orWhere('w.bo_id', 0)->orWhere('w.bo_id', $boId)->groupEnd();
+        }
+        if (!empty($filters['warehouse_id'])) {
+            $b->where('b.warehouse_id', (int) $filters['warehouse_id']);
+        }
+        if (!empty($filters['item_id'])) {
+            $b->where('b.item_id', (int) $filters['item_id']);
+        }
+        // The grid has a batch column; "which of these rows is batch B-102" was
+        // a question it could show and not answer.
+        if (!empty($filters['batch_id'])) {
+            $b->where('b.batch_id', (int) $filters['batch_id']);
+        }
+        if (!empty($filters['nonzero'])) {
+            $b->groupStart()->where('b.on_hand_qty !=', 0)->orWhere('b.reserved_qty !=', 0)->orWhere('b.packed_qty !=', 0)->orWhere('b.job_worker_qty !=', 0)->groupEnd();
+        }
+        if (!empty($filters['negative'])) {
+            $b->where('b.on_hand_qty <', self::NEGATIVE_ON_HAND_EPSILON);
+        }
+        $total = (clone $b)->countAllResults(false);
+        $order = strtoupper((string) ($filters['order'] ?? 'ASC')) === 'DESC' ? 'DESC' : 'ASC';
+        $rows = $b->orderBy(self::SORTABLE[(string) ($filters['sort'] ?? '')] ?? 'i.item_name', $order)
+            // A stable tail, so paging through 4,000 rows never repeats or skips one.
+            ->orderBy('i.item_name', 'ASC')->orderBy('w.warehouse_name', 'ASC')->orderBy('b.balance_id', 'ASC')
+            ->limit($limit, $offset)->get()->getResultArray();
+
+        return ['rows' => $rows, 'total' => $total];
+    }
+
+    /**
+     * The dashboard's negative-stock figures: items whose on-hand across the branch is below
+     * zero, and the individual balance rows behind them.
+     *
+     * Same table, same tolerance and same branch predicate as listBalances(), because the card
+     * drills straight into that register with ?negative=1: the row count is what the reader
+     * sees listed there, down to the batch, so it is counted the same way and not grouped.
+     *
+     * @return array{items: int, rows: int}
+     */
+    public function negativeStockCounts(int $cmpId, int $boId): array
+    {
+        $db = \Config\Database::connect();
+        $scope = 'b.cmp_id = ?';
+        $binds = [$cmpId];
+        if ($boId > 0) {
+            $scope .= ' AND (b.warehouse_id IS NULL OR w.bo_id = 0 OR w.bo_id = ?)';
+            $binds[] = $boId;
+        }
+        $from = ' FROM inv_stock_balances b LEFT JOIN inv_warehouses w ON w.warehouse_id = b.warehouse_id WHERE ' . $scope;
+        $binds[] = self::NEGATIVE_ON_HAND_EPSILON;
+        $items = $db->query('SELECT COUNT(*) AS cnt FROM (SELECT b.item_id' . $from . ' GROUP BY b.item_id HAVING SUM(b.on_hand_qty) < ?) t', $binds)->getRowArray() ?: [];
+        $rows = $db->query('SELECT COUNT(*) AS cnt' . $from . ' AND b.on_hand_qty < ?', $binds)->getRowArray() ?: [];
+
+        return ['items' => (int) ($items['cnt'] ?? 0), 'rows' => (int) ($rows['cnt'] ?? 0)];
     }
 
     /**

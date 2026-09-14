@@ -3,7 +3,6 @@ import {
   ArrowLeftRight,
   Barcode,
   BookOpen,
-  BookmarkCheck,
   Coins,
   Library,
   Boxes,
@@ -259,6 +258,12 @@ export const REPORT_NAV: readonly NavLeaf[] = [
  * a report summarises, a register lists line by line and drills through to the
  * document behind each line.
  */
+/*
+ * Reservations and reconciliation runs are deliberately absent: both screens
+ * carry actions the register has no room for ("New reservation", "Release",
+ * "Fulfil", "Run now"), so the action screen stays the single nav door and the
+ * printable register is one click away on the hub.
+ */
 export const REGISTER_NAV: readonly NavLeaf[] = [
   {
     label: 'All registers',
@@ -296,25 +301,11 @@ export const REGISTER_NAV: readonly NavLeaf[] = [
     permissions: [P.report('valuation')],
   },
   {
-    label: 'Reservations',
-    path: '/registers/reservations',
-    description: 'Reserved, fulfilled and still-open allocations of stock.',
-    icon: BookmarkCheck,
-    permissions: ['documents.reservation.read', P.documentsRead],
-  },
-  {
     label: 'Pending quantities',
     path: '/registers/pending-quantities',
     description: 'Everything issued or expected and not yet settled.',
     icon: Timer,
     permissions: [P.documentsRead],
-  },
-  {
-    label: 'Reconciliation runs',
-    path: '/registers/reconciliation-runs',
-    description: 'Inventory versus the Books stock ledger, run by run.',
-    icon: Repeat,
-    permissions: [P.reconciliationRead],
   },
 ]
 
@@ -444,7 +435,7 @@ export const SIDEBAR_NAV: readonly SidebarNavItem[] = [
           },
           {
             label: 'Pending quantities',
-            path: '/pending-quantities',
+            path: '/registers/pending-quantities',
             description: 'Challans and job work still to be settled.',
             icon: Timer,
             permissions: [P.documentsRead],
@@ -457,31 +448,36 @@ export const SIDEBAR_NAV: readonly SidebarNavItem[] = [
     key: 'stock',
     label: 'Stock',
     icon: Boxes,
-    path: '/stock',
+    path: '/registers/stock-balances',
     permissions: STOCK_PERMISSIONS,
     megaMenu: [
       {
         label: 'Stock',
         icon: Boxes,
         items: [
+          // These three are the registers, not a second plain copy of them:
+          // shipping both doors is what left a user on the old screen wondering
+          // why their colleague's looked different.
           {
             label: 'Balances',
-            path: '/stock',
-            end: true,
+            path: '/registers/stock-balances',
             description: 'On-hand, reserved and available quantity per item.',
             icon: Boxes,
+            permissions: [P.report('warehouse_stock'), P.report('stock_summary')],
           },
           {
             label: 'Ledger',
-            path: '/stock/ledger',
+            path: '/registers/stock-ledger',
             description: 'Every movement of one item, in date order.',
             icon: ScrollText,
+            permissions: [P.report('stock_ledger')],
           },
           {
             label: 'Movements',
-            path: '/stock/movements',
+            path: '/registers/movement-register',
             description: 'All movements for the period across items.',
             icon: Repeat,
+            permissions: [P.report('stock_ledger'), P.documentsRead],
           },
         ],
       },
@@ -491,7 +487,7 @@ export const SIDEBAR_NAV: readonly SidebarNavItem[] = [
     key: 'valuation',
     label: 'Valuation',
     icon: Gauge,
-    path: '/valuation',
+    path: '/registers/valuation',
     permissions: [P.report('valuation')],
     megaMenu: [
       {
@@ -500,8 +496,7 @@ export const SIDEBAR_NAV: readonly SidebarNavItem[] = [
         items: [
           {
             label: 'Snapshot',
-            path: '/valuation',
-            end: true,
+            path: '/registers/valuation',
             description: 'Value of stock on hand by the chosen method.',
             icon: Gauge,
           },

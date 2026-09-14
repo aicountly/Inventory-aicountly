@@ -416,6 +416,13 @@ function drawHeader(doc: jsPDF, theme: ExportTheme, a: PdfHeaderArgs, pageWidth:
   return y + h + 3
 }
 
+/** The ink a KPI tone is drawn in. Anything else keeps the sheet's own colour. */
+function toneColor(theme: ExportTheme, tone: string | undefined): RGB | null {
+  if (tone === 'credit') return theme.red600
+  if (tone === 'warn') return theme.amber600
+  return null
+}
+
 function drawSummaryCards(
   doc: jsPDF,
   theme: ExportTheme,
@@ -435,7 +442,7 @@ function drawSummaryCards(
     const col = index % perRow
     if (col === 0 && index > 0) cursorY += cardH + gap
     const cx = x + col * (cardW + gap)
-    const accent = card.tone === 'credit' ? theme.red600 : theme.primary
+    const accent = toneColor(theme, card.tone) ?? theme.primary
 
     doc.setFillColor(255, 255, 255)
     doc.setDrawColor(...rgbArgs(theme.gray[200]))
@@ -453,7 +460,7 @@ function drawSummaryCards(
 
     setLabelFont(doc, 'bold')
     doc.setFontSize(9)
-    doc.setTextColor(...rgbArgs(card.tone === 'credit' ? theme.red600 : theme.gray[900]))
+    doc.setTextColor(...rgbArgs(toneColor(theme, card.tone) ?? theme.gray[900]))
     doc.text(formatPdfCurrencyLabel(card.value), cx + cardW - 3, cursorY + 9.5, {
       align: 'right',
       maxWidth: cardW - 6,

@@ -186,9 +186,62 @@ class PendingQuantityService
     }
 
     /**
+     * Columns the pending register can order by, and how each compares. The rows are assembled
+     * in PHP (qty_open is derived), so the ordering is too — but only over the whole filtered
+     * set, never over the page, or the second page would be sorted against a different list.
+     */
+    public const SORTABLE = [
+        'document_date'  => 'text',
+        'document_no'    => 'text',
+        'document_type'  => 'text',
+        'pending_kind'   => 'text',
+        'direction'      => 'text',
+        'item_name'      => 'text',
+        'warehouse_name' => 'text',
+        'status'         => 'text',
+        'party_ref'      => 'numeric',
+        'qty_original'   => 'numeric',
+        'qty_settled'    => 'numeric',
+        'qty_open'       => 'numeric',
+    ];
+
+    /**
+     * Order open pending rows by one of SORTABLE, leaving the service's own
+     * document-date order in place for anything else.
+     *
+     * @param list<array<string, mixed>> $rows
      * @return list<array<string, mixed>>
      */
-    public function listOpen(int $cmpId, ?string $kind = null, ?string $direction = null, ?int $partyRef = null, ?int $itemId = null, ?int $warehouseId = null): array
+    public static function sortOpenRows(array $rows, string $sort, string $order): array
+    {
+        $kind = self::SORTABLE[$sort] ?? null;
+        if ($kind === null) {
+            return strtoupper($order) === 'DESC' ? array_reverse($rows) : array_values($rows);
+        }
+        $sign = strtoupper($order) === 'DESC' ? -1 : 1;
+        usort($rows, static function ($x, $y) use ($sort, $kind, $sign) {
+            $c = $kind === 'text'
+                ? strcasecmp((string) ($x[$sort] ?? ''), (string) ($y[$sort] ?? ''))
+                : (float) ($x[$sort] ?? 0) <=> (float) ($y[$sort] ?? 0);
+
+            // pending_id last, so an equal-valued pair keeps one stable order across pages.
+            return $c !== 0 ? $sign * $c : (int) ($x['pending_id'] ?? 0) <=> (int) ($y['pending_id'] ?? 0);
+        });
+
+        return array_values($rows);
+    }
+
+    /**
+     * Open pending quantities for the register behind /pending-quantities.
+     *
+     * $boId scopes to a branch through the document that raised the row, the way the document
+     * register itself does — a pending line has no branch of its own. It is deliberately not
+     * scoped by financial year: goods sent to a job worker in February are still out in April,
+     * and dropping them at the year boundary would understate ITC-04 and every open challan.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function listOpen(int $cmpId, ?string $kind = null, ?string $direction = null, ?int $partyRef = null, ?int $itemId = null, ?int $warehouseId = null, int $boId = 0): array
     {
         $db = \Config\Database::connect();
         $b = $db->table('inv_pending_quantities p')
@@ -213,6 +266,9 @@ class PendingQuantityService
         }
         if ($warehouseId) {
             $b->where('p.warehouse_id', $warehouseId);
+        }
+        if ($boId > 0) {
+            $b->where('d.bo_id', $boId);
         }
 
         return $b->get()->getResultArray();

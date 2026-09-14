@@ -261,6 +261,11 @@ export const nearExpiryConfig: RegisterConfig<NearExpiryRow, NearExpirySummary> 
     { key: 'as_of', kind: 'date', label: 'As at', defaultValue: (c) => c.today },
     { key: 'days', kind: 'number', label: 'Within days', defaultValue: () => '30' },
     { key: 'include_expired', kind: 'toggle', label: 'Include expired', defaultOn: true },
+    // Expired stock is a different job from stock about to expire — it is written
+    // off, returned or destroyed, not planned around — and until this existed the
+    // dashboard's "Expired batches" card had nowhere to send the reader that
+    // could show its figure.
+    { key: 'expired_only', kind: 'toggle', label: 'Expired only', defaultOn: false },
     itemFilter,
     warehouseFilter,
     itemGroupFilter,
@@ -323,8 +328,9 @@ export const nearExpiryConfig: RegisterConfig<NearExpiryRow, NearExpirySummary> 
       icon: AlertTriangle,
       tone: s.expired_batches > 0 ? 'danger' : 'success',
       // Straight to the ones that have already gone — nothing else on this
-      // screen is as urgent.
-      to: '/registers/near-expiry?days=0&include_expired=1',
+      // screen is as urgent — and the register's own batch count is then this
+      // very figure.
+      to: '/registers/near-expiry?expired_only=1',
     },
   ],
   summary: (s) => [
@@ -396,7 +402,10 @@ export const replenishmentConfig: RegisterConfig<ReplenishmentRow, Replenishment
       value: formatInt(s.triggered_total),
       icon: ShoppingCart,
       tone: s.triggered_total > 0 ? 'warning' : 'success',
-      to: '/registers/replenishment?only_triggered=1',
+      // `only_triggered` is already on by default, so linking to it alone left
+      // the card doing nothing when clicked. Worst shortfall first is the thing
+      // a reader wants from this figure, and it is a filter the endpoint reads.
+      to: '/registers/replenishment?only_triggered=1&sort=projected&order=asc',
     },
     // The endpoint only totals the page it served, so the label has to say so
     // rather than let a reader read it as the whole result.

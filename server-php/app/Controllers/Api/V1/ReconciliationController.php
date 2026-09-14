@@ -26,6 +26,9 @@ class ReconciliationController extends BaseController
     }
 
     /** GET /reconciliation?status=&from=&to=&all_fy=0|1 */
+    /** Columns the run register can order by; its sort headers are drawn from this list. */
+    public const SORTABLE = ['created_at', 'as_of_date', 'run_id', 'difference', 'status', 'inventory_closing_qty', 'inventory_closing_value', 'books_stock_ledger_balance'];
+
     public function index()
     {
         $a = $this->authorize('reconciliation.read');
@@ -59,7 +62,7 @@ class ReconciliationController extends BaseController
             $b->where('as_of_date <=', $to);
         }
         $total = (clone $b)->countAllResults(false);
-        $sort = in_array($p['sort'], ['created_at', 'as_of_date', 'run_id', 'difference', 'status', 'inventory_closing_value', 'books_stock_ledger_balance'], true) ? $p['sort'] : 'created_at';
+        $sort = in_array($p['sort'], self::SORTABLE, true) ? $p['sort'] : 'created_at';
         $rows = $b->select('run_id, run_uuid, cmp_id, fy_id, bo_id, as_of_date, inventory_closing_value, inventory_closing_qty, books_stock_ledger_balance, difference, status, requested_by, created_at')
             ->orderBy($sort, $p['order'])->orderBy('run_id', 'DESC')
             ->limit($p['limit'], $p['offset'])->get()->getResultArray();

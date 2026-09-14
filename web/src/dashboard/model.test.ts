@@ -4,8 +4,10 @@ import {
   buildKpiCards,
   documentStatusSeries,
   donutArcs,
+  inboundSeries,
   movementSeries,
   outboxSeries,
+  postedTypeSeries,
   pendingSeries,
   topShare,
   warehouseSeries,
@@ -321,6 +323,66 @@ describe('documentStatusSeries', () => {
   })
 })
 
+describe('the masters counters still reach the page', () => {
+  it('says how many warehouses the quantity is spread across', () => {
+    const card = buildKpiCards({
+      asOf: ASOF,
+      nearExpiryDays: 30,
+      core: core(),
+      stock,
+      expiry,
+      replenishment,
+    }).find((c) => c.key === 'stock_qty')!
+    expect(card.hint).toBe('Base units across 4 active warehouses')
+  })
+
+  it('falls back to a figure-free hint until the payload lands', () => {
+    const card = buildKpiCards({
+      asOf: ASOF,
+      nearExpiryDays: 30,
+      core: null,
+      stock,
+      expiry,
+      replenishment,
+    }).find((c) => c.key === 'stock_qty')!
+    expect(card.hint).toBe('Base units across all warehouses')
+  })
+})
+
+describe('postedTypeSeries', () => {
+  it('shows what was actually raised, biggest first, and links each type', () => {
+    const series = postedTypeSeries(core().documents.posted_by_type)
+    expect(series.map((s) => s.key)).toEqual(['SALES_ISSUE', 'PURCHASE_RECEIPT'])
+    expect(series[0].to).toBe('/documents?document_type=SALES_ISSUE')
+    expect(series[0].label).not.toBe('SALES_ISSUE')
+  })
+
+  it('keeps the share honest when the list is capped', () => {
+    const many = { A: 10, B: 8, C: 6, D: 4, E: 3, F: 2, G: 1 }
+    const series = postedTypeSeries(many, 3)
+    expect(series).toHaveLength(3)
+    // 10 of 34, not 10 of the 24 on screen.
+    expect(series[0].share).toBeCloseTo((10 / 34) * 100, 5)
+  })
+
+  it('handles a missing payload', () => {
+    expect(postedTypeSeries(null)).toEqual([])
+    expect(postedTypeSeries({})).toEqual([])
+  })
+})
+
+describe('inboundSeries', () => {
+  it('reports the half of the sync that comes from Books', () => {
+    const series = inboundSeries(core().integration.inbound)
+    expect(series.map((s) => s.key)).toEqual(['RECEIVED', 'PROCESSED', 'FAILED'])
+    expect(series.find((s) => s.key === 'FAILED')?.tone).toBe('critical')
+  })
+
+  it('links nowhere, because there is no inbound screen to land on', () => {
+    expect(inboundSeries(core().integration.inbound).every((s) => s.to === undefined)).toBe(true)
+  })
+})
+
 describe('outboxSeries / pendingSeries', () => {
   it('colours a dead outbox event as critical and a failure as a warning', () => {
     const series = outboxSeries(core().integration.outbox)
@@ -331,7 +393,7 @@ describe('outboxSeries / pendingSeries', () => {
   it('links pending quantities by kind', () => {
     const series = pendingSeries(core().stock.pending_quantities)
     expect(series.map((s) => s.key)).toEqual(['challan', 'job_work'])
-    expect(series[0].to).toBe('/pending-quantities?kind=challan')
+    expect(series[0].to).toBe('/registers/pending-quantities?kind=challan')
   })
 })
 

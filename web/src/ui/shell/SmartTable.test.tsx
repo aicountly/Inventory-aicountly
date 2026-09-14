@@ -28,6 +28,46 @@ function renderTable(ui: ReactElement) {
   return render(<MemoryRouter>{ui}</MemoryRouter>)
 }
 
+describe('SmartTable grouping', () => {
+  const grouped: Row[] = [
+    { id: 1, code: 'ITEM-1', qty: 10, note: 'A' },
+    { id: 2, code: 'ITEM-2', qty: 20, note: 'A' },
+    { id: 3, code: 'ITEM-3', qty: 30, note: 'B' },
+  ]
+  const byNote = (r: Row) => ({ key: r.note ?? '', label: `Note ${r.note}` })
+
+  it('puts a heading over each group and a subtotal under it', () => {
+    renderTable(
+      <SmartTable
+        columns={columns}
+        rows={grouped}
+        rowKey="id"
+        rowGroup={byNote}
+        groupSubtotal={(rs, g) => ({ code: `${g.label} subtotal`, qty: rs.reduce((a, r) => a + r.qty, 0) })}
+      />,
+    )
+    expect(screen.getByText('Note A')).toBeTruthy()
+    expect(screen.getByText('Note B')).toBeTruthy()
+    const subtotal = screen.getByText('Note A subtotal').closest('tr') as HTMLElement
+    // 10 + 20 for the first group.
+    expect(within(subtotal).getByText('30')).toBeTruthy()
+    // 3 data rows + 2 headings + 2 subtotals + the header row.
+    expect(screen.getAllByRole('row')).toHaveLength(8)
+  })
+
+  it('renders headings without subtotals when the register asks for none', () => {
+    renderTable(<SmartTable columns={columns} rows={grouped} rowKey="id" rowGroup={byNote} />)
+    expect(screen.getByText('Note A')).toBeTruthy()
+    expect(screen.getAllByRole('row')).toHaveLength(6)
+  })
+
+  it('leaves the table exactly as it was when nothing is grouped', () => {
+    renderTable(<SmartTable columns={columns} rows={grouped} rowKey="id" />)
+    expect(screen.getAllByRole('row')).toHaveLength(4)
+    expect(screen.queryByText('Note A')).toBeNull()
+  })
+})
+
 describe('SmartTable', () => {
   it('renders a header and a row per record', () => {
     renderTable(<SmartTable columns={columns} rows={rows} rowKey="id" />)

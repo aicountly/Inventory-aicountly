@@ -253,6 +253,7 @@ export function TopItemsWidget({
         rows={rows}
         rowKey={(r) => r.item_id}
         to={(r) => drill.itemLedger(r.item_id, period)}
+        rowLabel={(r) => `${r.item_name ?? `Item ${r.item_id}`} — stock ledger`}
       />
     </WidgetCard>
   )

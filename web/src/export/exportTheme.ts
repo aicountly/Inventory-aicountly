@@ -37,6 +37,7 @@ export interface ExportTheme {
   workspaceBg: RGB
   gray: ExportGrayScale
   red600: RGB
+  amber600: RGB
   /** Positive / debit figures. */
   debitColor: RGB
   /** Negative / credit figures — the house rule is red. */
@@ -57,6 +58,7 @@ const GRAY: ExportGrayScale = {
 
 const WORKSPACE_BG: RGB = [245, 247, 250]
 const RED_600: RGB = [220, 38, 38]
+const AMBER_600: RGB = [217, 119, 6]
 
 /** Books' brand defaults, used when no stylesheet is available (tests, SSR). */
 export const DEFAULT_PRIMARY: RGB = [37, 176, 3]
@@ -114,6 +116,7 @@ export function getExportTheme(): ExportTheme {
     workspaceBg: WORKSPACE_BG,
     gray: GRAY,
     red600: RED_600,
+    amber600: AMBER_600,
     debitColor: GRAY[900],
     creditColor: RED_600,
     cardShadow: '0 1px 2px rgba(15, 23, 42, 0.04)',

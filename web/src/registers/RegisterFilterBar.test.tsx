@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { RegisterFilterBar } from './RegisterFilterBar'
 import type { ReportFilter } from '../reports/types'
@@ -38,6 +38,17 @@ vi.mock('./useDocumentTypeOptions', () => ({
   }),
 }))
 
+vi.mock('../services/lookupApi', () => ({
+  lookupApi: {
+    batches: async () => ({
+      data: [
+        { batch_id: 7, item_id: 12, batch_no: 'B-102', lot_no: null, mfg_date: null, expiry_date: '2026-12-31', status: 'active' },
+      ],
+      meta: { total: 1, limit: 200, offset: 0 },
+    }),
+  },
+}))
+
 vi.mock('../components/ItemFilter', () => ({
   ItemFilter: ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
     <input aria-label="Item" value={value} onChange={(e) => onChange(e.target.value)} />
@@ -45,6 +56,8 @@ vi.mock('../components/ItemFilter', () => ({
 }))
 
 const ctx = { today: '2026-09-14', fyFrom: '2026-04-01', fyTo: '2027-03-31' }
+
+const itemFilterSpec: ReportFilter = { key: 'item_id', kind: 'item', label: 'Item' }
 
 function renderBar(
   filters: ReportFilter[],
@@ -135,7 +148,7 @@ describe('RegisterFilterBar', () => {
     expect(onChange).toHaveBeenCalledWith('nonzero', '1')
 
     fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'bolt' } })
-    expect(onChange).toHaveBeenCalledWith('q', 'bolt')
+    expect(screen.getByLabelText('Search')).toHaveProperty('value', 'bolt')
   })
 
   it('gives a select with no blank option an explicit "all" row', () => {
@@ -157,10 +170,46 @@ describe('RegisterFilterBar', () => {
     expect(select.options[0].text).toBe('In and out')
   })
 
-  it('clears a text filter from its own × button', () => {
-    const { onChange } = renderBar([{ key: 'q', kind: 'text', label: 'Search' }], { q: 'bolt' })
-    fireEvent.click(screen.getByRole('button', { name: 'Clear Search' }))
-    expect(onChange).toHaveBeenCalledWith('q', '')
+  it('searches after the user pauses, not once per keystroke', async () => {
+    // Each call here is a URL write, a navigation and a fetch, with the value
+    // fed back asynchronously — typing four characters used to cost four.
+    vi.useFakeTimers()
+    try {
+      const { onChange } = renderBar([{ key: 'q', kind: 'text', label: 'Search' }])
+      const box = screen.getByLabelText('Search')
+      for (const value of ['b', 'bo', 'bol', 'bolt']) {
+        fireEvent.change(box, { target: { value } })
+      }
+      expect(onChange).not.toHaveBeenCalled()
+      // The caret must also survive: the box shows what was typed straight away.
+      expect(box).toHaveProperty('value', 'bolt')
+      await act(async () => {
+        vi.advanceTimersByTime(350)
+      })
+      expect(onChange).toHaveBeenCalledTimes(1)
+      expect(onChange).toHaveBeenCalledWith('q', 'bolt')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('clears a text filter from its own × button', async () => {
+    vi.useFakeTimers()
+    try {
+      const { onChange } = renderBar([{ key: 'q', kind: 'text', label: 'Search' }], { q: 'bolt' })
+      fireEvent.click(screen.getByRole('button', { name: 'Clear search' }))
+      await act(async () => {
+        vi.advanceTimersByTime(350)
+      })
+      expect(onChange).toHaveBeenCalledWith('q', '')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('offers the / shortcut hint on the search box', () => {
+    renderBar([{ key: 'q', kind: 'text', label: 'Search' }])
+    expect(screen.getByText('/')).toBeTruthy()
   })
 
   it('offers Reset only when something is filtered', () => {
@@ -187,6 +236,39 @@ describe('RegisterFilterBar', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: 'Reset' }))
     expect(onReset).toHaveBeenCalled()
+  })
+
+  it('offers the item\u2019s batches once an item is chosen', async () => {
+    // Every batch-bearing endpoint has read batch_id all along; the bar simply
+    // had no control that could send one.
+    const { onChange } = renderBar(
+      [itemFilterSpec, { key: 'batch_id', kind: 'batch', label: 'Batch' }],
+      { item_id: '12' },
+    )
+    const select = screen.getByLabelText('Batch') as HTMLSelectElement
+    expect(select.disabled).toBe(false)
+    await waitFor(() => expect(select.options).toHaveLength(2))
+    expect(select.options[1].value).toBe('7')
+    expect(select.options[1].text).toContain('B-102')
+
+    fireEvent.change(select, { target: { value: '7' } })
+    expect(onChange).toHaveBeenCalledWith('batch_id', '7')
+  })
+
+  it('stays inert until there is an item, because a batch belongs to one', () => {
+    renderBar([itemFilterSpec, { key: 'batch_id', kind: 'batch', label: 'Batch' }])
+    const select = screen.getByLabelText('Batch') as HTMLSelectElement
+    expect(select.disabled).toBe(true)
+    expect(select.options[0].text).toBe('Pick an item first')
+  })
+
+  it('drops a batch left over from a cleared item', async () => {
+    // Otherwise the register filters to nothing while the control says "All".
+    const { onChange } = renderBar(
+      [itemFilterSpec, { key: 'batch_id', kind: 'batch', label: 'Batch' }],
+      { batch_id: '7' },
+    )
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith('batch_id', ''))
   })
 
   it('renders the trailing slot for exports and counts', () => {

@@ -27,6 +27,7 @@ const GROUP_LABELS: Record<string, string> = {
   quick: 'Recent',
   month: 'Months',
   quarter: 'Quarters',
+  half: 'Half years',
   year: 'Financial year',
   special: '',
 }

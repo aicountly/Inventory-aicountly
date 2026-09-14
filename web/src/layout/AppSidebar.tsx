@@ -24,6 +24,34 @@ interface FlyoutState {
 
 const CLOSE_DELAY_MS = 120
 
+/* Books' rail, to the pixel: web/src/components/AppSidebar.jsx:552-553. The
+   flyout opens flush against the rail's outer edge, so its offset is the rail
+   width itself — declared here with it so the two cannot drift apart. */
+const RAIL_WIDTH_EXPANDED = '15rem'
+const RAIL_WIDTH_COLLAPSED = '4.25rem'
+
+/* Matches the `md:` breakpoint the rail switches on. Below it the rail is an
+   overlay drawer, and a drawer has obligations a static rail does not. */
+const DESKTOP_QUERY = '(min-width: 768px)'
+
+const DRAWER_FOCUSABLE = 'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
+/* The collapse control is `hidden md:flex`, so at drawer widths it is
+   display:none. A trap that counted it would hand Tab to something that cannot
+   take focus, and focus would land on the page behind the scrim instead. */
+function drawerFocusables(aside: HTMLElement): HTMLElement[] {
+  return [...aside.querySelectorAll<HTMLElement>(DRAWER_FOCUSABLE)].filter(
+    (el) => window.getComputedStyle(el).display !== 'none',
+  )
+}
+
+function matchesDesktop(): boolean {
+  // No matchMedia: assume the static rail, which is the state that needs no
+  // special handling — never lock a usable rail away behind `inert`.
+  if (typeof window === 'undefined' || !window.matchMedia) return true
+  return window.matchMedia(DESKTOP_QUERY).matches
+}
+
 function isLeafActive(pathname: string, leaf: NavLeaf): boolean {
   if (!leaf.path) return false
   const [path] = leaf.path.split('?')
@@ -33,12 +61,14 @@ function isLeafActive(pathname: string, leaf: NavLeaf): boolean {
 function MegaMenu({
   item,
   top,
+  left,
   onNavigate,
   onMouseEnter,
   onMouseLeave,
 }: {
   item: SidebarNavItem
   top: number
+  left: string
   onNavigate: () => void
   onMouseEnter: () => void
   onMouseLeave: () => void
@@ -48,20 +78,23 @@ function MegaMenu({
   return (
     <div
       // Fixed, not absolute: the rail scrolls and would clip an absolute panel.
-      style={{ top: Math.min(top, Math.max(64, window.innerHeight - 140)) }}
-      className="aic fixed left-[var(--sidebar-flyout-left)] z-40 hidden md:block print:hidden"
+      // `left` is inline rather than a custom property because this panel is
+      // the rail's sibling, and a custom property only reaches descendants.
+      style={{ top: Math.min(top, Math.max(64, window.innerHeight - 140)), left }}
+      className="aic fixed z-40 hidden md:block print:hidden"
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
     >
-      <div className="ml-1 rounded-xl border border-gray-200 bg-white shadow-overlay p-3 max-h-[70vh] overflow-auto scrollbar-thin animate-rise-in">
+      <div className="ml-1 w-max max-w-[calc(100vw-2rem)] rounded-xl border border-gray-200 bg-white shadow-overlay p-3 max-h-[70vh] overflow-auto scrollbar-thin animate-rise-in">
+        {/* One column per section, each as wide as it needs and no wider — a
+            fixed three-column grid squeezed a four-section menu and left a
+            two-section one with a column of air. Books does the same. */}
         <div
-          className={cx(
-            'grid gap-x-5 gap-y-1',
-            columns.length > 2 ? 'grid-cols-3' : columns.length === 2 ? 'grid-cols-2' : 'grid-cols-1',
-          )}
+          className="grid gap-x-5 gap-y-1"
+          style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(200px, max-content))` }}
         >
           {columns.map((column) => (
-            <div key={column.label} className="min-w-[13rem]">
+            <div key={column.label} className="min-w-[200px]">
               <p className="px-2 pb-1 text-label-xs font-semibold uppercase tracking-wide text-gray-400">
                 {column.label}
               </p>
@@ -125,6 +158,8 @@ export function AppSidebar({
   const location = useLocation()
   const [flyout, setFlyout] = useState<FlyoutState | null>(null)
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const asideRef = useRef<HTMLElement>(null)
+  const [isDesktop, setIsDesktop] = useState(matchesDesktop)
 
   // While permissions load every entry shows; once known, entries the user
   // cannot open disappear rather than leading to a "forbidden" page.
@@ -163,20 +198,54 @@ export function AppSidebar({
 
   useEffect(() => () => cancelClose(), [cancelClose])
 
+  useEffect(() => {
+    if (!window.matchMedia) return undefined
+    const mql = window.matchMedia(DESKTOP_QUERY)
+    const onChange = (e: MediaQueryListEvent) => setIsDesktop(e.matches)
+    mql.addEventListener('change', onChange)
+    return () => mql.removeEventListener('change', onChange)
+  }, [])
+
+  // Closed, the drawer is only translated off-screen: without `inert` every
+  // link in it stays tabbable and announced, so a keyboard user walks an
+  // invisible menu on the way from the topbar to the page.
+  const drawerOpen = !isDesktop && mobileOpen
+  const drawerHidden = !isDesktop && !mobileOpen
+
+  // Open, the page behind the scrim is still tabbable, so focus has to be put
+  // in the drawer and held there until it closes.
+  useEffect(() => {
+    const aside = asideRef.current
+    if (!drawerOpen || !aside) return undefined
+    const restoreTo = document.activeElement as HTMLElement | null
+    drawerFocusables(aside)[0]?.focus()
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') return
+      const items = drawerFocusables(aside)
+      if (items.length === 0) return
+      const edge = e.shiftKey ? items[0] : items[items.length - 1]
+      if (document.activeElement !== edge) return
+      e.preventDefault()
+      ;(e.shiftKey ? items[items.length - 1] : items[0]).focus()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      if (restoreTo?.isConnected) restoreTo.focus()
+    }
+  }, [drawerOpen])
+
   const activeFlyoutItem = flyout ? items.find((i) => i.key === flyout.key) : undefined
 
   return (
     <>
       <aside
-        style={
-          {
-            '--sidebar-flyout-left': collapsed ? '3.5rem' : '14rem',
-          } as React.CSSProperties
-        }
+        ref={asideRef}
+        inert={drawerHidden}
         className={cx(
           AIC,
           'app-sidebar print:hidden fixed inset-y-0 left-0 z-40 flex flex-col border-r border-gray-200 bg-white transition-[width,transform] duration-200 md:static md:translate-x-0',
-          collapsed ? 'w-14' : 'w-56',
+          collapsed ? 'w-[4.25rem]' : 'w-60',
           mobileOpen ? 'translate-x-0 shadow-overlay' : '-translate-x-full',
         )}
         aria-label="Primary"
@@ -292,6 +361,7 @@ export function AppSidebar({
         <MegaMenu
           item={activeFlyoutItem}
           top={flyout.top}
+          left={collapsed ? RAIL_WIDTH_COLLAPSED : RAIL_WIDTH_EXPANDED}
           onNavigate={onNavigate}
           onMouseEnter={cancelClose}
           onMouseLeave={scheduleClose}

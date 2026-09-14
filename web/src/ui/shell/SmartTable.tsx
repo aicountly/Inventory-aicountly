@@ -109,6 +109,17 @@ export interface SmartTableProps<T> {
   /** Pinned tfoot row keyed by column key — pass server totals, not page sums. */
   totals?: Record<string, ReactNode> | ((col: SmartColumn<T>) => ReactNode)
 
+  /**
+   * In-table grouping: which group a row belongs to, and what to call it.
+   *
+   * The rows must already be ordered so that a group's rows are adjacent — the
+   * table groups what it is given, it does not re-sort behind the caller's back
+   * and quietly undo the sort column the reader picked.
+   */
+  rowGroup?: (row: T, index: number) => { key: string; label: string } | null
+  /** Subtotal cells for one group, keyed by column key. Omit for headers only. */
+  groupSubtotal?: (rows: readonly T[], group: { key: string; label: string }) => Record<string, ReactNode>
+
   size?: 'xs' | 'sm'
   density?: TableDensity
   hover?: boolean
@@ -181,6 +192,8 @@ export function SmartTable<T>({
   caption,
   tfoot,
   totals,
+  rowGroup,
+  groupSubtotal,
   size = 'sm',
   density = 'compact',
   hover = true,
@@ -306,7 +319,28 @@ export function SmartTable<T>({
         </tr>
       )
     }
-    return rows.map((row, rowIdx) => {
+    const grouped: ReactNode[] = []
+    let openGroup: { key: string; label: string } | null = null
+    let openRows: T[] = []
+
+    const closeGroup = () => {
+      if (!openGroup || !groupSubtotal) return
+      const cells = groupSubtotal(openRows, openGroup)
+      grouped.push(
+        <tr key={`grp-sub-${openGroup.key}`} className="border-t border-gray-200 bg-gray-50/70 font-semibold text-gray-800">
+          {columns.map((col) => (
+            <td
+              key={`grp-sub-${openGroup?.key}-${col.key}`}
+              className={cx(padCls, textCls, alignCls(col.align), col.align === 'right' && AMOUNT_CELL_CLASS)}
+            >
+              {cells[col.key] ?? ''}
+            </td>
+          ))}
+        </tr>,
+      )
+    }
+
+    const rowNodes = rows.map((row, rowIdx) => {
       const keyboardProps = navEnabled ? getRowProps(row, rowIdx) : {}
       const {
         ref: rowRef,
@@ -374,6 +408,33 @@ export function SmartTable<T>({
         </tr>
       )
     })
+
+    if (!rowGroup) return rowNodes
+
+    rows.forEach((row, rowIdx) => {
+      const group = rowGroup(row, rowIdx)
+      if (group && group.key !== openGroup?.key) {
+        closeGroup()
+        openGroup = group
+        openRows = []
+        grouped.push(
+          <tr key={`grp-${group.key}`} className="bg-gray-100/80">
+            <th
+              scope="colgroup"
+              colSpan={columns.length}
+              className={cx(padCls, textCls, 'text-left font-semibold text-gray-700')}
+            >
+              {group.label}
+            </th>
+          </tr>,
+        )
+      }
+      if (openGroup) openRows.push(row)
+      grouped.push(rowNodes[rowIdx])
+    })
+    closeGroup()
+
+    return grouped
   })()
 
   const tableFoot = !totals && tfoot ? (

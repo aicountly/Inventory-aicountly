@@ -19,6 +19,7 @@ export const DASH = <span className="text-gray-300">—</span>
 
 export const itemFilter: ReportFilter = { key: 'item_id', kind: 'item', label: 'Item' }
 export const warehouseFilter: ReportFilter = { key: 'warehouse_id', kind: 'warehouse', label: 'Warehouse' }
+export const batchFilter: ReportFilter = { key: 'batch_id', kind: 'batch', label: 'Batch' }
 export const itemGroupFilter: ReportFilter = { key: 'item_grp_id', kind: 'item_group', label: 'Item group' }
 export const stockCategoryFilter: ReportFilter = { key: 'stock_cat_id', kind: 'stock_category', label: 'Category' }
 export const nonzeroFilter: ReportFilter = { key: 'nonzero', kind: 'toggle', label: 'Hide zero rows', defaultOn: true }
@@ -57,24 +58,37 @@ export const fullFyPeriodFilter: readonly ReportFilter[] = [
 
 /* ---------------------------------------------------------------- columns */
 
-export function qtyColumn<T>(key: keyof T & string, header: string, opts: { strong?: boolean } = {}): ReportColumn<T> {
+/**
+ * `sortable: false` is not decoration: SmartTable draws a sort control for any
+ * column carrying a sortKey, and a control the endpoint cannot honour moves the
+ * arrow and returns the same rows — which reads as "sorted", wrongly.
+ */
+export function qtyColumn<T>(
+  key: keyof T & string,
+  header: string,
+  opts: { strong?: boolean; sortable?: boolean } = {},
+): ReportColumn<T> {
   return {
     key,
     header,
     align: 'right',
-    sortKey: key,
+    sortKey: opts.sortable === false ? undefined : key,
     format: 'qty',
     render: (r) =>
       opts.strong ? <strong className="font-semibold text-gray-900">{formatQty(r[key])}</strong> : formatQty(r[key]),
   }
 }
 
-export function moneyColumn<T>(key: keyof T & string, header: string, opts: { strong?: boolean } = {}): ReportColumn<T> {
+export function moneyColumn<T>(
+  key: keyof T & string,
+  header: string,
+  opts: { strong?: boolean; sortable?: boolean } = {},
+): ReportColumn<T> {
   return {
     key,
     header,
     align: 'right',
-    sortKey: key,
+    sortKey: opts.sortable === false ? undefined : key,
     format: 'amount',
     amount: true,
     render: (r) =>
@@ -82,16 +96,22 @@ export function moneyColumn<T>(key: keyof T & string, header: string, opts: { st
   }
 }
 
-export function intColumn<T>(key: keyof T & string, header: string): ReportColumn<T> {
-  return { key, header, align: 'right', sortKey: key, format: 'int' }
+export function intColumn<T>(key: keyof T & string, header: string, sortable = true): ReportColumn<T> {
+  return { key, header, align: 'right', sortKey: sortable ? key : undefined, format: 'int' }
 }
 
-export function dateColumn<T>(key: keyof T & string, header: string): ReportColumn<T> {
-  return { key, header, sortKey: key, format: 'date', render: (r) => formatDate(r[key]) }
+export function dateColumn<T>(key: keyof T & string, header: string, sortable = true): ReportColumn<T> {
+  return { key, header, sortKey: sortable ? key : undefined, format: 'date', render: (r) => formatDate(r[key]) }
 }
 
-export function dateTimeColumn<T>(key: keyof T & string, header: string): ReportColumn<T> {
-  return { key, header, sortKey: key, format: 'datetime', render: (r) => formatDateTime(r[key]) }
+export function dateTimeColumn<T>(key: keyof T & string, header: string, sortable = true): ReportColumn<T> {
+  return {
+    key,
+    header,
+    sortKey: sortable ? key : undefined,
+    format: 'datetime',
+    render: (r) => formatDateTime(r[key]),
+  }
 }
 
 export function textColumn<T>(key: keyof T & string, header: string, sortable = true): ReportColumn<T> {
@@ -103,8 +123,13 @@ export function textColumn<T>(key: keyof T & string, header: string, sortable = 
   }
 }
 
-export function statusColumn<T>(key: keyof T & string, header = 'Status'): ReportColumn<T> {
-  return { key, header, sortKey: key, render: (r) => <StatusBadge value={String(r[key] ?? '')} /> }
+export function statusColumn<T>(key: keyof T & string, header = 'Status', sortable = true): ReportColumn<T> {
+  return {
+    key,
+    header,
+    sortKey: sortable ? key : undefined,
+    render: (r) => <StatusBadge value={String(r[key] ?? '')} />,
+  }
 }
 
 /** Item name + SKU + group — the first column of every item register. */

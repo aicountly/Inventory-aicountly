@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { P } from '../../services/access'
 import { stockBalancesApi, stockLedgerApi, stockMovementsApi } from '../../services/stockViewsApi'
 import type {
+  LedgerResponse,
   LedgerRow,
   LedgerSummary,
   StockBalanceGridRow,
@@ -13,6 +14,7 @@ import { StatusBadge } from '../../ui/StatusBadge'
 import { formatInt, formatMoney, formatQty } from '../../utils/format'
 import {
   DASH,
+  batchFilter,
   dateColumn,
   dateTimeColumn,
   itemFilter,
@@ -24,7 +26,7 @@ import {
 } from '../../reports/configs/common'
 import { buildTotalsRow, totalsLabel } from '../registerTotals'
 import { defineRegister } from '../RegisterConfig'
-import { pageHint, withPageSummary } from './pageSummary'
+import { pageHint, summaryOverRows, withPageSummary } from './pageSummary'
 import type { PageSummary } from './pageSummary'
 
 /* ------------------------------------------------------------------ helpers */
@@ -76,6 +78,11 @@ function movementKindCell(kind: string) {
  * Books readers will look for first. Opening comes from the FY opening plus
  * everything dated before the period, so the running balance on the first line
  * is the real one, not a partial sum of the page.
+ *
+ * Only the date column sorts, and only by flipping direction: the balance is a
+ * running total accumulated in movement sequence (ReportsController::
+ * STOCK_LEDGER_SORTABLE), so re-ordering by rate or value would leave a balance
+ * column that is the sum of no particular thing.
  */
 export const stockLedgerRegister = defineRegister<LedgerRow, LedgerSummary>({
   slug: 'stock_ledger',
@@ -135,17 +142,17 @@ export const stockLedgerRegister = defineRegister<LedgerRow, LedgerSummary>({
     textColumn<LedgerRow>('warehouse_name', 'Warehouse', false),
     textColumn<LedgerRow>('batch_no', 'Batch', false),
     {
-      ...qtyColumn<LedgerRow>('in_qty', 'In'),
+      ...qtyColumn<LedgerRow>('in_qty', 'In', { sortable: false }),
       render: (r) => (r.in_qty ? <span className="text-emerald-700">{formatQty(r.in_qty)}</span> : ''),
     },
     {
-      ...qtyColumn<LedgerRow>('out_qty', 'Out'),
+      ...qtyColumn<LedgerRow>('out_qty', 'Out', { sortable: false }),
       render: (r) => (r.out_qty ? <span className="text-red-600">{formatQty(r.out_qty)}</span> : ''),
     },
-    { ...moneyColumn<LedgerRow>('unit_cost', 'Rate'), configureHint: 'Discloses unit cost.' },
-    moneyColumn<LedgerRow>('value', 'Value'),
-    { ...qtyColumn<LedgerRow>('balance_qty', 'Balance', { strong: true }), alwaysVisible: true },
-    moneyColumn<LedgerRow>('balance_value', 'Balance value'),
+    { ...moneyColumn<LedgerRow>('unit_cost', 'Rate', { sortable: false }), configureHint: 'Discloses unit cost.' },
+    moneyColumn<LedgerRow>('value', 'Value', { sortable: false }),
+    { ...qtyColumn<LedgerRow>('balance_qty', 'Balance', { strong: true, sortable: false }), alwaysVisible: true },
+    moneyColumn<LedgerRow>('balance_value', 'Balance value', { sortable: false }),
     {
       key: 'movement_kind',
       header: 'Kind',
@@ -185,7 +192,23 @@ export const stockLedgerRegister = defineRegister<LedgerRow, LedgerSummary>({
       },
       { labelKey: 'movement_date' },
     ),
-  kpis: (s) => [
+  kpis: (s, response) => {
+    // In and Out open the very movements they add up — same item, same
+    // warehouse, same period, one direction. Opening and Closing are balances
+    // rather than a set of rows, so they stay figures: a card that navigates
+    // somewhere showing a different number is worse than one that does not
+    // navigate at all.
+    const itemId = (response as LedgerResponse).item?.item_id
+    const movements = (direction: 'in' | 'out'): string | undefined => {
+      if (!itemId) return undefined
+      const qs = new URLSearchParams({ item_id: String(itemId), direction })
+      if (s.warehouse_id) qs.set('warehouse_id', String(s.warehouse_id))
+      if (s.from) qs.set('from', s.from)
+      if (s.to) qs.set('to', s.to)
+      return `/registers/movement-register?${qs.toString()}`
+    }
+
+    return [
     {
       key: 'opening',
       label: 'Opening',
@@ -194,8 +217,8 @@ export const stockLedgerRegister = defineRegister<LedgerRow, LedgerSummary>({
       icon: BookOpen,
       tone: 'slate',
     },
-    { key: 'in', label: 'In', value: formatQty(s.in_qty), hint: formatMoney(s.in_value), icon: BookOpen, tone: 'success' },
-    { key: 'out', label: 'Out', value: formatQty(s.out_qty), hint: formatMoney(s.out_value), icon: BookOpen, tone: 'warning' },
+    { key: 'in', label: 'In', value: formatQty(s.in_qty), hint: formatMoney(s.in_value), icon: BookOpen, tone: 'success', to: movements('in') },
+    { key: 'out', label: 'Out', value: formatQty(s.out_qty), hint: formatMoney(s.out_value), icon: BookOpen, tone: 'warning', to: movements('out') },
     {
       key: 'closing',
       label: 'Closing',
@@ -206,7 +229,8 @@ export const stockLedgerRegister = defineRegister<LedgerRow, LedgerSummary>({
       current: s.closing_qty,
       emphasizeNegative: true,
     },
-  ],
+    ]
+  },
   summary: (s) => [
     { label: 'Opening', value: formatQty(s.opening_qty), hint: formatMoney(s.opening_value) },
     { label: 'In', value: formatQty(s.in_qty), hint: formatMoney(s.in_value), tone: 'good' },
@@ -251,11 +275,13 @@ export const movementRegister = defineRegister<StockMovementRow, PageSummary>({
       'movement_register',
       MOVEMENT_SUM_KEYS,
     ),
+  summaryForRows: (s, rows) => summaryOverRows(s, rows, MOVEMENT_SUM_KEYS),
   filters: [
     ...periodFilter,
     { key: 'q', kind: 'text', label: 'Search', placeholder: 'Item, document or party…' },
     itemFilter,
     warehouseFilter,
+    batchFilter,
     { key: 'document_type', kind: 'document_type', label: 'Type' },
     {
       key: 'direction',
@@ -279,6 +305,9 @@ export const movementRegister = defineRegister<StockMovementRow, PageSummary>({
       ],
     },
     { key: 'all_fy', kind: 'toggle', label: 'All years', defaultOn: false },
+    // Not shown, but declared: /documents/:id and the dashboard link straight to
+    // "the movements this document made", and StockMovementsController reads it.
+    { key: 'document_id', kind: 'number', label: 'Document', hidden: true },
   ],
   columns: [
     { ...dateColumn<StockMovementRow>('movement_date', 'Date'), alwaysVisible: true, minWidth: 96 },
@@ -344,6 +373,46 @@ export const movementRegister = defineRegister<StockMovementRow, PageSummary>({
   ],
   rowKey: (r) => r.movement_id,
   drillTo: (r) => (r.document_id ? `/documents/${r.document_id}` : null),
+  groupBy: [
+    {
+      key: 'document_type',
+      label: 'Document type',
+      of: (r) => ({ key: r.document_type, label: r.document_type_label ?? r.document_type }),
+      subtotal: (rows, group) =>
+        buildTotalsRow(
+          [
+            { key: 'movement_date' },
+            { key: 'qty', align: 'right' },
+            { key: 'value', align: 'right' },
+          ],
+          {
+            qty: formatQty(rows.reduce((a, r) => a + r.qty, 0)),
+            value: formatMoney(rows.reduce((a, r) => a + (r.value ?? 0), 0)),
+          },
+          // Named "on this page" because that is what it is: the footer below
+          // still carries the figure for the whole filtered set.
+          { label: `${group.label} · ${totalsLabel(rows.length, 'movement')} on this page`, labelKey: 'movement_date' },
+        ),
+    },
+    {
+      key: 'warehouse',
+      label: 'Warehouse',
+      of: (r) => ({ key: String(r.warehouse_id ?? 0), label: r.warehouse_name ?? 'No warehouse' }),
+      subtotal: (rows, group) =>
+        buildTotalsRow(
+          [
+            { key: 'movement_date' },
+            { key: 'qty', align: 'right' },
+            { key: 'value', align: 'right' },
+          ],
+          {
+            qty: formatQty(rows.reduce((a, r) => a + r.qty, 0)),
+            value: formatMoney(rows.reduce((a, r) => a + (r.value ?? 0), 0)),
+          },
+          { label: `${group.label} · ${totalsLabel(rows.length, 'movement')} on this page`, labelKey: 'movement_date' },
+        ),
+    },
+  ],
   totals: (s) =>
     buildTotalsRow(
       [
@@ -440,10 +509,15 @@ export const stockBalanceRegister = defineRegister<StockBalanceGridRow, PageSumm
       'stock_balances',
       BALANCE_SUM_KEYS,
     ),
+  summaryForRows: (s, rows) => summaryOverRows(s, rows, BALANCE_SUM_KEYS),
   filters: [
     itemFilter,
     warehouseFilter,
+    batchFilter,
     { key: 'nonzero', kind: 'toggle', label: 'Hide zero balances', defaultOn: true },
+    // Where the dashboard's negative-stock card lands: same table, same
+    // tolerance (StockBalanceService::NEGATIVE_ON_HAND_EPSILON).
+    { key: 'negative', kind: 'toggle', label: 'Below zero only', defaultOn: false },
   ],
   columns: [
     {
@@ -479,6 +553,24 @@ export const stockBalanceRegister = defineRegister<StockBalanceGridRow, PageSumm
   rowKey: (r) => r.balance_id,
   drillTo: (r) =>
     `/registers/stock-ledger?item_id=${r.item_id}${r.warehouse_id ? `&warehouse_id=${r.warehouse_id}` : ''}`,
+  groupBy: [
+    {
+      key: 'warehouse',
+      label: 'Warehouse',
+      of: (r) => ({ key: String(r.warehouse_id ?? 0), label: r.warehouse_name ?? 'No warehouse' }),
+      subtotal: (rows, group) =>
+        buildTotalsRow(
+          [
+            { key: 'item_name' },
+            ...BALANCE_SUM_KEYS.map((key) => ({ key, align: 'right' as const })),
+          ],
+          Object.fromEntries(
+            BALANCE_SUM_KEYS.map((key) => [key, formatQty(rows.reduce((a, r) => a + Number(r[key] ?? 0), 0))]),
+          ),
+          { label: `${group.label} · ${totalsLabel(rows.length, 'row')} on this page`, labelKey: 'item_name' },
+        ),
+    },
+  ],
   totals: (s) =>
     buildTotalsRow(
       [
