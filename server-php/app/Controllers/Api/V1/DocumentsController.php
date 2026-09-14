@@ -264,6 +264,32 @@ class DocumentsController extends BaseController
         }
     }
 
+    /**
+     * POST inventory-documents/{id}/challan-value — record the commercial value of a job-work
+     * dispatch that is already posted, and nothing else.
+     *
+     * Body: {lines: [{line_id, rate?, amount?}, ...]}.
+     *
+     * Unlike revise(), a document whose source_app is 'books' is not held back here. The value is
+     * not a Books-owned field being second-guessed: Books never had one to push — Job Work Out
+     * migrated out of books_voucher_job_work_lines, which holds no rate or amount — and Books
+     * refuses vch_type 6/7 at draft time, so the challan and its value live here or nowhere.
+     */
+    public function challanValue($id = null)
+    {
+        $a = $this->authorizeAny(['documents.edit', 'documents.create']);
+        if (isset($a['response'])) {
+            return $a['response'];
+        }
+        try {
+            $body = $this->request->getJSON(true) ?? [];
+
+            return $this->respond(['data' => $this->documents->amendChallanValue((int) $a['ctx']['cmp_id'], (int) $id, $body, $a['session']['uuid'])]);
+        } catch (\Throwable $e) {
+            return $this->failFromException($e);
+        }
+    }
+
     public function submit($id = null)
     {
         return $this->lifecycle($id, 'submit', ['documents.create', 'documents.edit']);

@@ -13,6 +13,23 @@ class DocumentService
 {
     public const EDITABLE_STATUSES = ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'FAILED'];
 
+    /**
+     * Document types whose commercial value can still be recorded once the document is posted.
+     *
+     * JOB_WORK_OUT only, and for a reason that has to hold for anything added here: it is
+     * status_only and carries no valuation — the goods never leave the principal's ownership, so
+     * nothing was costed — and it is not in DocumentTypeRegistry::COST_BEARING_SOURCE_RATE, so no
+     * movement, cost layer, balance or COGS figure anywhere reads its source rate. On a type
+     * where the source rate IS the cost (a purchase, a GRN, an opening) the same write would
+     * silently re-price closing stock. A JOB_WORK_IN stays out for the other half of the test: it
+     * moves and values stock, and it needs no door anyway — Books' item lines carried rate and
+     * amount, so a receipt arrives from the migration with the value its challan declared.
+     */
+    public const VALUE_AMENDABLE_TYPES = ['JOB_WORK_OUT'];
+
+    /** Live posted statuses, the ones a challan value can still be recorded against. */
+    public const VALUE_AMENDABLE_STATUSES = ['POSTED', 'PARTIALLY_FULFILLED', 'COMPLETED'];
+
     public function __construct(
         protected ?UnitConversionService $units = null,
         protected ?AuditService $audit = null,
@@ -109,6 +126,112 @@ class DocumentService
         $this->audit->log($cmpId, 'document', $documentId, 'document.update', $actor, [], ['version' => $doc['version']], ['version' => $header['version']]);
 
         return $this->get($cmpId, $documentId);
+    }
+
+    /**
+     * Record the challan value of a job-work dispatch that has already been posted.
+     *
+     * Table 4 of FORM GST ITC-04 declares the value the goods went out at, and Books never
+     * captured one: books_voucher_job_work_lines holds item, unit, qty and material centre only,
+     * so every Job Work Out the migration moved out of Books arrives here POSTED and worth
+     * nothing. Books has no job-work screen left to type it on — vch_type 6/7 are refused at
+     * draft time — and a posted document is outside EDITABLE_STATUSES, so without this the
+     * quarter can never be completed and the return never filed. revise() is not the answer: it
+     * reverses and re-creates under a new document_id, reopening the pending quantities a later
+     * JOB_WORK_IN already settled.
+     *
+     * Nothing is posted here, so the period lock — which guards postings — has nothing to guard.
+     *
+     * @param array<string, mixed> $payload lines: [{line_id, rate?, amount?}, ...]
+     * @return array<string, mixed>
+     */
+    public function amendChallanValue(int $cmpId, int $documentId, array $payload, ?string $actor): array
+    {
+        $doc = $this->get($cmpId, $documentId);
+        $writes = $this->challanValueWrites($doc, $payload);
+        $before = [];
+        foreach ($doc['lines'] as $line) {
+            $lineId = (int) $line['line_id'];
+            if (isset($writes[$lineId])) {
+                $before[$lineId] = ['source_transaction_rate' => $line['source_transaction_rate'] ?? null, 'source_transaction_amount' => $line['source_transaction_amount'] ?? null];
+            }
+        }
+        $db = \Config\Database::connect();
+        $db->transStart();
+        try {
+            foreach ($writes as $lineId => $set) {
+                $db->table('inv_document_lines')->where('line_id', $lineId)->where('document_id', $documentId)->where('cmp_id', $cmpId)->update($set);
+            }
+            $db->table('inv_documents')->where('document_id', $documentId)->where('cmp_id', $cmpId)->update([
+                'version' => (int) $doc['version'] + 1, 'updated_by' => $actor, 'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+            $db->transComplete();
+        } catch (\Throwable $e) {
+            $db->transRollback();
+            $db->resetTransStatus();
+
+            throw $e;
+        }
+        $this->audit->log($cmpId, 'document', $documentId, 'document.challan_value', $actor, ['lines' => count($writes)], $before, $writes);
+
+        return $this->get($cmpId, $documentId);
+    }
+
+    /**
+     * The columns a value amendment is allowed to write, by line_id — and the whole of what it
+     * may touch. Only the commercial pair appears here: a valuation figure is what the stock
+     * cost, on a basis no challan declares, and letting one in through this door is the exact
+     * confusion the Books / Inventory split exists to prevent.
+     *
+     * @param array<string, mixed> $doc
+     * @param array<string, mixed> $payload
+     * @return array<int, array{source_transaction_rate: float, source_transaction_amount: float}>
+     */
+    protected function challanValueWrites(array $doc, array $payload): array
+    {
+        $type = strtoupper((string) $doc['document_type']);
+        $status = (string) $doc['status'];
+        if (!in_array($type, self::VALUE_AMENDABLE_TYPES, true)) {
+            throw InventoryException::invalidState('A ' . $type . ' carries no challan value that can be recorded after posting; its value is part of the document');
+        }
+        if (in_array($status, self::EDITABLE_STATUSES, true)) {
+            throw InventoryException::invalidState('This document is still editable — put the value on the document itself (status ' . $status . ')');
+        }
+        if (!in_array($status, self::VALUE_AMENDABLE_STATUSES, true)) {
+            throw InventoryException::invalidState('A ' . $status . ' document has no challan value to record');
+        }
+        $byLineId = [];
+        foreach ($doc['lines'] as $line) {
+            $byLineId[(int) $line['line_id']] = $line;
+        }
+        $writes = [];
+        foreach (is_array($payload['lines'] ?? null) ? $payload['lines'] : [] as $idx => $in) {
+            $in = (array) $in;
+            $lineId = (int) ($in['line_id'] ?? 0);
+            if (!isset($byLineId[$lineId])) {
+                throw InventoryException::validation('Line ' . ((int) $idx + 1) . ': line #' . $lineId . ' is not on this document', ['line_id' => $lineId]);
+            }
+            $qty = (float) ($byLineId[$lineId]['qty'] ?? 0);
+            $rate = (float) ($in['rate'] ?? 0);
+            $amount = (float) ($in['amount'] ?? 0);
+            if ($amount <= 0 && $rate > 0) {
+                $amount = round($qty * $rate, 4);
+            }
+            if ($rate <= 0 && $amount > 0 && $qty > 0) {
+                $rate = round($amount / $qty, 4);
+            }
+            // Clearing a value is not an amendment, it is the return quietly losing its Table 4
+            // figure again. Correcting one positive value to another is what this is for.
+            if ($amount <= 0) {
+                throw InventoryException::validation('Line ' . ((int) $idx + 1) . ': a challan value greater than zero is required', ['line_id' => $lineId]);
+            }
+            $writes[$lineId] = ['source_transaction_rate' => round($rate, 4), 'source_transaction_amount' => round($amount, 4)];
+        }
+        if ($writes === []) {
+            throw InventoryException::validation('No line values to record');
+        }
+
+        return $writes;
     }
 
     public function submit(int $cmpId, int $documentId, ?string $actor, ?string $notes = null): array

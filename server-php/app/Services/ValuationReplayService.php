@@ -208,8 +208,9 @@ class ValuationReplayService
     }
 
     /**
-     * Movement events per item in replay order. Inward cost = source rate ÷ factor when the line has a
-     * commercial rate (Books rule), else the valuation rate stored on the line (transfers, production, adjustments).
+     * Movement events per item in replay order. Inward cost = source rate ÷ factor only where that
+     * rate is the cost of the goods, else the valuation rate posted on the line (transfers,
+     * production, adjustments); a commercial rate is never a cost.
      *
      * @param list<int> $itemIds
      * @return array<int, list<array{direction:string, qty:float, unit_cost:float, date:string}>>
@@ -241,9 +242,10 @@ class ValuationReplayService
                 $unitCost = 0.0;
                 if ($direction === 'in') {
                     $srcRate = UnitConversionService::effectiveRate((float) ($r['line_qty'] ?? 0), (float) ($r['source_transaction_rate'] ?? 0), (float) ($r['source_transaction_amount'] ?? 0));
-                    // SALES_RETURN / JOURNAL_ADJUSTMENT deliberately excluded: their source rate is
-                    // the Books commercial rate, so the replay reads the posted cost instead.
-                    if ($srcRate > 0 && in_array($r['document_type'], ['PURCHASE_RECEIPT', 'OPENING_STOCK', 'MATERIAL_RECEIPT', 'WRITE_IN', 'JOB_WORK_IN', 'PRODUCTION', 'PHYSICAL_ADJUSTMENT', 'STOCK_JOURNAL'], true) && $r['movement_kind'] === 'physical') {
+                    // SALES_RETURN / JOURNAL_ADJUSTMENT / JOB_WORK_IN deliberately excluded: their
+                    // source rate is the Books commercial rate — for a job-work receipt the value
+                    // agreed with the job worker — so the replay reads the posted cost instead.
+                    if ($srcRate > 0 && in_array($r['document_type'], ['PURCHASE_RECEIPT', 'OPENING_STOCK', 'MATERIAL_RECEIPT', 'WRITE_IN', 'PRODUCTION', 'PHYSICAL_ADJUSTMENT', 'STOCK_JOURNAL'], true) && $r['movement_kind'] === 'physical') {
                         $unitCost = UnitConversionService::toBaseUnitCost($srcRate, (float) ($r['conversion_factor'] ?: 1));
                     } else {
                         $unitCost = (float) ($r['unit_cost'] ?? $r['valuation_rate'] ?? 0);

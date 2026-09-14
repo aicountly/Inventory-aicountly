@@ -88,6 +88,15 @@ export const documentsApi = {
     return { ...res.data, duplicate: res.duplicate ?? res.data.duplicate }
   },
 
+  /**
+   * Record the commercial value of a posted job-work dispatch — the value Table 4 of FORM GST
+   * ITC-04 declares — without reversing it. Nothing else on the document moves.
+   */
+  async challanValue(id: number, lines: { line_id: number; amount: number }[]): Promise<InventoryDocument> {
+    const res = await api.post<ItemResponse<InventoryDocument>>(`${BASE}/${id}/challan-value`, { lines })
+    return res.data
+  },
+
   async reverse(id: number, reason: string): Promise<InventoryDocument> {
     const res = await api.post<MutationResponse<InventoryDocument>>(`${BASE}/${id}/reverse`, { reason }, idempotent())
     return { ...res.data, duplicate: res.duplicate ?? res.data.duplicate }

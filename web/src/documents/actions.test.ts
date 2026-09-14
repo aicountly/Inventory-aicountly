@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { allowedActions, availableActions, canCreate, packingActions, permissionKeysFor, statusAllows, statusTone } from './actions'
+import { allowedActions, availableActions, canCreate, canRecordChallanValue, packingActions, permissionKeysFor, statusAllows, statusTone } from './actions'
 
 const canWith = (keys: string[]) => (k: string | string[]) => (Array.isArray(k) ? k : [k]).some((x) => keys.includes(x))
 
@@ -71,6 +71,33 @@ describe('packingActions', () => {
     expect(packingActions('consumed', editor)).toEqual([])
     expect(packingActions(null, editor)).toEqual([])
     expect(packingActions('open', canWith(['documents.reverse']))).toEqual(['unpack'])
+  })
+})
+
+/**
+ * Every Job Work Out migrated out of Smart Books is POSTED and carries no value, and Books has
+ * no job-work screen left to type one on. The quarterly ITC-04 names those challans and tells the
+ * operator to record the value here, so the screen has to offer it on a posted challan.
+ */
+describe('canRecordChallanValue', () => {
+  const editor = canWith(['documents.edit'])
+
+  it('is offered on a posted job-work dispatch', () => {
+    expect(canRecordChallanValue('POSTED', 'JOB_WORK_OUT', editor)).toBe(true)
+    expect(canRecordChallanValue('COMPLETED', 'JOB_WORK_OUT', editor)).toBe(true)
+  })
+
+  it('is not offered where the value belongs on the document itself', () => {
+    expect(canRecordChallanValue('DRAFT', 'JOB_WORK_OUT', editor)).toBe(false)
+  })
+
+  it('is not offered where the source rate is a cost', () => {
+    expect(canRecordChallanValue('POSTED', 'JOB_WORK_IN', editor)).toBe(false)
+    expect(canRecordChallanValue('POSTED', 'PURCHASE_RECEIPT', editor)).toBe(false)
+  })
+
+  it('needs a permission that can change a document', () => {
+    expect(canRecordChallanValue('POSTED', 'JOB_WORK_OUT', canWith(['documents.read']))).toBe(false)
   })
 })
 

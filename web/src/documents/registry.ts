@@ -93,7 +93,11 @@ export const NATIVE_DOCUMENT_TYPES: DocumentTypeSpec[] = [
   // ownership, so nothing is costed here — but Table 4 of ITC-04 declares the value each challan
   // went out at, and without the field the return can only ever be filed at 0.00.
   spec({ code: 'JOB_WORK_OUT', label: 'Job Work Outward', description: 'Send material to a job worker (stays yours, tracked as pending).', lineMode: 'status_only', formKind: 'job_work_out', valuation: false, cogs: false, party: 'job_worker', returnable: true, rate: true }),
-  spec({ code: 'JOB_WORK_IN', label: 'Job Work Inward', description: 'Settle material with the job worker and receive finished goods.', lineMode: 'by_line', formKind: 'job_work_in', valuation: true, cogs: true, party: 'job_worker', rate: true }),
+  // rate: the value on the challan the goods come back on, which is what Table 5 of ITC-04
+  // declares. valuationRate: what those goods cost. One column cannot be both — costed at the
+  // challan value closing stock is re-priced at whatever was agreed with the job worker, and
+  // filed at cost the return's Value column is a basis no challan states.
+  spec({ code: 'JOB_WORK_IN', label: 'Job Work Inward', description: 'Settle material with the job worker and receive finished goods.', lineMode: 'by_line', formKind: 'job_work_in', valuation: true, cogs: true, party: 'job_worker', rate: true, valuationRate: true }),
   spec({ code: 'BATCH_ADJUSTMENT', label: 'Batch Adjustment', description: 'Correct batch allocations without changing value.', lineMode: 'by_line', formKind: 'lines', valuation: false, cogs: false, reason: true, movesStock: false }),
   spec({ code: 'SERIAL_ADJUSTMENT', label: 'Serial Adjustment', description: 'Correct serial numbers without changing value.', lineMode: 'by_line', formKind: 'lines', valuation: false, cogs: false, reason: true, movesStock: false }),
   spec({ code: 'REVALUATION', label: 'Stock Revaluation', description: 'Re-price the cost of stock on hand.', lineMode: 'status_only', formKind: 'revaluation', valuation: true, cogs: false, reason: true, valuationRate: true }),

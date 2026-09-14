@@ -11,7 +11,7 @@ import { documentsApi } from '../services/documentsApi'
 import type { AuditRow } from '../services/documentsApi'
 import { packingApi } from '../services/stockApi'
 import { formatDate, formatDateTime, formatMoney, formatQty } from '../utils/format'
-import { STATUS_LABELS, allowedActions, packingActions, statusTone } from './actions'
+import { STATUS_LABELS, allowedActions, canRecordChallanValue, packingActions, statusTone } from './actions'
 import type { DocumentAction, PackingAction } from './actions'
 import { offendingLineIds, parseNegativeStock } from './negativeStock'
 import type { NegativeStockDetail } from './negativeStock'
@@ -59,6 +59,8 @@ export function DocumentDetailPage() {
   const [negative, setNegative] = useState<NegativeStockDetail[] | null>(null)
   const [override, setOverride] = useState(false)
   const [warnings, setWarnings] = useState<PostingWarning[]>([])
+  const [challanValueOpen, setChallanValueOpen] = useState(false)
+  const [challanValues, setChallanValues] = useState<Record<number, string>>({})
 
   const query = useQuery((signal) => documentsApi.get(docId, signal), [docId, tick], { enabled: Number.isFinite(docId) })
   const doc = query.data
@@ -71,6 +73,7 @@ export function DocumentDetailPage() {
   const actions = doc ? allowedActions(doc.status, doc.document_type, can) : []
   const packingMeta = packing.data?.packing ?? null
   const pActions = isPacking && doc && ['POSTED', 'COMPLETED', 'PARTIALLY_FULFILLED'].includes(doc.status) ? packingActions(packingMeta?.packing_status, can) : []
+  const offersChallanValue = doc ? canRecordChallanValue(doc.status, doc.document_type, can) : false
   const timeline = useMemo(() => (doc ? buildTimeline(doc, doc.approvals ?? [], (audit.data?.data ?? []) as AuditRow[]) : []), [doc, audit.data])
   const offending = useMemo(() => new Set(doc && negative ? offendingLineIds(doc.lines, negative) : []), [doc, negative])
 
@@ -122,6 +125,26 @@ export function DocumentDetailPage() {
       default:
         return
     }
+  }
+
+  const openChallanValue = () => {
+    if (!doc) return
+    setChallanValues(Object.fromEntries(doc.lines.map((l) => [l.line_id, l.source_transaction_amount !== null ? String(l.source_transaction_amount) : ''])))
+    setActionError(null)
+    setChallanValueOpen(true)
+  }
+
+  const saveChallanValue = () => {
+    if (!doc) return
+    const lines = doc.lines
+      .map((l) => ({ line_id: l.line_id, amount: Number(challanValues[l.line_id] ?? '') }))
+      .filter((l) => Number.isFinite(l.amount) && l.amount > 0)
+    if (lines.length === 0) return
+    void run('challan-value', async () => {
+      const updated = await documentsApi.challanValue(doc.document_id, lines)
+      setChallanValueOpen(false)
+      return updated
+    }, 'Challan value recorded.')
   }
 
   const doPacking = (action: PackingAction) => {
@@ -208,6 +231,11 @@ export function DocumentDetailPage() {
                 </button>
               ),
             )}
+            {offersChallanValue ? (
+              <button type="button" className="btn" onClick={openChallanValue} disabled={busy !== null}>
+                {busy === 'challan-value' ? 'Working…' : 'Record challan value'}
+              </button>
+            ) : null}
             {pActions.map((a) => (
               <button key={a} type="button" className={`btn ${a === 'unpack' ? 'btn-danger' : ''}`} onClick={() => doPacking(a)} disabled={busy !== null}>
                 {a === 'unpack' ? 'Unpack' : a === 'lock' ? 'Lock' : 'Unlock'}
@@ -554,6 +582,60 @@ export function DocumentDetailPage() {
           <span className="field-label">{dialog?.kind === 'reverse' ? 'Reason (required)' : dialog?.kind === 'lock' || dialog?.kind === 'unlock' ? 'Sale / draft reference (optional)' : 'Notes (optional)'}</span>
           <textarea className="textarea" value={notes} onChange={(e) => setNotes(e.target.value)} autoFocus />
         </label>
+        {actionError ? <Notice kind="error">{actionError}</Notice> : null}
+      </Modal>
+
+      <Modal
+        open={challanValueOpen}
+        title="Record challan value"
+        size="lg"
+        onClose={() => setChallanValueOpen(false)}
+        busy={busy !== null}
+        footer={
+          <>
+            <button type="button" className="btn" onClick={() => setChallanValueOpen(false)} disabled={busy !== null}>
+              Back
+            </button>
+            <button type="button" className="btn btn-primary" onClick={saveChallanValue} disabled={busy !== null}>
+              {busy === 'challan-value' ? 'Working…' : 'Record challan value'}
+            </button>
+          </>
+        }
+      >
+        <p style={{ marginTop: 0 }}>
+          Table 4 of FORM GST ITC-04 declares the value the goods went out at, and a challan migrated from Smart Books carries
+          none. This records that value and nothing else: the goods are still yours, nothing is costed, and the pending
+          quantities stay exactly as they are.
+        </p>
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th className="align-right">Qty</th>
+              <th className="align-right">Challan value</th>
+            </tr>
+          </thead>
+          <tbody>
+            {doc.lines.map((l) => (
+              <tr key={l.line_id}>
+                <td>{l.item_label ?? l.item_name ?? `Item #${l.item_id}`}</td>
+                <td className="align-right">
+                  {formatQty(l.qty)} {l.unit_symbol ?? ''}
+                </td>
+                <td className="align-right">
+                  <input
+                    className="input"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={challanValues[l.line_id] ?? ''}
+                    onChange={(e) => setChallanValues((v) => ({ ...v, [l.line_id]: e.target.value }))}
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
         {actionError ? <Notice kind="error">{actionError}</Notice> : null}
       </Modal>
     </div>

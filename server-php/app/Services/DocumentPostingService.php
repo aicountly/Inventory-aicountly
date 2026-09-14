@@ -174,6 +174,7 @@ class DocumentPostingService
         if (trim($reason) === '') {
             throw InventoryException::validation('A reason is required to reverse a posted document');
         }
+        $this->packing->assertReversible($cmpId, $doc);
         $this->assertPeriodOpen($cmpId, (int) $doc['bo_id'], (string) $doc['document_date']);
         $spec = DocumentTypeRegistry::get((string) $doc['document_type']);
         $db = \Config\Database::connect();

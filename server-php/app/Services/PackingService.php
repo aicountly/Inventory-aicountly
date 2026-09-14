@@ -38,7 +38,10 @@ class PackingService
     /** @return array<string, mixed>|null raw inv_packing_meta row */
     public function meta(int $cmpId, int $documentId): ?array
     {
-        return \Config\Database::connect()->table('inv_packing_meta')->where('cmp_id', $cmpId)->where('document_id', $documentId)->get()->getRowArray() ?: null;
+        // DBDebug is off outside the test suite, so a failed statement returns false here.
+        $res = \Config\Database::connect()->table('inv_packing_meta')->where('cmp_id', $cmpId)->where('document_id', $documentId)->get();
+
+        return ($res ? $res->getRowArray() : null) ?: null;
     }
 
     /**
@@ -203,22 +206,129 @@ class PackingService
             return null;
         }
         [, $meta] = $this->postedWithMeta($cmpId, $listId);
+        if ($meta['packing_status'] === self::STATUS_UNPACKED) {
+            // The consignment went back to available stock before this invoice posted, so there is
+            // nothing set aside left for it to take and it bills the goods out of general stock
+            // like any other sale. Only markConsumed(), where the caller named this list, refuses:
+            // here the link is a stale reference on the draft and failing the invoice over it
+            // would leave a customer unbillable.
+            return null;
+        }
         $refusal = self::consumptionRefusal($meta, $consumingId);
         if ($refusal !== null) {
             throw InventoryException::invalidState($refusal, $this->stateDetails($meta));
         }
         if (!$alreadyIssued && $meta['packing_status'] !== self::STATUS_CONSUMED) {
             // Books clamps a sale to on_invoice, so nothing above drained the packed bucket: the
-            // whole consignment leaves here. Booked against the sale, so reversing it puts the
-            // goods back where reverseForDocument expects to find them.
-            $list = $this->documents->get($cmpId, $listId);
-            $this->status->apply($cmpId, $consumingId, StockStatusService::MOV_SALE_ISSUE, array_map(
-                static fn ($l) => ['item_id' => (int) $l['item_id'], 'unit_id' => $l['unit_id'], 'warehouse_id' => $l['warehouse_id'], 'batch_id' => $l['batch_id'], 'qty' => (float) $l['qty']],
-                $list['lines'],
-            ));
+            // consignment leaves here. Booked against the sale, so reversing it puts the goods
+            // back where reverseForDocument expects to find them.
+            $split = self::splitConsumption($this->documents->get($cmpId, $listId)['lines'], $saleDoc['lines'] ?? []);
+            foreach ([StockStatusService::MOV_SALE_ISSUE => $split['issued'], StockStatusService::MOV_UNPACK => $split['released']] as $movementType => $lines) {
+                if ($lines !== []) {
+                    $this->status->apply($cmpId, $consumingId, $movementType, $lines);
+                }
+            }
         }
 
         return $this->markConsumed($cmpId, $listId, $consumingId, $actor);
+    }
+
+    /**
+     * Split the list between what the sale actually ships and what closing the list hands back.
+     *
+     * The invoice that names a list closes it whether or not it bills all of it, so the residual
+     * has to leave the packed bucket too — but as an `unpack`, because the sale never issued it.
+     * Booking the whole list as `sale_issue` states in the status journal, which is the audit
+     * trail for the packed bucket, that the invoice issued goods it did not.
+     *
+     * Sale quantities are matched in base units on (item, warehouse, batch) first and on the item
+     * alone for whatever is left over. Either way the bucket moves at the LIST line's own key, so
+     * the match decides only which of the two movements a quantity is journalled under.
+     *
+     * @param list<array<string, mixed>> $listLines lines of the PACKING document
+     * @param list<array<string, mixed>> $saleLines lines of the sale closing it
+     * @return array{issued: list<array<string, mixed>>, released: list<array<string, mixed>>}
+     */
+    public static function splitConsumption(array $listLines, array $saleLines): array
+    {
+        $byKey = [];
+        $byItem = [];
+        foreach ($saleLines as $l) {
+            $itemId = (int) ($l['item_id'] ?? 0);
+            $base = (float) ($l['base_qty'] ?? 0);
+            if ($itemId <= 0 || $base <= 0) {
+                continue;
+            }
+            $byKey[self::bucketKey($l)] = ($byKey[self::bucketKey($l)] ?? 0.0) + $base;
+            $byItem[$itemId] = ($byItem[$itemId] ?? 0.0) + $base;
+        }
+        $taken = array_fill_keys(array_keys($listLines), 0.0);
+        foreach ([true, false] as $exactKey) {
+            foreach ($listLines as $i => $l) {
+                $itemId = (int) ($l['item_id'] ?? 0);
+                $key = self::bucketKey($l);
+                $pool = $exactKey ? ($byKey[$key] ?? 0.0) : ($byItem[$itemId] ?? 0.0);
+                $take = min((float) ($l['base_qty'] ?? 0) - $taken[$i], $pool);
+                if ($take <= 0) {
+                    continue;
+                }
+                $taken[$i] += $take;
+                $byItem[$itemId] -= $take;
+                if ($exactKey) {
+                    $byKey[$key] -= $take;
+                }
+            }
+        }
+        $split = ['issued' => [], 'released' => []];
+        foreach ($listLines as $i => $l) {
+            $qty = (float) ($l['qty'] ?? 0);
+            $base = (float) ($l['base_qty'] ?? 0);
+            $line = ['item_id' => (int) $l['item_id'], 'unit_id' => $l['unit_id'] ?? null, 'warehouse_id' => $l['warehouse_id'] ?? null, 'batch_id' => $l['batch_id'] ?? null];
+            // Entered units, not base, so the journal reads in the unit the list was packed in.
+            $issued = $base > 0 ? round($qty * ($taken[$i] / $base), 4) : 0.0;
+            if ($issued > 0.0000001) {
+                $split['issued'][] = $line + ['qty' => $issued];
+            }
+            if ($qty - $issued > 0.0000001) {
+                $split['released'][] = $line + ['qty' => $qty - $issued];
+            }
+        }
+
+        return $split;
+    }
+
+    /** The (item, warehouse, batch) a status movement lands on. */
+    private static function bucketKey(array $line): string
+    {
+        return (int) ($line['item_id'] ?? 0) . '|' . (int) ($line['warehouse_id'] ?? 0) . '|' . (int) ($line['batch_id'] ?? 0);
+    }
+
+    /**
+     * Refuse to reverse a PACKING document whose consignment an invoice has already issued.
+     *
+     * The sale emptied the packed bucket when it consumed the list, so unwinding the `pack`
+     * movement here credits back goods that are no longer in it: packed goes negative and
+     * availableFrom() subtracts packed, so `available` ends up above on_hand and the negative
+     * stock guard will let those units be sold a second time. The invoice has to be reversed
+     * first — that hands the consignment back through releaseConsumedBy(), and the list is then
+     * open and reversible. A no-op for every document that is not a consumed packing list.
+     *
+     * @param array<string, mixed> $doc the document being reversed
+     */
+    public function assertReversible(int $cmpId, array $doc): void
+    {
+        if (($doc['document_type'] ?? '') !== 'PACKING') {
+            return;
+        }
+        $meta = $this->meta($cmpId, (int) ($doc['document_id'] ?? 0));
+        if ($meta === null || $meta['packing_status'] !== self::STATUS_CONSUMED) {
+            return;
+        }
+
+        throw InventoryException::invalidState(
+            'Packing list was issued by document #' . (int) ($meta['locked_by_document_id'] ?? 0) . ' and cannot be reversed; reverse that document first',
+            $this->stateDetails($meta),
+        );
     }
 
     /**
