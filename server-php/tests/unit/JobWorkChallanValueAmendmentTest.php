@@ -11,6 +11,117 @@ use App\Services\UnitConversionService;
 use CodeIgniter\Test\CIUnitTestCase;
 
 /**
+ * A connection that fails the way the production one does, in the two ways a local fixture does
+ * not: DBDebug is off on the default group, so a refused statement returns false instead of
+ * throwing, and PostgreSQL refuses everything else in the transaction once one statement has
+ * failed. CI4 latches its own transaction flag on that failure (transStrict is on, so nothing
+ * clears it), and COMMIT on such a transaction quietly performs a ROLLBACK.
+ */
+final class StubAbortingChallanConnection
+{
+    public string $DBDriver = 'Postgre';
+
+    /** @var list<string> */
+    public array $log = [];
+
+    public bool $committed = false;
+
+    /** Tables whose UPDATE the server refuses. */
+    public array $refuse = [];
+
+    private bool $transStatus = true;
+
+    private bool $aborted = false;
+
+    public function transStart(bool $testMode = false): bool
+    {
+        $this->log[] = 'BEGIN';
+        $this->aborted = false;
+
+        return true;
+    }
+
+    public function table(string $table): StubAbortingChallanBuilder
+    {
+        return new StubAbortingChallanBuilder($this, $table);
+    }
+
+    public function runUpdate(string $table): bool
+    {
+        if ($this->aborted || in_array($table, $this->refuse, true)) {
+            $this->aborted = true;
+            $this->transStatus = false;
+            $this->log[] = 'UPDATE ' . $table . ' REFUSED';
+
+            return false;
+        }
+        $this->log[] = 'UPDATE ' . $table;
+
+        return true;
+    }
+
+    public function transComplete(): bool
+    {
+        if ($this->transStatus === false) {
+            $this->transRollback();
+
+            return false;
+        }
+        $this->log[] = 'COMMIT';
+        $this->committed = true;
+
+        return true;
+    }
+
+    public function transStatus(): bool
+    {
+        return $this->transStatus;
+    }
+
+    public function transRollback(): bool
+    {
+        $this->log[] = 'ROLLBACK';
+
+        return true;
+    }
+
+    public function resetTransStatus(): static
+    {
+        $this->transStatus = true;
+
+        return $this;
+    }
+}
+
+final class StubAbortingChallanBuilder
+{
+    public function __construct(private StubAbortingChallanConnection $db, private string $table) {}
+
+    public function where($field, $value = null): self
+    {
+        return $this;
+    }
+
+    /** @param array<string, mixed> $set */
+    public function update(array $set): bool
+    {
+        return $this->db->runUpdate($this->table);
+    }
+}
+
+/** Keeps what was written to the append-only trail instead of writing it. */
+final class RecordingAuditService extends AuditService
+{
+    /** @var list<array<string, mixed>> */
+    public array $entries = [];
+
+    public function log(int $cmpId, string $entityType, int $entityId, string $action, ?string $actorUuid, array $meta = [], ?array $before = null, ?array $after = null): void
+    {
+        $this->entries[] = ['action' => $action, 'before' => $before, 'after' => $after];
+    }
+}
+
+/**
  * Recording the challan value of a job-work dispatch that is already posted.
  *
  * Books' Job Work Out never captured a value — books_voucher_job_work_lines holds item, unit,
@@ -137,5 +248,94 @@ final class JobWorkChallanValueAmendmentTest extends CIUnitTestCase
         $routes = (string) file_get_contents(__DIR__ . '/../../app/Config/Routes.php');
         $this->assertStringContainsString("inventory-documents/(:num)/challan-value', 'DocumentsController::challanValue", $routes);
         $this->assertTrue(method_exists(DocumentsController::class, 'challanValue'));
+    }
+
+    /** @var array<string, mixed>|null */
+    private ?array $savedConnections = null;
+
+    private function connectionsProperty(): \ReflectionProperty
+    {
+        return new \ReflectionProperty(\CodeIgniter\Database\Config::class, 'instances');
+    }
+
+    /** Hand amendChallanValue()'s \Config\Database::connect() the stub instead of a real server. */
+    private function useConnection(object $db): void
+    {
+        $prop = $this->connectionsProperty();
+        $instances = (array) $prop->getValue();
+        $this->savedConnections ??= $instances;
+        $instances[ENVIRONMENT === 'testing' ? 'tests' : 'default'] = $db;
+        $prop->setValue(null, $instances);
+    }
+
+    protected function tearDown(): void
+    {
+        if ($this->savedConnections !== null) {
+            $this->connectionsProperty()->setValue(null, $this->savedConnections);
+            $this->savedConnections = null;
+        }
+        parent::tearDown();
+    }
+
+    private function amendable(AuditService $audit): DocumentService
+    {
+        return new class (new UnitConversionService(), $audit, new InventorySettingsService(), $this->migratedDispatch()) extends DocumentService {
+            /** @param array<string, mixed> $doc */
+            public function __construct(UnitConversionService $units, AuditService $audit, InventorySettingsService $settings, private array $doc)
+            {
+                parent::__construct($units, $audit, $settings);
+            }
+
+            /** @return array<string, mixed> */
+            public function get(int $cmpId, int $documentId): array
+            {
+                return $this->doc;
+            }
+        };
+    }
+
+    /**
+     * DBDebug is off on the default connection, so a refused UPDATE returns false without
+     * throwing: the catch is never entered and transComplete() rolls the batch back in silence.
+     * On PostgreSQL one refused line takes the rest of a multi-line challan with it. The row that
+     * used to be appended after that is append-only, kept eight years, and asserts the very
+     * figure Table 4 of FORM GST ITC-04 is filed on.
+     */
+    public function testAnAmendmentThatWasRolledBackIsNotAudited(): void
+    {
+        $db = new StubAbortingChallanConnection();
+        $db->refuse = ['inv_document_lines'];
+        $this->useConnection($db);
+        $audit = new RecordingAuditService();
+
+        $thrown = null;
+        try {
+            $this->amendable($audit)->amendChallanValue(7, 8801, ['lines' => [['line_id' => 2000008801, 'rate' => 800]]], 'operator-uuid');
+        } catch (\Throwable $e) {
+            $thrown = $e;
+        }
+
+        $this->assertSame([], $audit->entries, 'the eight-year trail must not carry a Table 4 figure no line ever took');
+        $this->assertFalse($db->committed);
+        $this->assertInstanceOf(\RuntimeException::class, $thrown, 'the caller was told 200 for an amendment that was rolled back');
+        $this->assertStringContainsString('Could not record the challan value', $thrown->getMessage());
+    }
+
+    /** The guard must not swallow the amendment that did land. */
+    public function testAnAmendmentThatCommittedIsAudited(): void
+    {
+        $db = new StubAbortingChallanConnection();
+        $this->useConnection($db);
+        $audit = new RecordingAuditService();
+
+        $this->amendable($audit)->amendChallanValue(7, 8801, ['lines' => [['line_id' => 2000008801, 'rate' => 800]]], 'operator-uuid');
+
+        $this->assertTrue($db->committed);
+        $this->assertCount(1, $audit->entries);
+        $this->assertSame('document.challan_value', $audit->entries[0]['action']);
+        $this->assertSame(
+            ['source_transaction_rate' => 800.0, 'source_transaction_amount' => 96000.0],
+            $audit->entries[0]['after'][2000008801],
+        );
     }
 }

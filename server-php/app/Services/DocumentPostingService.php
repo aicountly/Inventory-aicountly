@@ -298,6 +298,10 @@ class DocumentPostingService
                 if (!empty($spec['valuation'])) {
                     if ($direction === 'in') {
                         $unitCost = $this->inwardUnitCost($cmpId, $doc, $line, $lines);
+                        $zeroCost = self::zeroInwardCostWarning($type, $itemId, (int) $line['line_id'], $unitCost);
+                        if ($zeroCost !== null) {
+                            $warnings[] = $zeroCost;
+                        }
                         $val = $this->valuation->recordReceipt($cmpId, $fyId, $itemId, $wh, $baseQty, $unitCost, $date . ' 00:00:00', $documentId, (int) $line['line_id'], $type === 'OPENING_STOCK' ? 'opening' : 'receipt');
                     } else {
                         $val = $this->valuation->issueStock($cmpId, $fyId, $itemId, $wh, $baseQty, $date . ' 00:00:00', $documentId, (int) $line['line_id']);
@@ -446,6 +450,27 @@ class DocumentPostingService
         }
 
         return round($value / $qty, 4);
+    }
+
+    /**
+     * Stock that enters at zero understates closing stock now and COGS when that layer is issued,
+     * and nothing refuses the zero: a job-work receipt whose cost column was left blank has no
+     * typed cost, no cost-bearing source rate and, for a first-ever receipt, no cost history to
+     * fall back on. Posting says so rather than booking the zero in silence.
+     *
+     * @return array<string, mixed>|null
+     */
+    public static function zeroInwardCostWarning(string $type, int $itemId, int $lineId, float $unitCost): ?array
+    {
+        if ($unitCost > 0) {
+            return null;
+        }
+
+        return [
+            'code'    => 'zero_valuation_inward',
+            'message' => sprintf('Item #%d enters stock at zero cost: no unit cost on the line and none known for the item', $itemId),
+            'details' => ['item_id' => $itemId, 'line_id' => $lineId, 'document_type' => $type],
+        ];
     }
 
     private function enforceNegativeStock(int $cmpId, int $itemId, ?int $wh, ?int $batchId, float $baseQty, string $policy, bool $override, array $line, array &$warnings, array $options): void

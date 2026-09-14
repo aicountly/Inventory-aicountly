@@ -11,6 +11,11 @@ namespace App\Services;
  *            valuation_rate / valuation_amount of every line whose cost changed. Each change is an
  *            inv_valuation_revisions row and is published to Books as inventory.valuation.revised so
  *            Books can adjust COGS through its controlled mechanism (inline rewrite or adjustment journal).
+ *
+ * A receipt's cost is an input to the replay, never an output of it: the replay carries the cost the
+ * line already decided, so nothing re-prices historical closing stock behind the operator. Where a
+ * line decided none — a migration that found no cost_rate in Books — there is no input, and the job
+ * is refused whole rather than priced from the item's current cost.
  */
 class RecalculationService
 {
@@ -62,6 +67,10 @@ class RecalculationService
         $dryRun = (int) $job['dry_run'] === 1;
         try {
             $itemIds = $job['item_id'] ? [(int) $job['item_id']] : $this->itemsWithMovements($cmpId, $fyId);
+            $unpriced = $this->unpricedInwardLines($cmpId, $fyId, $itemIds);
+            if ($unpriced !== []) {
+                throw new \RuntimeException(self::unpricedReason($unpriced), 409);
+            }
             $revisions = [];
             $affectedDocs = [];
             $affectedLines = 0;
@@ -139,6 +148,123 @@ class RecalculationService
         }
     }
 
+    /**
+     * The cost a replayed inward line carries, or null when nothing decided one.
+     *
+     * The order is the posting engine's — an explicit line cost, then the source rate but only on a
+     * cost-bearing document, because on a job-work receipt or a credit note that rate is the
+     * commercial value Books owns. What differs is what an empty valuation column means at each
+     * end: posting reads the figure an operator typed, where blank and zero both say "none given",
+     * while a replay reads what posting then wrote for every line it valued, so a stored zero is a
+     * cost that was decided (and warned about at the time), not an invitation to price the goods
+     * again years later. Only a line that carries no valuation at all leaves a replay with nothing
+     * to go on, and that can only reach Inventory from a migration that found no cost_rate in
+     * Books.
+     *
+     * @param array<string, mixed> $m movement row joined to its document line
+     */
+    public static function decidedInwardUnitCost(array $m): ?float
+    {
+        $lineRate = $m['line_valuation_rate'] ?? null;
+        if ($lineRate !== null && (float) $lineRate > 0) {
+            return (float) $lineRate;
+        }
+        if (in_array($m['document_type'], \Config\DocumentTypeRegistry::COST_BEARING_SOURCE_RATE, true)) {
+            $srcRate = UnitConversionService::effectiveRate((float) $m['line_qty'], (float) ($m['source_transaction_rate'] ?? 0), (float) ($m['source_transaction_amount'] ?? 0));
+            if ($srcRate > 0) {
+                return UnitConversionService::toBaseUnitCost($srcRate, (float) ($m['conversion_factor'] ?: 1));
+            }
+        }
+
+        return $lineRate !== null ? 0.0 : null;
+    }
+
+    /**
+     * The inward movements of a replay set that no decided cost prices. A transfer's in-side is
+     * priced from the out-side it is paired with, and a type that carries no valuation was never
+     * costed, so neither is one of them.
+     *
+     * @param list<array<string, mixed>> $movements
+     * @param array<int, true> $reversed
+     * @return list<array<string, mixed>>
+     */
+    public static function unpricedInwardMovements(array $movements, array $reversed): array
+    {
+        $out = [];
+        foreach ($movements as $m) {
+            if (isset($reversed[(int) $m['movement_id']]) || (float) $m['qty'] <= 0) {
+                continue;
+            }
+            $spec = \Config\DocumentTypeRegistry::get((string) $m['document_type']);
+            if (empty($spec['valuation'])) {
+                continue;
+            }
+            $meta = json_decode((string) ($m['metadata_json'] ?? ''), true) ?: [];
+            if (($meta['side'] ?? '') === 'in' && !empty($meta['transfer_pair'])) {
+                continue;
+            }
+            if (self::decidedInwardUnitCost($m) === null) {
+                $out[] = $m;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * The same question asked of every item the job covers, before the first of them is replayed:
+     * a job that would have to invent a cost is refused whole rather than re-pricing half a
+     * company's stock and stopping, because the revisions Books is told about are only written once
+     * every item has been replayed.
+     *
+     * @param list<int> $itemIds
+     * @return list<array<string, mixed>>
+     */
+    public function unpricedInwardLines(int $cmpId, int $fyId, array $itemIds): array
+    {
+        $db = \Config\Database::connect();
+        $out = [];
+        foreach (array_chunk($itemIds, 500) as $chunk) {
+            $res = $db->table('inv_stock_movements m')
+                ->select('m.movement_id, m.line_id, m.item_id, m.document_id, m.qty, m.document_type, l.conversion_factor, l.qty AS line_qty, l.source_transaction_rate, l.source_transaction_amount, l.valuation_rate AS line_valuation_rate, l.metadata_json')
+                ->join('inv_document_lines l', 'l.line_id = m.line_id', 'inner')
+                ->join('inv_documents d', 'd.document_id = m.document_id', 'inner')
+                ->where('m.cmp_id', $cmpId)->where('m.fy_id', $fyId)->whereIn('m.item_id', $chunk)
+                ->where('m.movement_kind', 'physical')->where('m.qty >', 0)
+                ->whereIn('d.status', ['POSTED', 'COMPLETED', 'PARTIALLY_FULFILLED'])
+                ->orderBy('m.item_id', 'ASC')->orderBy('m.line_id', 'ASC')
+                ->get();
+            $rev = $db->table('inv_stock_movements')->select('reversal_of_movement_id')->where('cmp_id', $cmpId)->whereIn('item_id', $chunk)->where('movement_kind', 'reversal')->get();
+            if ($res === false || $rev === false) {
+                // DBDebug is off in every deployed environment, so a refused query answers false
+                // instead of throwing. A guard that cannot read is not a guard.
+                throw new \RuntimeException('Could not check the replay set for inward lines with no cost', 500);
+            }
+            $reversed = [];
+            foreach ($rev->getResultArray() as $r) {
+                $reversed[(int) $r['reversal_of_movement_id']] = true;
+            }
+            foreach (self::unpricedInwardMovements($res->getResultArray(), $reversed) as $m) {
+                $out[] = $m;
+            }
+        }
+
+        return $out;
+    }
+
+    /** @param list<array<string, mixed>> $unpriced */
+    private static function unpricedReason(array $unpriced): string
+    {
+        $ids = array_map(static fn ($m) => (int) $m['line_id'], array_slice($unpriced, 0, 20));
+
+        return sprintf(
+            'Refusing to recalculate: %d inward line(s) carry no cost to replay (line_id %s%s). Record a cost on them first — a replay would otherwise price them from the item\'s current cost, rewrite the stored history and publish the difference to Books as a valuation revision.',
+            count($unpriced),
+            implode(', ', $ids),
+            count($unpriced) > 20 ? ', …' : '',
+        );
+    }
+
     public function replayItem(int $cmpId, int $fyId, int $itemId, bool $dryRun): array
     {
         $db = \Config\Database::connect();
@@ -156,6 +282,15 @@ class RecalculationService
         $reversed = [];
         foreach ($db->table('inv_stock_movements')->select('reversal_of_movement_id')->where('cmp_id', $cmpId)->where('item_id', $itemId)->where('movement_kind', 'reversal')->get()->getResultArray() as $r) {
             $reversed[(int) $r['reversal_of_movement_id']] = true;
+        }
+
+        // Before anything is opened or cleared: a receipt the replay cannot price from a decided
+        // cost would be priced by invention, and the invention is written back to the line, the
+        // movement and the stored effects and published to Books as a valuation revision. PostgreSQL
+        // aborts a whole transaction on a failed statement, so the refusal happens out here.
+        $unpriced = self::unpricedInwardMovements($movements, $reversed);
+        if ($unpriced !== []) {
+            throw new \RuntimeException(self::unpricedReason($unpriced), 409);
         }
 
         if ($dryRun) {
@@ -182,23 +317,10 @@ class RecalculationService
                 if (($meta['side'] ?? '') === 'in' && !empty($meta['transfer_pair'])) {
                     $unitCost = $transferCost[(int) $m['document_id'] . ':' . $meta['transfer_pair']] ?? null;
                 }
-                if ($unitCost === null) {
-                    // Same precedence as DocumentPostingService::inwardUnitCost: the line's own
-                    // valuation rate outranks the source rate, and the source rate is only a cost
-                    // on a cost-bearing document — on a sales return or a journal with items it is
-                    // the Books commercial rate and must never become an inventory cost.
-                    $lineRate = (float) ($m['line_valuation_rate'] ?? 0);
-                    $srcIsCost = in_array($m['document_type'], \Config\DocumentTypeRegistry::COST_BEARING_SOURCE_RATE, true);
-                    $srcRate = UnitConversionService::effectiveRate((float) $m['line_qty'], (float) ($m['source_transaction_rate'] ?? 0), (float) ($m['source_transaction_amount'] ?? 0));
-                    if ($lineRate > 0) {
-                        $unitCost = $lineRate;
-                    } elseif ($srcIsCost && $srcRate > 0) {
-                        $unitCost = UnitConversionService::toBaseUnitCost($srcRate, (float) ($m['conversion_factor'] ?: 1));
-                    } else {
-                        $unitCost = $this->engine->resolveFallbackUnitCost($db, $cmpId, $itemId, $this->engine->scopeWarehouse($cmpId, $m['warehouse_id'] !== null ? (int) $m['warehouse_id'] : null));
-                    }
-                }
-                $val = $this->engine->recordReceipt($cmpId, $fyId, $itemId, $m['warehouse_id'] !== null ? (int) $m['warehouse_id'] : null, $qty, $unitCost, $date . ' 00:00:00', (int) $m['document_id'], $lineId);
+                $unitCost ??= self::decidedInwardUnitCost($m);
+                // Null is the guard's own case and it refused this item before the transaction
+                // opened; costing it at zero here keeps a throw out of an open transaction.
+                $val = $this->engine->recordReceipt($cmpId, $fyId, $itemId, $m['warehouse_id'] !== null ? (int) $m['warehouse_id'] : null, $qty, (float) $unitCost, $date . ' 00:00:00', (int) $m['document_id'], $lineId);
             } else {
                 $val = $this->engine->issueStock($cmpId, $fyId, $itemId, $m['warehouse_id'] !== null ? (int) $m['warehouse_id'] : null, $qty, $date . ' 00:00:00', (int) $m['document_id'], $lineId);
                 $meta = json_decode((string) ($m['metadata_json'] ?? ''), true) ?: [];

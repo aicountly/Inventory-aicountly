@@ -212,6 +212,10 @@ class ValuationReplayService
      * rate is the cost of the goods, else the valuation rate posted on the line (transfers,
      * production, adjustments); a commercial rate is never a cost.
      *
+     * Books' own engine costs every inward from the voucher rate, so this parts company with it
+     * wherever that rate is commercial - a job-work receipt above all. Migration\Validator
+     * quantifies that difference from Books' lines instead of assuming the two engines agree.
+     *
      * @param list<int> $itemIds
      * @return array<int, list<array{direction:string, qty:float, unit_cost:float, date:string}>>
      */

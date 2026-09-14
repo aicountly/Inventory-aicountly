@@ -14,8 +14,13 @@ use CodeIgniter\Database\BaseConnection;
  */
 class Validator
 {
-    public function __construct(private BaseConnection $books, private BaseConnection $inv, private MigrationLog $log)
+    public function __construct(private BaseConnection $books, private BaseConnection $inv, private MigrationLog $log, private ?ValuationReplayService $replay = null)
     {
+    }
+
+    private function replay(): ValuationReplayService
+    {
+        return $this->replay ??= new ValuationReplayService();
     }
 
     /** @param list<int> $companies */
@@ -368,7 +373,8 @@ class Validator
      * Value the migrated stock with the Inventory replay engine and compare to the Books figures
      * recorded on the lines: Σ posted valuation (cost_amount) per company/FY must match exactly,
      * and the closing valuation must reconcile within tolerance to Books' own replay
-     * (StockValuationService::snapshotValuation is reproduced by ValuationReplayService).
+     * (ValuationReplayService reproduces StockValuationService::snapshotValuation except where
+     * Books costs an inward from a commercial rate — see booksJobWorkInwardBasisByItem()).
      */
     /**
      * Compare, item by item, the closing quantity and stock value Books itself reports
@@ -376,6 +382,13 @@ class Validator
      * StockBalanceService + StockValuationService) with what Inventory reports for the
      * same company / FY / as-of date. This is the "compare with the backed-up database"
      * check: both engines must agree before cutover.
+     *
+     * They agree on every inward Books costs from a rate that is a cost. They do NOT agree on a
+     * job-work receipt: Books costs it from the voucher rate, which on that challan is the value
+     * agreed with the job worker, and Inventory will not adopt a commercial rate as a cost. That
+     * one divergence is deliberate and is therefore quantified from Books' own lines rather than
+     * assumed — accepted only up to the amount those receipts can account for, so a real
+     * migration difference on the same item still fails the gate.
      */
     private function booksSnapshot(string $dir, array $companies, float $qtyTol, float $moneyTol, array &$out): array
     {
@@ -385,7 +398,7 @@ class Validator
 
             return ['dir' => $dir, 'files' => 0];
         }
-        $svc = new ValuationReplayService();
+        $svc = $this->replay();
         $summary = ['dir' => $dir, 'files' => 0, 'compared' => [], 'skipped' => []];
         foreach ($files as $file) {
             $snap = json_decode((string) file_get_contents($file), true);
@@ -414,6 +427,7 @@ class Validator
             $zeroCostTransfers = $this->booksZeroCostTransferInByItem($cmpId, $fyId, $asOf);
             $missingCostLayers = $this->booksMissingCostLayerByItem($cmpId, $fyId, $asOf);
             $booksLayerValue   = $this->booksLayerValueByItem($cmpId);
+            $jobWorkBasis      = $this->booksJobWorkInwardBasisByItem($cmpId, $fyId, $asOf);
             $qtyDiffs = [];
             $explained = [];
             $valueDiffs = [];
@@ -480,7 +494,21 @@ class Validator
                         $entry['reason'] = 'books_cost_layer_missing';
                         $entry['books_lines_with_cost'] = $missingCostLayers[$itemId];
                         $valueExplained[] = $entry;
+                    } elseif (isset($jobWorkBasis[$itemId]) && self::withinJobWorkBasis($bv, $iv, $jobWorkBasis[$itemId], $moneyTol)) {
+                        // The one place the two engines are meant to disagree: Books costs a
+                        // job-work receipt from the voucher rate — the value agreed with the job
+                        // worker — and Inventory refuses a commercial rate as an inventory cost.
+                        // Bounded by the very lines that cause it, so a genuine migration
+                        // difference on a job-work item is not waved through with them.
+                        $entry['reason'] = 'job_work_receipt_valuation_basis';
+                        $entry += self::jobWorkBasisEvidence($jobWorkBasis[$itemId]);
+                        $valueExplained[] = $entry;
                     } else {
+                        if (isset($jobWorkBasis[$itemId])) {
+                            // Part of this difference is the job-work basis and the rest is not;
+                            // name the part that is so the reviewer is not left guessing.
+                            $entry += self::jobWorkBasisEvidence($jobWorkBasis[$itemId]);
+                        }
                         $valueDiffs[] = $entry;
                     }
                 }
@@ -574,6 +602,7 @@ class Validator
             'transfer_zero_cost_layer' => "Books wrote unit_cost 0 for these items' stock-transfer (vch_type 15) receiving-side cost layer, though the transfer line's own cost_rate was real and non-zero — a known Books valuation gap, not a migration defect. Inventory's replayed valuation uses the line's real cost_rate.",
             'books_cost_layer_missing' => "Books' inward line carries a real cost_rate but the cost layer its valuation report reads was never written, or was written at zero, so Books reports the item as worthless. Inventory replays the movement using the cost Books itself recorded on the line. Reviewed and approved by the owner before cutover: accepting Inventory's figures rather than carrying demonstrably purchased stock at zero. Every affected item and voucher is listed under books_lines_with_cost.",
             'books_report_disagrees_with_own_layers' => "Books' own cost layers for these items are complete and intact, and their total (qty_remaining x unit_cost, listed under books_layers) agrees with Inventory exactly. Books' valuation report disagrees with Books' own stored layers - a reporting defect in Books, not a migration difference. Inventory's figure is corroborated by Books' data itself, so no judgement call is involved in accepting it.",
+            'job_work_receipt_valuation_basis' => "Books costs a job-work receipt (vch_type 6) at the voucher rate — the value agreed with the job worker, the same figure it files in the Value column of FORM GST ITC-04 — while Inventory refuses a commercial rate as an inventory cost and values the receipt at the cost posted on the line. These items therefore differ by design, not by migration error. Accepted only where the difference stays inside what those receipts can account for (job_work_max_delta) and points the way they push it (job_work_expected_delta); every line is listed under job_work_lines.",
             'qty_explained'            => 'Value differs only because the quantity difference is itself already explained; see explanation.',
         ];
         $out = [];
@@ -659,6 +688,79 @@ class Validator
         return $out;
     }
 
+    /**
+     * Items whose closing value the two engines are meant to differ on: those with a job-work
+     * receipt (legacy vch_type 6, dr_cr 1). Books' StockValuationService derives every inward cost
+     * from the voucher rate, and on a job-work challan that rate is the value agreed with the job
+     * worker — the commercial figure Books files in the Value column of FORM GST ITC-04 — so
+     * Inventory will not adopt it as a cost and the replay reads the valuation posted on the line.
+     *
+     * Per item: `signed` is how much more Books' basis brings those receipts in at, and `cap` the
+     * largest closing-value difference they can account for. A receipt already issued out again
+     * moves the closing value by less than it came in at, never by more, so `cap` is a true ceiling
+     * and a difference beyond it is something other than this.
+     *
+     * @return array<int, array{signed: float, cap: float, lines: list<array<string, mixed>>}>
+     */
+    private function booksJobWorkInwardBasisByItem(int $cmpId, int $fyId, string $asOf): array
+    {
+        $res = $this->books->query(
+            "SELECT l.item_id, h.vch_txn_id, h.vch_number, h.vch_date, l.qty, l.rate, l.cost_rate
+             FROM books_voucher_inventory_lines l
+             JOIN books_voucher_headers h ON h.vch_txn_id = l.vch_txn_id
+             WHERE l.cmp_id = ? AND l.fy_id = ? AND h.status = 'posted' AND h.deleted_at IS NULL
+               AND h.vch_date <= ? AND h.vch_type_id = 6 AND l.dr_cr = 1 AND l.qty > 0
+             ORDER BY l.item_id, h.vch_date",
+            [$cmpId, $fyId, $asOf]
+        );
+        // A statement that failed must leave the difference unexplained, never waved through.
+        $rows = $res ? $res->getResultArray() : [];
+        $out = [];
+        foreach ($rows as $r) {
+            $qty = (float) $r['qty'];
+            // Books costs the line at rate ÷ factor over qty × factor base units, so whatever the
+            // unit it brings in qty × rate; the replay reads cost_rate over the migrated base
+            // quantity, and a line Books left without a cost_rate enters Inventory at nothing.
+            $delta = round($qty * (float) $r['rate'] - $qty * (float) ($r['cost_rate'] ?? 0), 4);
+            if (abs($delta) <= 0.00001) {
+                continue;
+            }
+            $itemId = (int) $r['item_id'];
+            $out[$itemId]['signed'] = round(($out[$itemId]['signed'] ?? 0.0) + $delta, 4);
+            $out[$itemId]['cap'] = round(($out[$itemId]['cap'] ?? 0.0) + abs($delta), 4);
+            $out[$itemId]['lines'][] = [
+                'vch_txn_id' => (int) $r['vch_txn_id'], 'vch_number' => $r['vch_number'], 'vch_date' => $r['vch_date'],
+                'qty' => $qty, 'books_voucher_rate' => (float) $r['rate'],
+                'line_cost_rate' => $r['cost_rate'] !== null ? (float) $r['cost_rate'] : null, 'value_delta' => $delta,
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Whether a value-only difference lies inside what the item's job-work receipts can produce and
+     * points the way they push it. A `signed` of zero means the lines' own deltas cancelled, which
+     * leaves the direction open and only the ceiling to test.
+     *
+     * @param array{signed: float, cap: float, lines: list<array<string, mixed>>} $basis
+     */
+    private static function withinJobWorkBasis(float $booksValue, float $invValue, array $basis, float $moneyTol): bool
+    {
+        $diff = $booksValue - $invValue;
+
+        return abs($diff) <= $basis['cap'] + $moneyTol && $diff * $basis['signed'] >= 0;
+    }
+
+    /**
+     * @param array{signed: float, cap: float, lines: list<array<string, mixed>>} $basis
+     * @return array<string, mixed>
+     */
+    private static function jobWorkBasisEvidence(array $basis): array
+    {
+        return ['job_work_expected_delta' => $basis['signed'], 'job_work_max_delta' => $basis['cap'], 'job_work_lines' => $basis['lines']];
+    }
+
     private function booksZeroCostTransferInByItem(int $cmpId, int $fyId, string $asOf): array
     {
         $rows = $this->books->query(
@@ -686,7 +788,7 @@ class Validator
 
     private function valuationVsBooks(array $companies, float $moneyTol, array &$out): array
     {
-        $svc = new ValuationReplayService();
+        $svc = $this->replay();
         $summary = [];
         $cmps = $companies ?: array_map(static fn ($r) => (int) $r['cmp_id'], $this->inv->query('SELECT DISTINCT cmp_id FROM inv_documents')->getResultArray());
         foreach ($cmps as $cmpId) {

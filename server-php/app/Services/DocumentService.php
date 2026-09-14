@@ -166,6 +166,12 @@ class DocumentService
                 'version' => (int) $doc['version'] + 1, 'updated_by' => $actor, 'updated_at' => date('Y-m-d H:i:s'),
             ]);
             $db->transComplete();
+            // DBDebug is off, so a refused UPDATE returns false instead of throwing and the
+            // rollback is silent. Without this the audit row below would assert a Table 4 figure
+            // that no line ever carried, append-only and kept for eight years.
+            if ($db->transStatus() === false) {
+                throw new \RuntimeException('Could not record the challan value', 500);
+            }
         } catch (\Throwable $e) {
             $db->transRollback();
             $db->resetTransStatus();
