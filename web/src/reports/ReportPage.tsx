@@ -181,10 +181,13 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
 
   // ---- columns -------------------------------------------------------------
   const prefsKey = registerColumnPrefsKey(config)
-  const { visibility, setVisibility, visibleColumns, columnsKey } = useColumnConfig(
-    prefsKey,
-    config.columns,
-  )
+  const {
+    visibility,
+    setVisibility,
+    visibleColumns,
+    columnsKey,
+    ready: columnsReady,
+  } = useColumnConfig(prefsKey, config.columns)
 
   // ---- KPI cards -----------------------------------------------------------
   const kpiCards = useMemo(() => {
@@ -298,6 +301,10 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
         columns={config.columns}
         visibility={visibility}
         onChange={setVisibility}
+        // The choice is stored against the member uuid, so one taken before
+        // /v1/access/me answers has nowhere to be written and would be dropped
+        // the moment the uuid arrives and the per-user key changes under it.
+        disabled={!columnsReady}
       />
       <ExportActions
         columns={visibleColumns}
