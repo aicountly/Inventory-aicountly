@@ -97,6 +97,36 @@ final class OutboxDeliveryOutcomeTest extends TestCase
         $this->assertSame('Books unreachable', $outcome['error']);
     }
 
+    /**
+     * deliveryOutcome() is public and static: BooksApiClient::request() sets every key, but a
+     * caller that does not know that may omit one. Reading an omitted key must not raise a PHP
+     * warning — the dispatcher runs unattended under spark and a warning there is noise in the
+     * log that hides a real delivery failure.
+     */
+    public function testResultMissingTheErrorKeyRaisesNoWarning(): void
+    {
+        $raised = [];
+        set_error_handler(static function (int $severity, string $message) use (&$raised): bool {
+            $raised[] = $message;
+
+            return true;
+        });
+        try {
+            $outcome = OutboxService::deliveryOutcome(['ok' => false, 'status' => 502, 'body' => null]);
+        } finally {
+            restore_error_handler();
+        }
+
+        $this->assertSame([], $raised, 'a key the caller omitted must be null-coalesced, not read bare');
+        $this->assertFalse($outcome['ack']);
+        $this->assertSame('Books did not acknowledge the event', $outcome['error']);
+        // An error Books left empty must still fall through to the apply reason, not become ''.
+        $this->assertStringContainsString('voucher locked', OutboxService::deliveryOutcome([
+            'ok' => true, 'status' => 200, 'error' => '',
+            'body' => ['data' => [['event_id' => 'e7', 'status' => 'failed', 'error' => 'voucher locked']]],
+        ])['error']);
+    }
+
     /** A 2xx whose body Books did not shape as expected is still a delivery. */
     public function testUnparseableBodyOnA2xxIsAcknowledged(): void
     {

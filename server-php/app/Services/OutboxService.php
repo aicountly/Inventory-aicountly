@@ -104,7 +104,7 @@ class OutboxService
             return ['ack' => true, 'error' => ''];
         }
 
-        return ['ack' => false, 'error' => (string) ($result['error'] ?: $applyError ?: 'Books did not acknowledge the event')];
+        return ['ack' => false, 'error' => (string) (($result['error'] ?? null) ?: $applyError ?: 'Books did not acknowledge the event')];
     }
 
     /**
