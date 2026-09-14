@@ -190,7 +190,7 @@ class RecalculationService
                     $lineRate = (float) ($m['line_valuation_rate'] ?? 0);
                     $srcIsCost = in_array($m['document_type'], \Config\DocumentTypeRegistry::COST_BEARING_SOURCE_RATE, true);
                     $srcRate = UnitConversionService::effectiveRate((float) $m['line_qty'], (float) ($m['source_transaction_rate'] ?? 0), (float) ($m['source_transaction_amount'] ?? 0));
-                    if ($lineRate > 0 && (!$srcIsCost || in_array($m['document_type'], \Config\DocumentTypeRegistry::LINE_VALUATION_RATE_TYPES, true))) {
+                    if ($lineRate > 0) {
                         $unitCost = $lineRate;
                     } elseif ($srcIsCost && $srcRate > 0) {
                         $unitCost = UnitConversionService::toBaseUnitCost($srcRate, (float) ($m['conversion_factor'] ?: 1));

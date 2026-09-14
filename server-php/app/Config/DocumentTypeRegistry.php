@@ -72,11 +72,6 @@ class DocumentTypeRegistry
         'PHYSICAL_ADJUSTMENT', 'STOCK_JOURNAL', 'PRODUCTION', 'ASSEMBLY', 'DISASSEMBLY', 'JOB_WORK_IN',
     ];
 
-    /** Types whose inward lines carry their own valuation_rate (an explicit cost, not a commercial rate). */
-    public const LINE_VALUATION_RATE_TYPES = [
-        'PRODUCTION', 'PHYSICAL_ADJUSTMENT', 'STOCK_JOURNAL', 'WRITE_IN', 'MATERIAL_RECEIPT', 'JOB_WORK_IN', 'ASSEMBLY', 'DISASSEMBLY',
-    ];
-
     /**
      * Books voucher types whose direction was driven by the line's dr_cr rather than the type
      * (InventoryMovementClassifier::drCrDrivenTypeIds): 15, 20, 10, 14, 6.
