@@ -282,6 +282,60 @@ final class ReservationsAndPackingTest extends IntegrationTestCase
         }
     }
 
+    /**
+     * A packed consignment may be invoiced once. Books clamps a sale to stock_effect on_invoice
+     * and names the list in metadata.linked_source_document_id, so the packed bucket used to be
+     * left holding goods that had already been shipped and the list stayed open for the next
+     * invoice to issue all over again.
+     */
+    public function testASecondSaleCannotIssueAConsignmentTheFirstAlreadyTook(): void
+    {
+        $pcs = $this->makeUnit();
+        $wh = $this->makeWarehouse();
+        $item = $this->makeItem('Consigned', $pcs);
+        $this->receive($item, $wh, 10, 305);
+        $listId = (int) $this->postDoc([
+            'document_type' => 'PACKING', 'document_date' => '2026-04-06', 'party_ref' => 9003,
+            'lines' => [['item_id' => $item, 'warehouse_id' => $wh, 'qty' => 4]],
+        ])['document_id'];
+        $this->assertEqualsWithDelta(4.0, $this->balances->balance($this->cmpId, $item, $wh)['packed'], 0.0001);
+
+        $sale = static fn (int $sourceId): array => [
+            'document_type' => 'SALES_ISSUE', 'document_date' => '2026-04-07', 'party_ref' => 9003,
+            'source_document_type' => 'books.sales_invoice', 'source_document_id' => $sourceId,
+            'metadata' => ['linked_source_document_id' => $listId],
+            'lines' => [['item_id' => $item, 'warehouse_id' => $wh, 'qty' => 4, 'rate' => 120]],
+        ];
+
+        $first = $this->postDoc($sale(7101), 'books');
+        $this->assertSame('POSTED', $first['status']);
+        $bal = $this->balances->balance($this->cmpId, $item, $wh);
+        $this->assertEqualsWithDelta(6.0, $bal['on_hand'], 0.0001);
+        $this->assertEqualsWithDelta(0.0, $bal['packed'], 0.0001, 'the packed goods left with the invoice');
+        $list = $this->packing->get($this->cmpId, $listId)['packing'];
+        $this->assertSame('consumed', $list['packing_status']);
+        $this->assertSame((int) $first['document_id'], $list['locked_by_document_id']);
+
+        $second = $this->docs->create($this->ctx(), $sale(7102), 'tester', 'books');
+        try {
+            $this->posting->post($this->cmpId, (int) $second['document_id'], 'tester', ['session' => ['kind' => 'service']]);
+            $this->fail('a consignment that has already shipped cannot be invoiced again');
+        } catch (InventoryException $e) {
+            $this->assertSame('invalid_state', $e->errorCode());
+            $this->assertStringContainsString('#' . (int) $first['document_id'], $e->getMessage());
+        }
+        $this->assertSame('FAILED', $this->docs->get($this->cmpId, (int) $second['document_id'])['status']);
+        $this->assertEqualsWithDelta(6.0, $this->balances->balance($this->cmpId, $item, $wh)['on_hand'], 0.0001, 'the refused invoice moved nothing');
+
+        // Reversing the invoice hands the consignment back rather than stranding it: consumed is
+        // terminal for unpack, so a list left closed here could never be released again.
+        $this->posting->reverse($this->cmpId, (int) $first['document_id'], 'tester', 'customer refused delivery');
+        $bal = $this->balances->balance($this->cmpId, $item, $wh);
+        $this->assertEqualsWithDelta(10.0, $bal['on_hand'], 0.0001);
+        $this->assertEqualsWithDelta(4.0, $bal['packed'], 0.0001);
+        $this->assertSame('open', $this->packing->get($this->cmpId, $listId)['packing']['packing_status']);
+    }
+
     public function testOpenPendingQuantitiesListingBehindPendingController(): void
     {
         $pcs = $this->makeUnit();

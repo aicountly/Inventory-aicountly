@@ -31,6 +31,7 @@ class DocumentPostingService
         protected ?OutboxService $outbox = null,
         protected ?AuditService $audit = null,
         protected ?AccessService $access = null,
+        protected ?PackingService $packing = null,
     ) {
         $this->units ??= new UnitConversionService();
         $this->documents ??= new DocumentService($this->units);
@@ -43,6 +44,7 @@ class DocumentPostingService
         $this->outbox ??= new OutboxService();
         $this->audit ??= new AuditService();
         $this->access ??= new AccessService();
+        $this->packing ??= new PackingService($this->documents, $this->status, $this->audit);
     }
 
     /**
@@ -199,6 +201,7 @@ class DocumentPostingService
             }
             // 3. Status buckets and pending quantities.
             $this->status->reverseForDocument($cmpId, $documentId, $documentId);
+            $this->packing->releaseConsumedBy($cmpId, $documentId, $actor);
             $this->pending->unsettleForDocument($cmpId, $documentId);
             $this->pending->cancelForDocument($cmpId, $documentId);
             // 4. Serials back to their prior state.
@@ -324,6 +327,12 @@ class DocumentPostingService
                     $this->status->apply($cmpId, $documentId, StockStatusService::MOV_SALE_ISSUE, [['item_id' => $itemId, 'unit_id' => $line['unit_id'], 'warehouse_id' => $wh, 'batch_id' => $batchId, 'qty' => (float) $line['qty']]]);
                 }
             }
+        }
+
+        // A sale raised against a packing list closes that list, so the next invoice naming it is
+        // refused instead of issuing the same consignment again.
+        if ($type === 'SALES_ISSUE') {
+            $this->packing->consumeForSale($cmpId, $doc, $actor, $movesStock && $stockEffect === 'from_packing');
         }
 
         // Pending quantities: open / settle.

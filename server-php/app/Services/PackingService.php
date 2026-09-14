@@ -12,7 +12,8 @@ use App\Exceptions\InventoryException;
  *   open      packed, waiting for a sale
  *   locked    a Books sale draft is being keyed against it (locked_by_external_ref) or an
  *             inventory document holds it (locked_by_document_id)
- *   consumed  a posted sale issued the packed goods (SALES_ISSUE stock_effect from_packing)
+ *   consumed  a posted sale issued the packed goods; the sale names the list in
+ *             metadata.linked_source_document_id and no second sale may name it again
  *   unpacked  goods went back to available stock (unpack); the document stays POSTED so the
  *             pack/unpack trail is complete and a later reversal nets to zero
  */
@@ -147,6 +148,100 @@ class PackingService
     }
 
     /**
+     * The packing list a sales document issues, named as metadata.linked_source_document_id.
+     * Only a sales issue takes goods out of the packed bucket; a return links its own invoice
+     * through the same key, so nothing else may be read as a consignment.
+     *
+     * @param array<string, mixed>|null $metadata
+     */
+    public static function consumedListId(string $documentType, ?array $metadata): int
+    {
+        if ($documentType !== 'SALES_ISSUE' || !is_array($metadata)) {
+            return 0;
+        }
+
+        return max(0, (int) ($metadata['linked_source_document_id'] ?? 0));
+    }
+
+    /**
+     * Why $meta cannot be consumed by document #$consumingDocumentId, or null when it can.
+     * Re-posting the same sale is idempotent; every other document is refused, which is what
+     * stops a second invoice from issuing a consignment the first one already took.
+     *
+     * @param array<string, mixed> $meta
+     */
+    public static function consumptionRefusal(array $meta, int $consumingDocumentId): ?string
+    {
+        $status = (string) ($meta['packing_status'] ?? '');
+        if ($status === self::STATUS_CONSUMED) {
+            return (int) ($meta['locked_by_document_id'] ?? 0) === $consumingDocumentId
+                ? null
+                : 'Packing list was already consumed by document #' . (int) ($meta['locked_by_document_id'] ?? 0);
+        }
+        if ($status === self::STATUS_UNPACKED) {
+            return 'Packing list was unpacked and cannot be consumed';
+        }
+
+        return null;
+    }
+
+    /**
+     * Close the packing list a posting sale names: release the packed goods and mark the list
+     * consumed, so the next invoice against it is refused instead of issuing the consignment a
+     * second time. No-op when the sale names no list, or names a document that is not one.
+     *
+     * @param array<string, mixed> $saleDoc       the posting document, hydrated
+     * @param bool                 $alreadyIssued the sale already drained the packed bucket line
+     *                                            by line (stock_effect from_packing)
+     * @return array<string, mixed>|null the consumed list
+     */
+    public function consumeForSale(int $cmpId, array $saleDoc, ?string $actor, bool $alreadyIssued = false): ?array
+    {
+        $listId = self::consumedListId((string) ($saleDoc['document_type'] ?? ''), $saleDoc['metadata'] ?? null);
+        $consumingId = (int) ($saleDoc['document_id'] ?? 0);
+        if ($listId <= 0 || $listId === $consumingId || $this->documentType($cmpId, $listId) !== 'PACKING') {
+            return null;
+        }
+        [, $meta] = $this->postedWithMeta($cmpId, $listId);
+        $refusal = self::consumptionRefusal($meta, $consumingId);
+        if ($refusal !== null) {
+            throw InventoryException::invalidState($refusal, $this->stateDetails($meta));
+        }
+        if (!$alreadyIssued && $meta['packing_status'] !== self::STATUS_CONSUMED) {
+            // Books clamps a sale to on_invoice, so nothing above drained the packed bucket: the
+            // whole consignment leaves here. Booked against the sale, so reversing it puts the
+            // goods back where reverseForDocument expects to find them.
+            $list = $this->documents->get($cmpId, $listId);
+            $this->status->apply($cmpId, $consumingId, StockStatusService::MOV_SALE_ISSUE, array_map(
+                static fn ($l) => ['item_id' => (int) $l['item_id'], 'unit_id' => $l['unit_id'], 'warehouse_id' => $l['warehouse_id'], 'batch_id' => $l['batch_id'], 'qty' => (float) $l['qty']],
+                $list['lines'],
+            ));
+        }
+
+        return $this->markConsumed($cmpId, $listId, $consumingId, $actor);
+    }
+
+    /**
+     * A reversed sale hands the consignment back: every list it consumed reopens, so the goods
+     * can be invoiced again or unpacked instead of being stranded in the packed bucket.
+     */
+    public function releaseConsumedBy(int $cmpId, int $consumingDocumentId, ?string $actor): int
+    {
+        $db = \Config\Database::connect();
+        $res = $db->table('inv_packing_meta')->select('document_id')->where('cmp_id', $cmpId)
+            ->where('locked_by_document_id', $consumingDocumentId)->where('packing_status', self::STATUS_CONSUMED)->get();
+        $rows = $res ? $res->getResultArray() : [];
+        foreach ($rows as $row) {
+            $db->table('inv_packing_meta')->where('cmp_id', $cmpId)->where('document_id', (int) $row['document_id'])->update([
+                'packing_status' => self::STATUS_OPEN, 'locked_by_document_id' => null, 'locked_by_external_ref' => null, 'locked_at' => null, 'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+            $this->audit->log($cmpId, 'document', (int) $row['document_id'], 'packing.release', $actor, ['released_by_document_id' => $consumingDocumentId], ['packing_status' => self::STATUS_CONSUMED], ['packing_status' => self::STATUS_OPEN]);
+        }
+
+        return count($rows);
+    }
+
+    /**
      * The packed goods were issued by $consumingDocumentId (a posted SALES_ISSUE from packing).
      * Allowed from open or locked; idempotent for the same consumer; 409 otherwise.
      *
@@ -155,19 +250,25 @@ class PackingService
     public function markConsumed(int $cmpId, int $documentId, int $consumingDocumentId, ?string $actor): array
     {
         [$doc, $meta] = $this->postedWithMeta($cmpId, $documentId);
-        if ($meta['packing_status'] === self::STATUS_CONSUMED) {
-            if ((int) ($meta['locked_by_document_id'] ?? 0) === $consumingDocumentId) {
-                return $this->get($cmpId, $documentId);
-            }
-            throw InventoryException::invalidState('Packing list was already consumed by document #' . $meta['locked_by_document_id'], $this->stateDetails($meta));
+        $refusal = self::consumptionRefusal($meta, $consumingDocumentId);
+        if ($refusal !== null) {
+            throw InventoryException::invalidState($refusal, $this->stateDetails($meta));
         }
-        if ($meta['packing_status'] === self::STATUS_UNPACKED) {
-            throw InventoryException::invalidState('Packing list was unpacked and cannot be consumed', $this->stateDetails($meta));
+        if ($meta['packing_status'] === self::STATUS_CONSUMED) {
+            return $this->get($cmpId, $documentId);
         }
         $now = date('Y-m-d H:i:s');
-        \Config\Database::connect()->table('inv_packing_meta')->where('cmp_id', $cmpId)->where('document_id', $documentId)->update([
-            'packing_status' => self::STATUS_CONSUMED, 'locked_by_document_id' => $consumingDocumentId, 'locked_by_external_ref' => null, 'locked_at' => $now, 'updated_at' => $now,
-        ]);
+        $db = \Config\Database::connect();
+        // Compare-and-swap on the status rather than a blind write: two invoices posting against
+        // the same list at once both read it open, and the loser must find nothing left to claim.
+        $db->table('inv_packing_meta')->where('cmp_id', $cmpId)->where('document_id', $documentId)
+            ->whereIn('packing_status', [self::STATUS_OPEN, self::STATUS_LOCKED])->update([
+                'packing_status' => self::STATUS_CONSUMED, 'locked_by_document_id' => $consumingDocumentId, 'locked_by_external_ref' => null, 'locked_at' => $now, 'updated_at' => $now,
+            ]);
+        if ($db->affectedRows() < 1) {
+            $current = $this->meta($cmpId, $documentId) ?? $meta;
+            throw InventoryException::invalidState(self::consumptionRefusal($current, $consumingDocumentId) ?? 'Packing list is no longer open for consumption', $this->stateDetails($current));
+        }
         $this->audit->log($cmpId, 'document', $documentId, 'packing.consume', $actor, ['entity_uuid' => $doc['document_uuid'], 'consumed_by_document_id' => $consumingDocumentId], ['packing_status' => $meta['packing_status']], ['packing_status' => self::STATUS_CONSUMED]);
 
         return $this->get($cmpId, $documentId);
@@ -193,6 +294,20 @@ class PackingService
     }
 
     // ------------------------------------------------------------------ internals
+
+    /**
+     * The type of one document, read without hydrating it: a sale links its order or its challan
+     * through the same metadata key, and only a PACKING document is a consignment.
+     */
+    private function documentType(int $cmpId, int $documentId): ?string
+    {
+        // DBDebug is off outside the test suite, so a failed statement returns false here.
+        $res = \Config\Database::connect()->table('inv_documents')->select('document_type')
+            ->where('cmp_id', $cmpId)->where('document_id', $documentId)->get();
+        $row = $res ? $res->getRowArray() : null;
+
+        return $row['document_type'] ?? null;
+    }
 
     /** @return array{0: array<string, mixed>, 1: array<string, mixed>} [document, meta] */
     private function postedWithMeta(int $cmpId, int $documentId): array
