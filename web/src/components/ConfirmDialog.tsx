@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { Modal } from './Modal'
 import { Notice } from './Notice'
+import { Button } from '../ui/Button'
 
 interface ConfirmDialogProps {
   open: boolean
@@ -14,26 +15,43 @@ interface ConfirmDialogProps {
   onCancel: () => void
 }
 
-export function ConfirmDialog({ open, title, message, confirmLabel = 'Confirm', danger = false, busy = false, error, onConfirm, onCancel }: ConfirmDialogProps) {
+export function ConfirmDialog({
+  open,
+  title,
+  message,
+  confirmLabel = 'Confirm',
+  danger = false,
+  busy = false,
+  error,
+  onConfirm,
+  onCancel,
+}: ConfirmDialogProps) {
   return (
     <Modal
       open={open}
       title={title}
       onClose={onCancel}
       busy={busy}
+      size="sm"
       footer={
         <>
-          <button type="button" className="btn" onClick={onCancel} disabled={busy}>
+          <Button variant="secondary" onClick={onCancel} disabled={busy}>
             Cancel
-          </button>
-          <button type="button" className={`btn ${danger ? 'btn-danger' : 'btn-primary'}`} onClick={onConfirm} disabled={busy}>
-            {busy ? 'Working…' : confirmLabel}
-          </button>
+          </Button>
+          <Button
+            variant={danger ? 'danger' : 'primary'}
+            onClick={onConfirm}
+            loading={busy}
+          >
+            {confirmLabel}
+          </Button>
         </>
       }
     >
-      <div>{message}</div>
-      {error ? <Notice kind="error">{error}</Notice> : null}
+      <div className="space-y-3 text-sm leading-relaxed text-gray-700">
+        <div>{message}</div>
+        {error ? <Notice kind="error">{error}</Notice> : null}
+      </div>
     </Modal>
   )
 }

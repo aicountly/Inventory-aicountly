@@ -1,5 +1,5 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
-import { AppLayout } from './layout/AppLayout'
+import { AppShell } from './layout/AppShell'
 import Dashboard from './pages/Dashboard'
 import { renderDocumentRoutes } from './documents/routes'
 import NotFound from './pages/NotFound'
@@ -18,6 +18,8 @@ import { PostingStatusPage } from './pages/reconciliation/PostingStatusPage'
 import { ReconciliationLayout } from './pages/reconciliation/ReconciliationLayout'
 import { ReconciliationRunPage } from './pages/reconciliation/ReconciliationRunPage'
 import { ReconciliationRunsPage } from './pages/reconciliation/ReconciliationRunsPage'
+import { RegisterRoutePage } from './registers/RegisterRoutePage'
+import { RegistersHubPage } from './registers/RegistersHubPage'
 import { ReportRoutePage } from './pages/reports/ReportRoutePage'
 import { ReportsIndexPage } from './pages/reports/ReportsIndexPage'
 import { AccessPage } from './pages/settings/AccessPage'
@@ -42,7 +44,7 @@ import { ValuationSnapshotPage } from './pages/valuation/ValuationSnapshotPage'
 export function AppRoutes() {
   return (
     <Routes>
-      <Route element={<AppLayout />}>
+      <Route element={<AppShell />}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="auth/callback" element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
@@ -82,6 +84,10 @@ export function AppRoutes() {
         </Route>
         <Route path="reports" element={<ReportsIndexPage />} />
         <Route path="reports/:path" element={<ReportRoutePage />} />
+        {/* Registers share the engine with reports; the /reports/* URLs stay
+            valid so existing links and bookmarks keep resolving. */}
+        <Route path="registers" element={<RegistersHubPage />} />
+        <Route path="registers/:path" element={<RegisterRoutePage />} />
         <Route path="reconciliation" element={<ReconciliationLayout />}>
           <Route index element={<ReconciliationRunsPage />} />
           <Route path="posting-status" element={<PostingStatusPage />} />

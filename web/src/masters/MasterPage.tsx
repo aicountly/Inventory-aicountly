@@ -185,7 +185,7 @@ export function MasterPage<T>({ config, extraActions, children, breadcrumbs }: M
     const treeFirst: Column<T> = {
       ...first,
       sortKey: undefined,
-      render: (row) => {
+      render: (row, index) => {
         const node = nodeById.get(Number((row as Record<string, unknown>)[config.idKey]))
         const depth = node?.depth ?? 0
         return (
@@ -201,7 +201,7 @@ export function MasterPage<T>({ config, extraActions, children, breadcrumbs }: M
             ) : (
               <span className="tree-toggle" aria-hidden />
             )}
-            {first.render ? first.render(row) : config.nameOf(row)}
+            {first.render ? first.render(row, index) : config.nameOf(row)}
           </span>
         )
       },

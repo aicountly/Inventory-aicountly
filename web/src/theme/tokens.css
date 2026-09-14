@@ -1,0 +1,526 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * AICOUNTLY design tokens — ported from books-react-app/web/src/index.css so
+ * Books and Inventory render the same product family.
+ *
+ * Every colour is a space-separated RGB triple consumed as
+ * `rgb(var(--x) / <alpha>)`. Never put a hex value in a component.
+ *
+ * Two deliberate differences from the Books original, both marked below:
+ *   1. `--font-size-base` is still 16px here. Books rem-scales its whole app off
+ *      13px; Inventory's legacy stylesheets are written against a 16px root, so
+ *      flipping it now would shrink every un-converted screen. One-line change
+ *      when the last legacy stylesheet retires.
+ *   2. Tailwind preflight is off (see tailwind.config.js). The equivalent reset
+ *      lives at the bottom of this file, scoped under `.aic` and written with
+ *      :where() so it carries zero specificity and every utility still wins.
+ */
+:root,
+[data-theme='default'] {
+  color-scheme: light;
+  /* Fixed workspace canvas — independent of the accent picker, but it does
+     follow light/dark mode. */
+  --workspace-bg: 245 247 250;
+  --color-primary: 37 176 3;
+  --color-primary-hover: 40 160 3;
+  --color-primary-active: 30 108 2;
+  --color-primary-light: 233 252 233;
+  --color-nav: 0 63 133;
+  --color-secondary: 21 128 61;
+
+  --color-surface: 255 255 255;
+  --color-surface-2: 246 248 250;
+  --color-surface-3: 238 242 245;
+  --color-fg: 15 23 42;
+  --color-fg-strong: 2 6 23;
+  --color-fg-muted: 100 116 139;
+  --color-fg-subtle: 148 163 184;
+  --color-border: 226 232 240;
+  --color-border-strong: 203 213 225;
+
+  --font-family: 'Nunito', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  /* Books: 13px. See note 1 above. */
+  --font-size-base: 16px;
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-overlay: 0 16px 40px -12px rgba(15, 23, 42, 0.18), 0 4px 12px rgba(15, 23, 42, 0.08);
+  --shadow-sticky: 0 -1px 2px rgba(15, 23, 42, 0.04);
+}
+
+/* Dark mode — applied via the `dark` class on <html> (pre-paint script in
+   index.html), never via a bare media query, so a future appearance picker can
+   override the OS. */
+.dark {
+  color-scheme: dark;
+  --workspace-bg: 9 13 17;
+  --color-primary: 37 176 3;
+  --color-primary-hover: 59 184 28;
+  --color-primary-active: 33 155 3;
+  --color-primary-light: 21 47 26;
+  --color-nav: 96 165 250;
+  --color-secondary: 101 172 128;
+
+  --color-surface: 18 24 30;
+  --color-surface-2: 27 34 42;
+  --color-surface-3: 36 45 54;
+  --color-fg: 226 232 240;
+  --color-fg-strong: 248 250 252;
+  --color-fg-muted: 148 163 184;
+  --color-fg-subtle: 100 116 139;
+  --color-border: 39 48 58;
+  --color-border-strong: 55 66 78;
+
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-overlay: 0 16px 40px -12px rgba(0, 0, 0, 0.55), 0 4px 12px rgba(0, 0, 0, 0.35);
+  --shadow-sticky: 0 -1px 2px rgba(0, 0, 0, 0.4);
+}
+
+[data-theme='red'] {
+  --color-primary: 221 0 38;
+  --color-primary-hover: 198 0 34;
+  --color-primary-active: 160 0 28;
+  --color-primary-light: 254 226 226;
+  --color-secondary: 127 29 29;
+}
+
+[data-theme='orange'] {
+  --color-primary: 236 123 45;
+  --color-primary-hover: 214 110 40;
+  --color-primary-active: 180 90 32;
+  --color-primary-light: 255 237 213;
+  --color-secondary: 154 52 18;
+}
+
+[data-theme='sky'],
+[data-theme='sky_blue'] {
+  --color-primary: 47 161 218;
+  --color-primary-hover: 40 145 198;
+  --color-primary-active: 30 120 170;
+  --color-primary-light: 224 242 254;
+  --color-secondary: 30 64 98;
+}
+
+[data-theme='purpl'],
+[data-theme='purple'] {
+  --color-primary: 217 124 248;
+  --color-primary-hover: 195 100 230;
+  --color-primary-active: 160 80 200;
+  --color-primary-light: 243 232 255;
+  --color-secondary: 88 28 135;
+}
+
+[data-theme='yelow'],
+[data-theme='yellow'] {
+  --color-primary: 211 176 0;
+  --color-primary-hover: 190 158 0;
+  --color-primary-active: 150 125 0;
+  --color-primary-light: 254 249 195;
+  --color-secondary: 113 63 18;
+}
+
+[data-theme='part'],
+[data-theme='lime'] {
+  --color-primary: 162 196 46;
+  --color-primary-hover: 145 175 40;
+  --color-primary-active: 120 145 32;
+  --color-primary-light: 236 252 203;
+  --color-secondary: 63 98 18;
+}
+
+[data-theme='grn'],
+[data-theme='teal'] {
+  --color-primary: 91 187 177;
+  --color-primary-hover: 75 165 156;
+  --color-primary-active: 55 140 132;
+  --color-primary-light: 204 251 241;
+  --color-secondary: 19 78 74;
+}
+
+[data-theme='blue'] {
+  --color-primary: 56 116 255;
+  --color-primary-hover: 45 100 230;
+  --color-primary-active: 37 80 200;
+  --color-primary-light: 219 234 254;
+  --color-secondary: 37 99 235;
+}
+
+/* Dark variants of the accent presets — primaries luminance-lifted for contrast
+   on the dark surface, tints blended toward the surface instead of white. */
+.dark[data-theme='red'] {
+  --color-primary: 227 48 79;
+  --color-primary-hover: 230 69 97;
+  --color-primary-active: 200 43 70;
+  --color-primary-light: 49 28 37;
+  --color-secondary: 194 147 147;
+}
+
+.dark[data-theme='orange'] {
+  --color-primary: 236 123 45;
+  --color-primary-hover: 238 136 66;
+  --color-primary-active: 208 108 40;
+  --color-primary-light: 51 39 32;
+  --color-secondary: 195 135 115;
+}
+
+.dark[data-theme='sky'],
+.dark[data-theme='sky_blue'] {
+  --color-primary: 47 161 218;
+  --color-primary-hover: 68 170 222;
+  --color-primary-active: 41 142 192;
+  --color-primary-light: 22 45 58;
+  --color-secondary: 135 153 172;
+}
+
+.dark[data-theme='purpl'],
+.dark[data-theme='purple'] {
+  --color-primary: 217 124 248;
+  --color-primary-hover: 221 137 249;
+  --color-primary-active: 191 109 218;
+  --color-primary-light: 48 39 63;
+  --color-secondary: 175 146 198;
+}
+
+.dark[data-theme='yelow'],
+.dark[data-theme='yellow'] {
+  --color-primary: 211 176 0;
+  --color-primary-hover: 215 184 26;
+  --color-primary-active: 186 155 0;
+  --color-primary-light: 47 47 26;
+  --color-secondary: 180 153 129;
+}
+
+.dark[data-theme='part'],
+.dark[data-theme='lime'] {
+  --color-primary: 162 196 46;
+  --color-primary-hover: 171 202 67;
+  --color-primary-active: 143 172 40;
+  --color-primary-light: 40 50 32;
+  --color-secondary: 142 162 115;
+}
+
+.dark[data-theme='grn'],
+.dark[data-theme='teal'] {
+  --color-primary: 91 187 177;
+  --color-primary-hover: 107 194 185;
+  --color-primary-active: 80 165 156;
+  --color-primary-light: 29 48 52;
+  --color-secondary: 130 161 159;
+}
+
+.dark[data-theme='blue'] {
+  --color-primary: 56 116 255;
+  --color-primary-hover: 76 130 255;
+  --color-primary-active: 49 102 224;
+  --color-primary-light: 24 38 64;
+  --color-secondary: 112 153 242;
+}
+
+html {
+  font-size: var(--font-size-base);
+}
+
+body {
+  font-family: var(--font-family);
+}
+
+@layer utilities {
+  .text-label-xs {
+    font-size: 0.625rem;
+  }
+  .text-label-sm {
+    font-size: 0.6875rem;
+  }
+  .text-label-md {
+    font-size: 0.75rem;
+  }
+  .bg-primary {
+    background-color: rgb(var(--color-primary));
+  }
+  .hover\:bg-primary-hover:hover {
+    background-color: rgb(var(--color-primary-hover));
+  }
+  .bg-primary-hover {
+    background-color: rgb(var(--color-primary-hover));
+  }
+  .text-primary {
+    color: rgb(var(--color-primary));
+  }
+  .border-primary {
+    border-color: rgb(var(--color-primary));
+  }
+  .bg-primary-light {
+    background-color: rgb(var(--color-primary) / 0.12);
+  }
+  .hover\:bg-primary-light:hover {
+    background-color: rgb(var(--color-primary) / 0.12);
+  }
+  .bg-brand-surface {
+    background-color: rgb(var(--color-primary-light));
+  }
+  .bg-nav {
+    background-color: rgb(var(--color-nav));
+  }
+  .text-nav {
+    color: rgb(var(--color-nav));
+  }
+  .border-nav {
+    border-color: rgb(var(--color-nav));
+  }
+  .bg-workspace {
+    background-color: rgb(var(--workspace-bg));
+  }
+  .bg-bg {
+    background-color: rgb(var(--workspace-bg));
+  }
+  .text-secondary {
+    color: rgb(var(--color-secondary));
+  }
+  .ring-primary {
+    --tw-ring-color: rgb(var(--color-primary) / 0.25);
+  }
+  .shadow-card {
+    box-shadow: var(--shadow-card);
+  }
+  .shadow-overlay {
+    box-shadow: var(--shadow-overlay);
+  }
+  .shadow-sticky {
+    box-shadow: var(--shadow-sticky);
+  }
+  .focus-ring-primary:focus {
+    outline: none;
+    --tw-ring-color: rgb(var(--color-primary) / 0.3);
+    box-shadow: 0 0 0 2px var(--tw-ring-color);
+    border-color: rgb(var(--color-primary));
+  }
+}
+
+@layer components {
+  .table-row-selected {
+    background-color: rgb(var(--color-primary-light) / 0.75);
+    box-shadow: inset 0 0 0 2px rgb(var(--color-primary) / 0.35);
+    transition: background-color 120ms ease, box-shadow 120ms ease;
+  }
+  .table-row-hover {
+    transition: background-color 120ms ease;
+  }
+  .table-row-hover:hover {
+    background-color: rgb(var(--color-primary-light) / 0.45);
+  }
+  .kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 0.375rem;
+    height: 1.125rem;
+    min-width: 1.125rem;
+    border-radius: 0.25rem;
+    border: 1px solid rgb(var(--color-border));
+    background-color: rgb(var(--color-surface-2));
+    color: rgb(var(--color-fg-muted));
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.625rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    line-height: 1;
+  }
+  .input-base {
+    width: 100%;
+    border-radius: 0.5rem;
+    border: 1px solid rgb(var(--color-border));
+    background-color: rgb(var(--color-surface));
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    color: rgb(var(--color-fg));
+    transition: border-color 120ms ease, box-shadow 120ms ease;
+  }
+  .input-base::placeholder {
+    color: rgb(var(--color-fg-subtle));
+  }
+  .input-base:focus {
+    outline: none;
+    border-color: rgb(var(--color-primary));
+    box-shadow: 0 0 0 2px rgb(var(--color-primary) / 0.25);
+  }
+  .input-base:disabled {
+    background-color: rgb(var(--color-surface-2));
+    color: rgb(var(--color-fg-muted));
+    cursor: not-allowed;
+  }
+
+  /*
+   * Loading placeholder used by src/ui/Skeleton.tsx (and therefore by every
+   * dashboard widget). It lives here rather than as a utility bundle on the
+   * component so the shimmer follows the surface tokens in both themes and so
+   * one edit restyles every placeholder in the product.
+   *
+   * The sweep is a ::after overlay rather than an animated background-position,
+   * which keeps it on the compositor, and it is suppressed entirely for users
+   * who asked for reduced motion — a dashboard can hold a dozen of these at
+   * once and a dozen pulsing blocks is exactly what that setting exists for.
+   */
+  .skeleton {
+    position: relative;
+    overflow: hidden;
+    background-color: rgb(var(--color-surface-2));
+  }
+
+  .skeleton::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background-image: linear-gradient(
+      90deg,
+      rgb(var(--color-surface-2) / 0) 0%,
+      rgb(var(--color-surface-3) / 0.85) 50%,
+      rgb(var(--color-surface-2) / 0) 100%
+    );
+    animation: aic-skeleton-sweep 1.4s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton::after {
+      animation: none;
+      background-image: none;
+    }
+    .skeleton {
+      background-color: rgb(var(--color-surface-3));
+    }
+  }
+}
+
+@keyframes aic-skeleton-sweep {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* ------------------------------------------------------------------------- */
+/* Scoped preflight.                                                          */
+/*                                                                            */
+/* Tailwind's own reset is disabled (tailwind.config.js) so the ~170 legacy    */
+/* Inventory screens keep the browser defaults their hand-written stylesheets  */
+/* were written against. Books-ported subtrees opt in by putting `aic` on      */
+/* their root element and get the same normalisation preflight would have      */
+/* given them.                                                                 */
+/*                                                                            */
+/* Everything is wrapped in :where() so each rule has specificity 0,0,0 — a    */
+/* plain utility like `border` or `font-bold` always wins, exactly as it does  */
+/* against real preflight.                                                    */
+/* ------------------------------------------------------------------------- */
+@layer base {
+  :where(.aic),
+  :where(.aic) :where(*, *::before, *::after) {
+    box-sizing: border-box;
+    border: 0 solid rgb(var(--color-border));
+  }
+
+  :where(.aic) :where(h1, h2, h3, h4, h5, h6) {
+    font-size: inherit;
+    font-weight: inherit;
+    margin: 0;
+  }
+
+  :where(.aic) :where(p, dl, dd, ol, ul, figure, blockquote, pre, hr) {
+    margin: 0;
+  }
+
+  :where(.aic) :where(ol, ul, menu) {
+    list-style: none;
+    padding: 0;
+  }
+
+  :where(.aic) :where(a) {
+    color: inherit;
+    text-decoration: inherit;
+  }
+
+  :where(.aic) :where(button, input, optgroup, select, textarea) {
+    font-family: inherit;
+    font-size: 100%;
+    font-weight: inherit;
+    line-height: inherit;
+    color: inherit;
+    margin: 0;
+    padding: 0;
+  }
+
+  :where(.aic) :where(button, [type='button'], [type='reset'], [type='submit']) {
+    appearance: button;
+    background-color: transparent;
+    background-image: none;
+    cursor: pointer;
+  }
+
+  :where(.aic) :where(button:disabled) {
+    cursor: default;
+  }
+
+  :where(.aic) :where(table) {
+    border-collapse: collapse;
+    border-color: inherit;
+    text-indent: 0;
+  }
+
+  :where(.aic) :where(th, td) {
+    padding: 0;
+    text-align: inherit;
+    font-weight: inherit;
+  }
+
+  :where(.aic) :where(img, svg, video, canvas, audio, iframe, embed, object) {
+    display: block;
+    vertical-align: middle;
+  }
+
+  :where(.aic) :where(img, video) {
+    max-width: 100%;
+    height: auto;
+  }
+
+  :where(.aic) :where(::placeholder) {
+    opacity: 1;
+    color: rgb(var(--color-fg-subtle));
+  }
+}
+
+/* ------------------------------------------------------------------------- */
+/* Print — app chrome out, content in, colours preserved.                     */
+/* ------------------------------------------------------------------------- */
+@media print {
+  .app-sidebar,
+  .app-header,
+  .app-banners,
+  .toast-viewport,
+  .print\:hidden {
+    display: none !important;
+  }
+
+  .app-shell {
+    display: block !important;
+  }
+
+  .app-main {
+    overflow: visible !important;
+    padding: 0 !important;
+  }
+
+  body {
+    background: #fff !important;
+  }
+
+  .print-break-inside-avoid,
+  .aic table,
+  .aic tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}

@@ -1,0 +1,84 @@
+/**
+ * Legacy variable bridge.
+ *
+ * Inventory's original stylesheets (components/ui.css, layout/layout.css,
+ * pages/views.css, documents/documents.css, ui/toast.css, App.css) are written
+ * against a zinc palette declared in src/index.css: --bg, --fg, --muted,
+ * --border, --accent, --surface… Those screens are being converted to the
+ * Books design language one at a time, and until the last one lands the app
+ * would otherwise run two unrelated palettes side by side — and, worse, two
+ * unrelated *dark modes*: index.css switches on `prefers-color-scheme` while
+ * the new theme layer switches on the `.dark` class the user actually chose.
+ *
+ * So this file redefines every legacy variable in terms of the semantic tokens
+ * in theme/tokens.css. It is imported AFTER index.css (see main.tsx), so it
+ * wins on source order — including over index.css's own @media dark block,
+ * which is how an un-converted screen starts following the theme toggle.
+ *
+ * Delete a group here only when the last stylesheet that reads it is gone.
+ */
+
+:root {
+  /* Canvas + ink */
+  --bg: rgb(var(--workspace-bg));
+  --fg: rgb(var(--color-fg));
+  --muted: rgb(var(--color-fg-muted));
+  --border: rgb(var(--color-border));
+  --border-strong: rgb(var(--color-border-strong));
+
+  /* Legacy "accent" was near-black; the product accent is the theme primary,
+     so every legacy primary button, checkbox and focus ring becomes branded. */
+  --accent: rgb(var(--color-primary));
+  --accent-fg: #ffffff;
+
+  --surface: rgb(var(--color-surface));
+  --surface-2: rgb(var(--color-surface-2));
+  --surface-3: rgb(var(--color-surface-3));
+
+  --link: rgb(var(--color-primary));
+  --focus: rgb(var(--color-primary));
+
+  /* Status colours — matched to the Tailwind tones the new primitives use
+     (red-600 / amber-600 / emerald-600 / sky-600) so a legacy notice and a
+     ported Badge read as the same severity. */
+  --danger: rgb(220 38 38);
+  --danger-bg: rgb(254 242 242);
+  --success: rgb(5 150 105);
+  --success-bg: rgb(236 253 245);
+  --warning: rgb(217 119 6);
+  --warning-bg: rgb(255 251 235);
+  --info: rgb(2 132 199);
+  --info-bg: rgb(240 249 255);
+
+  /* Geometry + elevation follow the ported scale (rounded-lg / rounded-xl). */
+  --radius: 0.75rem;
+  --radius-sm: 0.5rem;
+  --shadow: var(--shadow-card);
+  --shadow-lg: var(--shadow-overlay);
+
+  /* Shell metrics — the new AppShell sizes itself with Tailwind, but legacy
+     layout.css still reads these while both shells coexist. */
+  --sidebar-w: 15rem;
+  --header-h: 3rem;
+}
+
+:root.dark {
+  --danger: rgb(248 113 113);
+  --danger-bg: rgb(69 26 26 / 0.6);
+  --success: rgb(52 211 153);
+  --success-bg: rgb(6 59 43 / 0.6);
+  --warning: rgb(251 191 36);
+  --warning-bg: rgb(69 48 8 / 0.6);
+  --info: rgb(56 189 248);
+  --info-bg: rgb(12 46 71 / 0.6);
+}
+
+/* Preflight strips the browser's default list and heading styling. The legacy
+   stylesheets set their own type scale on classes, but a few raw <ul>/<ol>
+   lists inside legacy panels relied on the default markers. `:where()` keeps
+   specificity at zero so any Tailwind utility still wins. */
+:where(.panel, .card, .notice, .view) :where(ul, ol):not([class]) {
+  list-style: revert;
+  margin: revert;
+  padding: revert;
+}

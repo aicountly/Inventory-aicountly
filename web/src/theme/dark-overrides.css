@@ -1,0 +1,150 @@
+/**
+ * Dark-mode retrofit layer.
+ *
+ * The app predates dark mode and hardcodes light Tailwind utilities in
+ * hundreds of components (bg-white, text-gray-*, border-gray-*, …). Instead
+ * of editing every file, this unlayered stylesheet remaps the utilities that
+ * are actually used onto the semantic dark tokens defined in src/index.css.
+ * `.dark .bg-white` (0,2,0) out-specifies the utility (0,1,0), so no
+ * !important is needed.
+ *
+ * It is imported AFTER index.css (see main.jsx) so it also wins ties.
+ *
+ * If a control still renders light in dark mode, grep its classes and extend
+ * the matching group below — keep selectors grouped by target token.
+ * Deliberately untouched: text-white, bg-slate-800/900, bg-black overlays
+ * (already dark-safe), inline style= colors, and images.
+ */
+
+/* ---------- Surfaces ---------- */
+.dark .bg-white {
+  background-color: rgb(var(--color-surface));
+}
+.dark .bg-white\/60,
+.dark .bg-white\/70,
+.dark .bg-white\/80 {
+  background-color: rgb(var(--color-surface) / 0.85);
+}
+.dark .bg-white\/10 {
+  background-color: rgb(255 255 255 / 0.06);
+}
+.dark .bg-gray-50,
+.dark .bg-slate-50,
+.dark .bg-gray-50\/40,
+.dark .bg-gray-50\/60,
+.dark .bg-gray-50\/80,
+.dark .bg-gray-50\/95 {
+  background-color: rgb(var(--color-surface-2));
+}
+.dark .bg-gray-100,
+.dark .bg-slate-100 {
+  background-color: rgb(var(--color-surface-2));
+}
+.dark .bg-gray-200,
+.dark .bg-slate-200 {
+  background-color: rgb(var(--color-surface-3));
+}
+.dark .hover\:bg-white:hover,
+.dark .hover\:bg-gray-50:hover,
+.dark .hover\:bg-slate-50:hover,
+.dark .hover\:bg-gray-50\/60:hover {
+  background-color: rgb(var(--color-surface-2));
+}
+.dark .hover\:bg-gray-100:hover,
+.dark .hover\:bg-slate-100:hover,
+.dark .hover\:bg-gray-200:hover {
+  background-color: rgb(var(--color-surface-3));
+}
+.dark .odd\:bg-gray-50:nth-child(odd),
+.dark .odd\:bg-slate-50:nth-child(odd),
+.dark .even\:bg-gray-50:nth-child(even),
+.dark .even\:bg-slate-50:nth-child(even) {
+  background-color: rgb(var(--color-surface-2));
+}
+.dark .disabled\:bg-gray-50:disabled,
+.dark .disabled\:bg-slate-50:disabled,
+.dark .disabled\:bg-slate-100:disabled {
+  background-color: rgb(var(--color-surface-2));
+}
+
+/* ---------- Text ---------- */
+.dark .text-black,
+.dark .text-gray-900,
+.dark .text-slate-900,
+.dark .text-gray-800,
+.dark .text-slate-800 {
+  color: rgb(var(--color-fg));
+}
+.dark .text-gray-700,
+.dark .text-slate-700,
+.dark .text-gray-600,
+.dark .text-slate-600 {
+  color: rgb(var(--color-fg-muted));
+}
+.dark .text-gray-500,
+.dark .text-slate-500,
+.dark .text-gray-400,
+.dark .text-slate-400,
+.dark .text-gray-300 {
+  color: rgb(var(--color-fg-subtle));
+}
+.dark .hover\:text-gray-900:hover,
+.dark .hover\:text-gray-800:hover,
+.dark .hover\:text-gray-700:hover {
+  color: rgb(var(--color-fg));
+}
+.dark .hover\:text-gray-600:hover {
+  color: rgb(var(--color-fg-muted));
+}
+.dark .disabled\:text-gray-500:disabled {
+  color: rgb(var(--color-fg-subtle));
+}
+
+/* ---------- Lines ---------- */
+.dark .border-gray-50,
+.dark .border-gray-100,
+.dark .border-slate-100,
+.dark .border-gray-200,
+.dark .border-slate-200,
+.dark .border-gray-300,
+.dark .border-slate-300,
+.dark .hover\:border-gray-200:hover,
+.dark .hover\:border-gray-400:hover,
+.dark .border-\[\#cbd0dd\] {
+  border-color: rgb(var(--color-border));
+}
+.dark .divide-gray-100 > :not([hidden]) ~ :not([hidden]),
+.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
+.dark .divide-gray-200 > :not([hidden]) ~ :not([hidden]),
+.dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: rgb(var(--color-border));
+}
+.dark .ring-gray-200,
+.dark .ring-slate-200 {
+  --tw-ring-color: rgb(var(--color-border));
+}
+
+/* ---------- Elevation ---------- */
+.dark .shadow-sm,
+.dark .shadow,
+.dark .shadow-md,
+.dark .shadow-lg,
+.dark .shadow-xl,
+.dark .shadow-2xl {
+  --tw-shadow-color: rgb(0 0 0 / 0.45);
+  --tw-shadow: var(--tw-shadow-colored);
+}
+
+/* ---------- Forms ---------- */
+.dark input,
+.dark select,
+.dark textarea {
+  color-scheme: dark;
+}
+.dark ::placeholder {
+  color: rgb(var(--color-fg-subtle));
+}
+.dark .placeholder-gray-400::placeholder,
+.dark .placeholder-slate-400::placeholder {
+  color: rgb(var(--color-fg-subtle));
+}

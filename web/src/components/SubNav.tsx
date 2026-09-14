@@ -1,6 +1,6 @@
-import { NavLink } from 'react-router-dom'
 import { useAccess } from '../access/AccessContext'
 import type { PermissionKey } from '../access/AccessContext'
+import { RouteTabBar } from '../ui/shell/PageTabBar'
 
 export interface SubNavItem {
   to: string
@@ -16,12 +16,9 @@ export function SubNav({ items, label }: { items: readonly SubNavItem[]; label: 
   const { can, loading } = useAccess()
   const visible = loading ? items : items.filter((i) => !i.permission || can(i.permission))
   return (
-    <nav className="sub-nav" aria-label={label}>
-      {visible.map((i) => (
-        <NavLink key={i.to} to={i.to} end={i.end} className={({ isActive }) => `sub-nav-link${isActive ? ' active' : ''}`}>
-          {i.label}
-        </NavLink>
-      ))}
-    </nav>
+    <RouteTabBar
+      tabs={visible.map((i) => ({ label: i.label, to: i.to, end: i.end }))}
+      aria-label={label}
+    />
   )
 }

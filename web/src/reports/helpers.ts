@@ -34,22 +34,44 @@ export function csvColumnsFromTable<T>(columns: readonly ReportColumn<T>[]): Csv
  */
 export function resolveFilterValues(filters: readonly ReportFilter[], urlFilters: Record<string, string>, ctx: FilterContext): Record<string, string> {
   const out: Record<string, string> = {}
-  for (const f of filters) {
-    const fromUrl = urlFilters[f.key]
+  const take = (key: string, fallback?: (c: FilterContext) => string): void => {
+    const fromUrl = urlFilters[key]
     if (fromUrl !== undefined && fromUrl !== '') {
-      out[f.key] = fromUrl
-      continue
+      out[key] = fromUrl
+      return
     }
-    if (f.kind === 'toggle') {
-      out[f.key] = f.defaultOn ? '1' : '0'
-      continue
-    }
-    if (f.defaultValue) {
-      const d = f.defaultValue(ctx)
-      if (d) out[f.key] = d
+    if (fallback) {
+      const d = fallback(ctx)
+      if (d) out[key] = d
     }
   }
+
+  for (const f of filters) {
+    if (f.kind === 'toggle') {
+      const fromUrl = urlFilters[f.key]
+      out[f.key] = fromUrl !== undefined && fromUrl !== '' ? fromUrl : f.defaultOn ? '1' : '0'
+      continue
+    }
+    // A date range is two independent URL keys, so an old bookmark that only
+    // carries `from` still resolves and only the missing end takes its default.
+    if (f.kind === 'date_range') {
+      take(f.key, f.defaultValue)
+      take(f.toKey ?? 'to', f.defaultToValue)
+      continue
+    }
+    take(f.key, f.defaultValue)
+  }
   return out
+}
+
+/** Every URL key a filter list owns — what useListParams has to be told about. */
+export function filterUrlKeys(filters: readonly ReportFilter[]): string[] {
+  const keys: string[] = []
+  for (const f of filters) {
+    keys.push(f.key)
+    if (f.kind === 'date_range') keys.push(f.toKey ?? 'to')
+  }
+  return Array.from(new Set(keys))
 }
 
 /** Default reporting period: the financial year, but never past today. */

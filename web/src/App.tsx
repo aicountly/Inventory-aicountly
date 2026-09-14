@@ -4,7 +4,9 @@ import { AccessProvider } from './access/AccessContext'
 import { useAuth } from './auth/AuthProvider'
 import { CompanyProvider } from './company/CompanyContext'
 import SignIn from './pages/SignIn'
+import { KeyboardProvider } from './keyboard/KeyboardProvider'
 import { AppRoutes } from './router'
+import { ThemeProvider } from './theme/ThemeProvider'
 import { ToastProvider } from './ui/ToastContext'
 import { initAnalytics, trackPageView } from './utils/analytics'
 import './App.css'
@@ -36,14 +38,18 @@ export default function App() {
   if (status === 'authenticated') {
     return (
       <BrowserRouter>
-        <ToastProvider>
-          <CompanyProvider>
-            <AccessProvider>
-              <RouteAnalytics />
-              <AppRoutes />
-            </AccessProvider>
-          </CompanyProvider>
-        </ToastProvider>
+        <ThemeProvider>
+          <KeyboardProvider>
+            <ToastProvider>
+              <CompanyProvider>
+                <AccessProvider>
+                  <RouteAnalytics />
+                  <AppRoutes />
+                </AccessProvider>
+              </CompanyProvider>
+            </ToastProvider>
+          </KeyboardProvider>
+        </ThemeProvider>
       </BrowserRouter>
     )
   }

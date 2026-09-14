@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { FormField as SharedFormField } from '../ui/shell/FormSectionCard'
 
 interface FormFieldProps {
   label: ReactNode
@@ -10,19 +11,22 @@ interface FormFieldProps {
   children: ReactNode
 }
 
+/**
+ * Label + control + one message line. Delegates to the shared field so the
+ * forms that already use it match the ported screens; `help` is the older
+ * name for `hint`.
+ */
 export function FormField({ label, htmlFor, required, help, error, className, children }: FormFieldProps) {
   return (
-    <div className={`field${className ? ` ${className}` : ''}`}>
-      <label className="field-label" htmlFor={htmlFor}>
-        {label}
-        {required ? (
-          <span className="field-required" aria-hidden>
-            *
-          </span>
-        ) : null}
-      </label>
+    <SharedFormField
+      label={label}
+      htmlFor={htmlFor}
+      required={required}
+      hint={help}
+      error={error}
+      className={className}
+    >
       {children}
-      {error ? <span className="field-error">{error}</span> : help ? <span className="field-help">{help}</span> : null}
-    </div>
+    </SharedFormField>
   )
 }

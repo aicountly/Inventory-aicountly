@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { BreadcrumbHeader } from '../ui/shell/BreadcrumbHeader'
 
 export interface Crumb {
   label: string
@@ -13,21 +13,18 @@ interface PageHeaderProps {
   breadcrumbs?: Crumb[]
 }
 
+/**
+ * The original page header, re-expressed on the shared one. Same props, so
+ * every screen that renders it gains the breadcrumb bar, the Esc-to-back
+ * shortcut and the Books type scale without an edit.
+ */
 export function PageHeader({ title, subtitle, actions, breadcrumbs }: PageHeaderProps) {
   return (
-    <div className="page-header">
-      <div>
-        {breadcrumbs && breadcrumbs.length > 0 ? (
-          <ol className="breadcrumbs">
-            {breadcrumbs.map((c, i) => (
-              <li key={`${c.label}-${i}`}>{c.to ? <Link to={c.to}>{c.label}</Link> : c.label}</li>
-            ))}
-          </ol>
-        ) : null}
-        <h1 className="page-title">{title}</h1>
-        {subtitle ? <p className="page-subtitle">{subtitle}</p> : null}
-      </div>
-      {actions ? <div className="page-actions">{actions}</div> : null}
-    </div>
+    <BreadcrumbHeader
+      breadcrumbs={breadcrumbs}
+      title={title}
+      description={subtitle}
+      actions={actions}
+    />
   )
 }
