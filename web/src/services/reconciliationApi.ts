@@ -89,6 +89,7 @@ export type SyncStatus =
   | 'FAILED_IN_BOOKS'
   | 'BOOKS_UNAVAILABLE'
   | 'CANCELLED_BOTH'
+  | 'BOOKS_STATUS_UNKNOWN'
 
 export const SYNC_STATUSES: SyncStatus[] = [
   'IN_SYNC',
@@ -102,6 +103,7 @@ export const SYNC_STATUSES: SyncStatus[] = [
   'FAILED_IN_BOOKS',
   'BOOKS_UNAVAILABLE',
   'CANCELLED_BOTH',
+  'BOOKS_STATUS_UNKNOWN',
 ]
 
 export interface PostingStatusEntry {

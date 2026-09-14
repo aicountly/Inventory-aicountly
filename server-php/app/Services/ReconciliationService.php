@@ -51,6 +51,7 @@ class ReconciliationService
     public const SYNC_FAILED_BOOKS = 'FAILED_IN_BOOKS';
     public const SYNC_BOOKS_UNAVAILABLE = 'BOOKS_UNAVAILABLE';
     public const SYNC_CANCELLED_BOTH = 'CANCELLED_BOTH';
+    public const SYNC_BOOKS_STATUS_UNKNOWN = 'BOOKS_STATUS_UNKNOWN';
 
     public function __construct(
         protected ?BooksApiClient $books = null,
@@ -651,20 +652,31 @@ class ReconciliationService
             'CANCELLED' => self::SYNC_CANCELLED_BOOKS,
             'PENDING' => self::SYNC_PENDING_BOOKS,
             'FAILED' => self::SYNC_FAILED_BOOKS,
-            default => self::SYNC_IN_SYNC,
+            // A word this side does not know is not agreement. Reporting IN_SYNC for it made the
+            // vocabularies drift apart in silence, which is how the composite statuses above went
+            // unnoticed for as long as they did.
+            default => self::SYNC_BOOKS_STATUS_UNKNOWN,
         };
     }
 
-    /** POSTED | CANCELLED | PENDING | FAILED | UNKNOWN */
+    /**
+     * POSTED | CANCELLED | PENDING | FAILED | UNKNOWN
+     *
+     * The first group of each arm is the generic vocabulary; the composite words after it are the
+     * ones Books' posting-status endpoint actually emits (InventoryIntegrationController::
+     * postingStatus()), which say what happened on BOTH sides in one token. Left unlisted they
+     * normalised to UNKNOWN, and a voucher cancelled in Books read as a document Inventory had
+     * reversed on its own.
+     */
     public static function normalizeBooksStatus(?string $status): string
     {
         $s = strtoupper(trim((string) $status));
 
         return match (true) {
             $s === '' => 'UNKNOWN',
-            in_array($s, ['POSTED', 'ACKED', 'ACKNOWLEDGED', 'SYNCED', 'OK', 'DONE', 'COMPLETED', 'SUCCESS'], true) => 'POSTED',
-            in_array($s, ['CANCELLED', 'CANCELED', 'REVERSED', 'DELETED', 'VOID'], true) => 'CANCELLED',
-            in_array($s, ['PENDING', 'QUEUED', 'DRAFT', 'IN_PROGRESS', 'PROCESSING', 'SENT'], true) => 'PENDING',
+            in_array($s, ['POSTED', 'ACKED', 'ACKNOWLEDGED', 'SYNCED', 'OK', 'DONE', 'COMPLETED', 'SUCCESS', 'MIGRATED', 'INVENTORY_NATIVE'], true) => 'POSTED',
+            in_array($s, ['CANCELLED', 'CANCELED', 'REVERSED', 'DELETED', 'VOID', 'CANCELLED_IN_BOOKS', 'CANCELLED_BOTH'], true) => 'CANCELLED',
+            in_array($s, ['PENDING', 'QUEUED', 'DRAFT', 'IN_PROGRESS', 'PROCESSING', 'SENT', 'INVENTORY_PENDING', 'REVERSAL_PENDING'], true) => 'PENDING',
             in_array($s, ['FAILED', 'ERROR', 'DEAD', 'REJECTED'], true) => 'FAILED',
             default => 'UNKNOWN',
         };
