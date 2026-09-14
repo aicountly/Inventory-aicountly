@@ -177,6 +177,7 @@ class DocumentPostingService
         $this->packing->assertReversible($cmpId, $doc);
         $this->assertPeriodOpen($cmpId, (int) $doc['bo_id'], (string) $doc['document_date']);
         $spec = DocumentTypeRegistry::get((string) $doc['document_type']);
+        $valuesLines = self::valuesLines((string) $doc['document_type'], $spec, (string) ($doc['stock_effect'] ?? ''));
         $db = \Config\Database::connect();
         $now = date('Y-m-d H:i:s');
         $db->transStart();
@@ -194,11 +195,10 @@ class DocumentPostingService
                 $this->balances->applyDelta($cmpId, (int) $m['item_id'], $m['warehouse_id'] !== null ? (int) $m['warehouse_id'] : null, $m['batch_id'] !== null ? (int) $m['batch_id'] : null, 'on_hand', -(float) $m['qty'], $now);
             }
             // 2. Valuation: restore layers consumed by out lines; withdraw layers created by in lines.
-            foreach ($doc['lines'] as $line) {
-                if (empty($spec['valuation'])) {
-                    break;
+            if ($valuesLines) {
+                foreach ($doc['lines'] as $line) {
+                    $this->reverseLineValuation($db, $cmpId, $doc, $line);
                 }
-                $this->reverseLineValuation($db, $cmpId, $doc, $line);
             }
             // 3. Status buckets and pending quantities.
             $this->status->reverseForDocument($cmpId, $documentId, $documentId);
@@ -212,7 +212,7 @@ class DocumentPostingService
                 'status' => 'REVERSED', 'cancelled_by' => $actor, 'cancelled_at' => $now, 'cancel_reason' => $reason, 'updated_by' => $actor, 'updated_at' => $now,
             ]);
             // 6. Later issues may have consumed different layers — replay from this date.
-            if (!empty($spec['valuation'])) {
+            if ($valuesLines) {
                 (new RecalculationService($this->valuation, $this->units, $this->balances, $this->outbox))
                     ->enqueue($cmpId, (int) $doc['fy_id'], null, (string) $doc['document_date'], 'reversal', $documentId, $actor);
             }
@@ -251,8 +251,9 @@ class DocumentPostingService
         $stockEffect = (string) ($doc['stock_effect'] ?? '');
         $lines = $doc['lines'];
 
-        // Which lines physically move stock right now?
-        $movesStock = $this->movesStockNow($type, $spec, $stockEffect);
+        // Which lines physically move stock right now, and does the document value them?
+        $movesStock = self::movesStockNow($type, $spec, $stockEffect);
+        $valuesLines = self::valuesLines($type, $spec, $stockEffect);
         $valuationTotal = 0.0;
         $cogsEffects = [];
         $adjustmentValue = 0.0;
@@ -295,7 +296,7 @@ class DocumentPostingService
                 }
 
                 $val = ['valuation_rate' => null, 'valuation_amount' => null, 'valuation_method_applied' => null];
-                if (!empty($spec['valuation'])) {
+                if ($valuesLines) {
                     if ($direction === 'in') {
                         $unitCost = $this->inwardUnitCost($cmpId, $doc, $line, $lines);
                         $zeroCost = self::zeroInwardCostWarning($type, $itemId, (int) $line['line_id'], $unitCost);
@@ -364,7 +365,8 @@ class DocumentPostingService
         return ['effects' => $effects, 'valuation_total' => round($valuationTotal, 4)];
     }
 
-    private function movesStockNow(string $type, array $spec, string $stockEffect): bool
+    /** Does a document of this type and stock_effect move stock at posting time? */
+    public static function movesStockNow(string $type, array $spec, string $stockEffect): bool
     {
         return match ($type) {
             'DELIVERY_CHALLAN' => $stockEffect === 'physical',
@@ -377,9 +379,26 @@ class DocumentPostingService
     }
 
     /**
+     * Does a document value the lines it posts? A type declared valuation => true always does.
+     * A type that values only the stock it actually moves (an inward challan) does exactly when it
+     * moves stock: a challan_only challan opens a pending quantity and touches no layer, while a
+     * settle_deferred or physical one is a receipt like any other and its goods must not reach
+     * on_hand without a cost layer behind them.
+     */
+    public static function valuesLines(string $type, ?array $spec, string $stockEffect): bool
+    {
+        if (!empty($spec['valuation'])) {
+            return true;
+        }
+
+        return DocumentTypeRegistry::valuesMovedStock($type) && self::movesStockNow($type, $spec ?? [], $stockEffect);
+    }
+
+    /**
      * Unit cost (base units) of an inward line.
      *  - transfer in-side: cost the out-side was issued at
      *  - explicit valuation_rate on the line (physical adjustment, write-in, production finished goods)
+     *  - inward challan settling a deferred purchase: the purchase's rate for the same item
      *  - source rate ÷ factor, but ONLY for a cost-bearing document (purchase, GRN, opening,
      *    production/adjustment): on a sales return or a journal with items the source rate is the
      *    Books COMMERCIAL rate (selling price) and is never a cost
@@ -407,6 +426,15 @@ class DocumentPostingService
             return round((float) $line['valuation_rate'], 4);
         }
         $db = \Config\Database::connect();
+        // A challan settling a deferred purchase carries the goods and nothing else: the price
+        // agreed with the supplier was recorded on the purchase, which posted with defer_inward and
+        // so moved no stock and was never valued. Cost this receipt from that purchase.
+        if ($type === 'INWARD_CHALLAN' && (string) ($doc['stock_effect'] ?? '') === 'settle_deferred') {
+            $deferred = $this->deferredPurchaseUnitCost($db, $cmpId, self::settledPurchaseId($doc), $itemId);
+            if ($deferred !== null) {
+                return $deferred;
+            }
+        }
         if (in_array($type, DocumentTypeRegistry::COST_BEARING_SOURCE_RATE, true)) {
             $rate = UnitConversionService::effectiveRate((float) $line['qty'], (float) ($line['source_transaction_rate'] ?? 0), (float) ($line['source_transaction_amount'] ?? 0));
             if ($rate > 0) {
@@ -420,6 +448,65 @@ class DocumentPostingService
         }
 
         return $this->valuation->resolveFallbackUnitCost($db, $cmpId, $itemId, $this->valuation->scopeWarehouse($cmpId, $line['warehouse_id'] !== null ? (int) $line['warehouse_id'] : null));
+    }
+
+    /**
+     * The deferred purchase an inward challan settles. The same link the pending settlement uses,
+     * so the cost of the goods and the pending row they close can never name different purchases.
+     */
+    private static function settledPurchaseId(array $doc): int
+    {
+        $meta = is_array($doc['metadata'] ?? null) ? $doc['metadata'] : [];
+
+        return (int) ($meta['linked_source_document_id'] ?? $doc['source_document_id'] ?? 0);
+    }
+
+    /**
+     * Base unit cost the deferred purchase recorded for an item, weighted over its inward lines for
+     * that item (a purchase may list the same item twice at different rates). An explicit cost on a
+     * purchase line wins; otherwise its commercial rate, which the registry declares to be the cost
+     * of the goods for a purchase — and only for a purchase, so a link pointing at some other
+     * document type never lets that document's commercial rate become an inventory cost.
+     * Null when the purchase has no priced inward line for the item.
+     *
+     * Public because the backfill of challans posted before this gate opened must price them
+     * exactly as posting does, from the same recorded facts.
+     */
+    public function deferredPurchaseUnitCost($db, int $cmpId, int $sourceId, int $itemId): ?float
+    {
+        if ($sourceId <= 0) {
+            return null;
+        }
+        $res = $db->table('inv_document_lines l')
+            ->select('l.qty, l.base_qty, l.conversion_factor, l.valuation_rate, l.source_transaction_rate, l.source_transaction_amount, d.document_type')
+            ->join('inv_documents d', 'd.document_id = l.document_id', 'inner')
+            ->where('l.cmp_id', $cmpId)->where('l.document_id', $sourceId)->where('l.item_id', $itemId)->where('l.direction', 'in')
+            ->get();
+        if ($res === false) {
+            // DBDebug is off in every deployed environment, so a refused query answers false and
+            // ->getResultArray() on false is fatal. A cost that cannot be read must stop the
+            // posting rather than fall through and be guessed from the item's history.
+            throw new \RuntimeException('Could not read the deferred purchase behind this inward challan', 500);
+        }
+        $qty = 0.0;
+        $value = 0.0;
+        foreach ($res->getResultArray() as $l) {
+            $baseQty = (float) $l['base_qty'];
+            $rate = (float) ($l['valuation_rate'] ?? 0);
+            if ($rate <= 0 && in_array(strtoupper((string) $l['document_type']), DocumentTypeRegistry::COST_BEARING_SOURCE_RATE, true)) {
+                $rate = UnitConversionService::toBaseUnitCost(
+                    UnitConversionService::effectiveRate((float) $l['qty'], (float) ($l['source_transaction_rate'] ?? 0), (float) ($l['source_transaction_amount'] ?? 0)),
+                    (float) ($l['conversion_factor'] ?: 1),
+                );
+            }
+            if ($baseQty <= 0 || $rate <= 0) {
+                continue;
+            }
+            $qty += $baseQty;
+            $value += $baseQty * $rate;
+        }
+
+        return $qty > 0 ? round($value / $qty, 4) : null;
     }
 
     /**
@@ -521,7 +608,7 @@ class DocumentPostingService
                 break;
             case 'INWARD_CHALLAN':
                 if ($stockEffect === 'settle_deferred') {
-                    $sourceId = (int) ($meta['linked_source_document_id'] ?? $doc['source_document_id'] ?? 0);
+                    $sourceId = self::settledPurchaseId($doc);
                     if ($sourceId <= 0) {
                         throw InventoryException::validation('An inward challan settling a deferred purchase must reference the purchase (metadata.linked_source_document_id)');
                     }
@@ -699,6 +786,19 @@ class DocumentPostingService
         $baseQty = (float) $line['base_qty'];
         $rate = (float) ($line['valuation_rate'] ?? 0);
         if ($baseQty <= 0 || !in_array($line['direction'], ['in', 'out'], true)) {
+            return;
+        }
+        if ($line['valuation_rate'] === null) {
+            // This line was never valued, so there is nothing of it to unwind. The decision has to
+            // be made from what the line RECORDED, not from what its document type would record
+            // today: an inward challan posted before this type became valued carries a null rate
+            // and contributed to no layer and no WAC state, but reversing it on today's rule
+            // subtracts its quantity from qty_on_hand and re-averages at zero — taking out units
+            // that were never put in and inflating the unit cost of everything left. FIFO survives
+            // that by accident (there is no layer to find), WAC does not, and WAC is where it is
+            // invisible. Posting writes 0.0 rather than null for a receipt it genuinely costed at
+            // nothing, so null means "untouched" exactly, and it stays right for a document whose
+            // lines were only partly repaired.
             return;
         }
         if ($method === 'WAC') {

@@ -184,6 +184,10 @@ class RecalculationService
      * priced from the out-side it is paired with, and a type that carries no valuation was never
      * costed, so neither is one of them.
      *
+     * A type that values only the stock it moves (an inward challan) is costed here whenever it
+     * appears: a physical movement row exists only because the document moved stock, which is the
+     * very condition under which posting valued it.
+     *
      * @param list<array<string, mixed>> $movements
      * @param array<int, true> $reversed
      * @return list<array<string, mixed>>
@@ -196,7 +200,7 @@ class RecalculationService
                 continue;
             }
             $spec = \Config\DocumentTypeRegistry::get((string) $m['document_type']);
-            if (empty($spec['valuation'])) {
+            if (empty($spec['valuation']) && !\Config\DocumentTypeRegistry::valuesMovedStock((string) $m['document_type'])) {
                 continue;
             }
             $meta = json_decode((string) ($m['metadata_json'] ?? ''), true) ?: [];
@@ -265,6 +269,16 @@ class RecalculationService
         );
     }
 
+    /** The one unpriced inward the pre-flight guard cannot see, because it deliberately exempts it. */
+    private static function unpairedTransferReason(int $lineId, int $documentId): string
+    {
+        return sprintf(
+            'Refusing to recalculate: the receiving side of a transfer (line_id %d, document_id %d) has no cost to replay — the issuing side it is priced from is not in the replay set. Repair that pair first; receiving the goods at zero would rewrite the stored history and publish the difference to Books as a valuation revision.',
+            $lineId,
+            $documentId,
+        );
+    }
+
     public function replayItem(int $cmpId, int $fyId, int $itemId, bool $dryRun): array
     {
         $db = \Config\Database::connect();
@@ -318,11 +332,25 @@ class RecalculationService
                     $unitCost = $transferCost[(int) $m['document_id'] . ':' . $meta['transfer_pair']] ?? null;
                 }
                 $unitCost ??= self::decidedInwardUnitCost($m);
-                // Null is the guard's own case and it refused this item before the transaction
-                // opened; costing it at zero here keeps a throw out of an open transaction.
-                $val = $this->engine->recordReceipt($cmpId, $fyId, $itemId, $m['warehouse_id'] !== null ? (int) $m['warehouse_id'] : null, $qty, (float) $unitCost, $date . ' 00:00:00', (int) $m['document_id'], $lineId);
+                if ($unitCost === null) {
+                    // The pre-flight guard exempts a transfer's in-side because the out-side prices
+                    // it, and in a well-formed pair the out-side is always replayed first. A pair
+                    // the replay never completes — one side reversed on its own, or left in another
+                    // year by a migration — leaves nothing to carry, and (float) null would receive
+                    // the goods at a silent zero and publish that zero to Books as a COGS revision.
+                    // Roll back first: the layers this item already has stay the truth until a
+                    // replay can price every receipt, and run() needs a usable connection to record
+                    // the failure on, which an abandoned open transaction would deny it.
+                    $db->transRollback();
+                    $db->resetTransStatus();
+
+                    throw new \RuntimeException(self::unpairedTransferReason($lineId, (int) $m['document_id']), 409);
+                }
+                $val = $this->engine->recordReceipt($cmpId, $fyId, $itemId, $m['warehouse_id'] !== null ? (int) $m['warehouse_id'] : null, $qty, $unitCost, $date . ' 00:00:00', (int) $m['document_id'], $lineId);
             } else {
-                $val = $this->engine->issueStock($cmpId, $fyId, $itemId, $m['warehouse_id'] !== null ? (int) $m['warehouse_id'] : null, $qty, $date . ' 00:00:00', (int) $m['document_id'], $lineId);
+                // $date bounds the last-resort cost: a replay re-costs an issue that Books was
+                // already told about, so a receipt dated after it may not price it.
+                $val = $this->engine->issueStock($cmpId, $fyId, $itemId, $m['warehouse_id'] !== null ? (int) $m['warehouse_id'] : null, $qty, $date . ' 00:00:00', (int) $m['document_id'], $lineId, null, $date);
                 $meta = json_decode((string) ($m['metadata_json'] ?? ''), true) ?: [];
                 if (($meta['side'] ?? '') === 'out' && !empty($meta['transfer_pair'])) {
                     $transferCost[(int) $m['document_id'] . ':' . $meta['transfer_pair']] = (float) $val['valuation_rate'];

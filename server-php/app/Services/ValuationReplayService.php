@@ -208,9 +208,9 @@ class ValuationReplayService
     }
 
     /**
-     * Movement events per item in replay order. Inward cost = source rate ÷ factor only where that
-     * rate is the cost of the goods, else the valuation rate posted on the line (transfers,
-     * production, adjustments); a commercial rate is never a cost.
+     * Movement events per item in replay order. Inward cost = what the posting engine recorded on
+     * the movement, and where it recorded none, the source rate ÷ factor but only where that rate
+     * is the cost of the goods; a commercial rate is never a cost.
      *
      * Books' own engine costs every inward from the voucher rate, so this parts company with it
      * wherever that rate is commercial - a job-work receipt above all. Migration\Validator
@@ -245,14 +245,26 @@ class ValuationReplayService
                 $direction = (float) $r['qty'] > 0 ? 'in' : 'out';
                 $unitCost = 0.0;
                 if ($direction === 'in') {
-                    $srcRate = UnitConversionService::effectiveRate((float) ($r['line_qty'] ?? 0), (float) ($r['source_transaction_rate'] ?? 0), (float) ($r['source_transaction_amount'] ?? 0));
-                    // SALES_RETURN / JOURNAL_ADJUSTMENT / JOB_WORK_IN deliberately excluded: their
-                    // source rate is the Books commercial rate — for a job-work receipt the value
-                    // agreed with the job worker — so the replay reads the posted cost instead.
-                    if ($srcRate > 0 && in_array($r['document_type'], ['PURCHASE_RECEIPT', 'OPENING_STOCK', 'MATERIAL_RECEIPT', 'WRITE_IN', 'PRODUCTION', 'PHYSICAL_ADJUSTMENT', 'STOCK_JOURNAL'], true) && $r['movement_kind'] === 'physical') {
-                        $unitCost = UnitConversionService::toBaseUnitCost($srcRate, (float) ($r['conversion_factor'] ?: 1));
-                    } else {
-                        $unitCost = (float) ($r['unit_cost'] ?? $r['valuation_rate'] ?? 0);
+                    // What posting decided, when posting decided anything: the two engines cannot
+                    // disagree about a line the posting engine valued if the report reads that very
+                    // figure. It matters most where the cost is NOT the line's own rate — an inward
+                    // challan settling a deferred purchase is costed from the purchase, because the
+                    // price agreed with the supplier was recorded there and the challan carries only
+                    // the goods.
+                    $unitCost = (float) ($r['unit_cost'] ?? $r['valuation_rate'] ?? 0);
+                    if ($unitCost <= 0) {
+                        // Posting recorded no cost: a migrated line (Books kept no movement ledger,
+                        // so valuation_rate came across empty wherever Books had no cost layer), or
+                        // an inward challan posted before this engine valued the stock it moves. The
+                        // line's own rate is the cost of the goods on a cost-bearing document only —
+                        // on a sales return or a job-work receipt it is the commercial value Books
+                        // owns. That list is read from the registry, which is where posting reads it
+                        // (inwardUnitCost); the copy that used to sit here had drifted, missing
+                        // INWARD_CHALLAN, so exactly those challan rows were reported at zero.
+                        $srcRate = UnitConversionService::effectiveRate((float) ($r['line_qty'] ?? 0), (float) ($r['source_transaction_rate'] ?? 0), (float) ($r['source_transaction_amount'] ?? 0));
+                        if ($srcRate > 0 && in_array(strtoupper((string) $r['document_type']), \Config\DocumentTypeRegistry::COST_BEARING_SOURCE_RATE, true) && $r['movement_kind'] === 'physical') {
+                            $unitCost = UnitConversionService::toBaseUnitCost($srcRate, (float) ($r['conversion_factor'] ?: 1));
+                        }
                     }
                 }
                 $out[$itemId][] = ['direction' => $direction, 'qty' => round($qty, 4), 'unit_cost' => round($unitCost, 4), 'date' => (string) $r['movement_date']];

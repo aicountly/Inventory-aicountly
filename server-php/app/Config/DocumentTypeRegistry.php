@@ -77,6 +77,21 @@ class DocumentTypeRegistry
     ];
 
     /**
+     * Types declared valuation => false that must still value the stock they DO move.
+     *
+     * An inward challan carries no valuation as a type because most of them (stock_effect
+     * challan_only) move no stock at all — they only open a pending quantity against the supplier.
+     * But on settle_deferred and physical the goods enter on_hand, and a receipt with no cost layer
+     * leaves the pool short by that quantity for ever: every later issue falls through to the
+     * fallback cost and is priced by guesswork. The deferred purchase is the case that proves it —
+     * the purchase (defer_inward) moves no stock and the settling challan carries no commercial
+     * rate of its own, so without this neither document ever opens a layer and the goods exist
+     * permanently at no cost. The cost is the challan's own rate (physical, declared above) or the
+     * linked purchase's rate (settle_deferred).
+     */
+    public const VALUES_MOVED_STOCK = ['INWARD_CHALLAN'];
+
+    /**
      * Books voucher types whose direction was driven by the line's dr_cr rather than the type
      * (InventoryMovementClassifier::drCrDrivenTypeIds): 15, 20, 10, 14, 6.
      */
@@ -105,6 +120,12 @@ class DocumentTypeRegistry
     public static function nativeTypes(): array
     {
         return array_keys(array_filter(self::TYPES, static fn ($t) => $t['native']));
+    }
+
+    /** Does this type value the stock it moves even though the type itself carries no valuation? */
+    public static function valuesMovedStock(string $type): bool
+    {
+        return in_array(strtoupper($type), self::VALUES_MOVED_STOCK, true);
     }
 
     public static function fromLegacyVchType(int $vchTypeId): ?string
