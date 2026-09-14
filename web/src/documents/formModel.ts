@@ -293,6 +293,13 @@ export function validateDraft(header: HeaderDraft, lines: LineDraft[], spec: Doc
       const rate = toNumber(l.valuation_rate)
       if (rate === null || rate <= 0) errors.push(`Line ${n}: enter the new unit cost.`)
     }
+    // The Rate column beside it is the value agreed with the job worker — a commercial figure the
+    // challan declares, never a cost — so nothing else on the form can price the goods coming back:
+    // left blank, the receipt posts into stock at zero.
+    if (spec.formKind === 'job_work_in' && l.direction === 'in') {
+      const cost = toNumber(l.valuation_rate)
+      if (cost === null || cost <= 0) errors.push(`Line ${n}: enter the unit cost of the goods coming back.`)
+    }
     if (spec.lineMode === 'transfer' && l.from_warehouse_id && l.warehouse_id && l.from_warehouse_id === l.warehouse_id) {
       errors.push(`Line ${n}: source and destination warehouses must differ.`)
     }

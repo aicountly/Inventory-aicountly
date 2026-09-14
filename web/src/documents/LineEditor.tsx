@@ -35,6 +35,7 @@ function valuationLabel(spec: DocumentTypeSpec): string {
     case 'revaluation':
       return 'New unit cost'
     case 'production':
+    case 'job_work_in':
       return 'Unit cost (in)'
     default:
       return 'Unit cost'
@@ -222,7 +223,7 @@ export function LineEditor({ spec, header, lines, onChange, warehouses, availabi
                 ) : null}
                 {showValuation ? (
                   <td className="qty-cell">
-                    <input className="input" inputMode="decimal" value={line.valuation_rate} disabled={disabled || (spec.formKind === 'production' && dir === 'out')} aria-label={valuationLabel(spec)} onChange={(e) => update(line.key, { valuation_rate: e.target.value })} />
+                    <input className="input" inputMode="decimal" value={line.valuation_rate} disabled={disabled || (dir === 'out' && ['production', 'job_work_in'].includes(spec.formKind))} aria-label={valuationLabel(spec)} onChange={(e) => update(line.key, { valuation_rate: e.target.value })} />
                   </td>
                 ) : null}
                 <td>

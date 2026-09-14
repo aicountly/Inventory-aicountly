@@ -453,17 +453,22 @@ class ValuationEngine
             return $this->historicCostCache[$key];
         }
         // Last inward line with a valuation rate, else last inward with a source rate, else the opening.
-        $row = $db->table('inv_document_lines l')
-            ->select('l.valuation_rate, l.source_transaction_rate, l.source_transaction_amount, l.base_qty, l.qty, l.unit_id')
+        $res = $db->table('inv_document_lines l')
+            ->select('l.valuation_rate, l.source_transaction_rate, l.source_transaction_amount, l.base_qty, l.qty, l.unit_id, d.document_type')
             ->join('inv_documents d', 'd.document_id = l.document_id', 'inner')
             ->where('l.cmp_id', $cmpId)->where('l.item_id', $itemId)->where('l.direction', 'in')
             ->whereIn('d.status', ['POSTED', 'COMPLETED', 'PARTIALLY_FULFILLED'])
             ->orderBy('d.document_date', 'DESC')->orderBy('l.line_id', 'DESC')->limit(1)
-            ->get()->getRowArray();
+            ->get();
+        $row = $res === false ? null : $res->getRowArray();
         $cost = 0.0;
         if ($row) {
             $cost = (float) ($row['valuation_rate'] ?? 0);
-            if ($cost <= 0) {
+            // Same gate as DocumentPostingService::inwardUnitCost: the source rate is only a cost on
+            // a cost-bearing document. On a job-work receipt or a credit note it is the commercial
+            // value Books owns, and an item whose whole history is job-work receipts would otherwise
+            // settle at the rate agreed with the party as its permanent cost basis.
+            if ($cost <= 0 && in_array(strtoupper((string) ($row['document_type'] ?? '')), \Config\DocumentTypeRegistry::COST_BEARING_SOURCE_RATE, true)) {
                 $factor = $this->units->factorFor($cmpId, $itemId, (int) ($row['unit_id'] ?? 0) ?: null);
                 $rate = UnitConversionService::effectiveRate((float) $row['qty'], (float) ($row['source_transaction_rate'] ?? 0), (float) ($row['source_transaction_amount'] ?? 0));
                 $cost = UnitConversionService::toBaseUnitCost($rate, $factor);

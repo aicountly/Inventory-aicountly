@@ -13,6 +13,23 @@ class DocumentService
 {
     public const EDITABLE_STATUSES = ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'FAILED'];
 
+    /**
+     * Document types whose commercial value can still be recorded once the document is posted.
+     *
+     * JOB_WORK_OUT only, and for a reason that has to hold for anything added here: it is
+     * status_only and carries no valuation — the goods never leave the principal's ownership, so
+     * nothing was costed — and it is not in DocumentTypeRegistry::COST_BEARING_SOURCE_RATE, so no
+     * movement, cost layer, balance or COGS figure anywhere reads its source rate. On a type
+     * where the source rate IS the cost (a purchase, a GRN, an opening) the same write would
+     * silently re-price closing stock. A JOB_WORK_IN stays out for the other half of the test: it
+     * moves and values stock, and it needs no door anyway — Books' item lines carried rate and
+     * amount, so a receipt arrives from the migration with the value its challan declared.
+     */
+    public const VALUE_AMENDABLE_TYPES = ['JOB_WORK_OUT'];
+
+    /** Live posted statuses, the ones a challan value can still be recorded against. */
+    public const VALUE_AMENDABLE_STATUSES = ['POSTED', 'PARTIALLY_FULFILLED', 'COMPLETED'];
+
     public function __construct(
         protected ?UnitConversionService $units = null,
         protected ?AuditService $audit = null,
@@ -111,6 +128,118 @@ class DocumentService
         return $this->get($cmpId, $documentId);
     }
 
+    /**
+     * Record the challan value of a job-work dispatch that has already been posted.
+     *
+     * Table 4 of FORM GST ITC-04 declares the value the goods went out at, and Books never
+     * captured one: books_voucher_job_work_lines holds item, unit, qty and material centre only,
+     * so every Job Work Out the migration moved out of Books arrives here POSTED and worth
+     * nothing. Books has no job-work screen left to type it on — vch_type 6/7 are refused at
+     * draft time — and a posted document is outside EDITABLE_STATUSES, so without this the
+     * quarter can never be completed and the return never filed. revise() is not the answer: it
+     * reverses and re-creates under a new document_id, reopening the pending quantities a later
+     * JOB_WORK_IN already settled.
+     *
+     * Nothing is posted here, so the period lock — which guards postings — has nothing to guard.
+     *
+     * @param array<string, mixed> $payload lines: [{line_id, rate?, amount?}, ...]
+     * @return array<string, mixed>
+     */
+    public function amendChallanValue(int $cmpId, int $documentId, array $payload, ?string $actor): array
+    {
+        $doc = $this->get($cmpId, $documentId);
+        $writes = $this->challanValueWrites($doc, $payload);
+        $before = [];
+        foreach ($doc['lines'] as $line) {
+            $lineId = (int) $line['line_id'];
+            if (isset($writes[$lineId])) {
+                $before[$lineId] = ['source_transaction_rate' => $line['source_transaction_rate'] ?? null, 'source_transaction_amount' => $line['source_transaction_amount'] ?? null];
+            }
+        }
+        $db = \Config\Database::connect();
+        $db->transStart();
+        try {
+            foreach ($writes as $lineId => $set) {
+                $db->table('inv_document_lines')->where('line_id', $lineId)->where('document_id', $documentId)->where('cmp_id', $cmpId)->update($set);
+            }
+            $db->table('inv_documents')->where('document_id', $documentId)->where('cmp_id', $cmpId)->update([
+                'version' => (int) $doc['version'] + 1, 'updated_by' => $actor, 'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+            $db->transComplete();
+            // DBDebug is off, so a refused UPDATE returns false instead of throwing and the
+            // rollback is silent. Without this the audit row below would assert a Table 4 figure
+            // that no line ever carried, append-only and kept for eight years.
+            if ($db->transStatus() === false) {
+                throw new \RuntimeException('Could not record the challan value', 500);
+            }
+        } catch (\Throwable $e) {
+            $db->transRollback();
+            $db->resetTransStatus();
+
+            throw $e;
+        }
+        $this->audit->log($cmpId, 'document', $documentId, 'document.challan_value', $actor, ['lines' => count($writes)], $before, $writes);
+
+        return $this->get($cmpId, $documentId);
+    }
+
+    /**
+     * The columns a value amendment is allowed to write, by line_id — and the whole of what it
+     * may touch. Only the commercial pair appears here: a valuation figure is what the stock
+     * cost, on a basis no challan declares, and letting one in through this door is the exact
+     * confusion the Books / Inventory split exists to prevent.
+     *
+     * @param array<string, mixed> $doc
+     * @param array<string, mixed> $payload
+     * @return array<int, array{source_transaction_rate: float, source_transaction_amount: float}>
+     */
+    protected function challanValueWrites(array $doc, array $payload): array
+    {
+        $type = strtoupper((string) $doc['document_type']);
+        $status = (string) $doc['status'];
+        if (!in_array($type, self::VALUE_AMENDABLE_TYPES, true)) {
+            throw InventoryException::invalidState('A ' . $type . ' carries no challan value that can be recorded after posting; its value is part of the document');
+        }
+        if (in_array($status, self::EDITABLE_STATUSES, true)) {
+            throw InventoryException::invalidState('This document is still editable — put the value on the document itself (status ' . $status . ')');
+        }
+        if (!in_array($status, self::VALUE_AMENDABLE_STATUSES, true)) {
+            throw InventoryException::invalidState('A ' . $status . ' document has no challan value to record');
+        }
+        $byLineId = [];
+        foreach ($doc['lines'] as $line) {
+            $byLineId[(int) $line['line_id']] = $line;
+        }
+        $writes = [];
+        foreach (is_array($payload['lines'] ?? null) ? $payload['lines'] : [] as $idx => $in) {
+            $in = (array) $in;
+            $lineId = (int) ($in['line_id'] ?? 0);
+            if (!isset($byLineId[$lineId])) {
+                throw InventoryException::validation('Line ' . ((int) $idx + 1) . ': line #' . $lineId . ' is not on this document', ['line_id' => $lineId]);
+            }
+            $qty = (float) ($byLineId[$lineId]['qty'] ?? 0);
+            $rate = (float) ($in['rate'] ?? 0);
+            $amount = (float) ($in['amount'] ?? 0);
+            if ($amount <= 0 && $rate > 0) {
+                $amount = round($qty * $rate, 4);
+            }
+            if ($rate <= 0 && $amount > 0 && $qty > 0) {
+                $rate = round($amount / $qty, 4);
+            }
+            // Clearing a value is not an amendment, it is the return quietly losing its Table 4
+            // figure again. Correcting one positive value to another is what this is for.
+            if ($amount <= 0) {
+                throw InventoryException::validation('Line ' . ((int) $idx + 1) . ': a challan value greater than zero is required', ['line_id' => $lineId]);
+            }
+            $writes[$lineId] = ['source_transaction_rate' => round($rate, 4), 'source_transaction_amount' => round($amount, 4)];
+        }
+        if ($writes === []) {
+            throw InventoryException::validation('No line values to record');
+        }
+
+        return $writes;
+    }
+
     public function submit(int $cmpId, int $documentId, ?string $actor, ?string $notes = null): array
     {
         return $this->transition($cmpId, $documentId, ['DRAFT', 'FAILED'], 'PENDING_APPROVAL', 'submitted', $actor, $notes);
@@ -179,37 +308,8 @@ class DocumentService
     public function hydrate(array $doc): array
     {
         $db = \Config\Database::connect();
-        $lines = $db->table('inv_document_lines l')
-            ->select('l.*, i.item_name, i.print_name AS item_print_name, i.item_sku, u.unit_symbol, u.unit_name, w.warehouse_name, dw.warehouse_name AS dest_warehouse_name, b.batch_no, b.expiry_date')
-            ->join('inv_items i', 'i.item_id = l.item_id', 'left')
-            ->join('inv_uom u', 'u.unit_id = l.unit_id', 'left')
-            ->join('inv_warehouses w', 'w.warehouse_id = l.warehouse_id', 'left')
-            ->join('inv_warehouses dw', 'dw.warehouse_id = l.dest_warehouse_id', 'left')
-            ->join('inv_batches b', 'b.batch_id = l.batch_id', 'left')
-            ->where('l.document_id', (int) $doc['document_id'])
-            ->orderBy('l.sort_order', 'ASC')->orderBy('l.line_id', 'ASC')
-            ->get()->getResultArray();
-        foreach ($lines as &$line) {
-            $line['metadata'] = json_decode((string) ($line['metadata_json'] ?? ''), true) ?: null;
-            unset($line['metadata_json']);
-            foreach (['qty', 'base_qty', 'conversion_factor', 'source_transaction_rate', 'source_transaction_amount', 'valuation_rate', 'valuation_amount', 'landed_cost_amount', 'book_qty', 'physical_qty'] as $k) {
-                if (array_key_exists($k, $line) && $line[$k] !== null) {
-                    $line[$k] = (float) $line[$k];
-                }
-            }
-            $line['item_label'] = $line['item_print_name'] ?: $line['item_name'];
-        }
-        unset($line);
-        $serials = $db->table('inv_document_line_serials ls')->select('ls.line_id, s.serial_id, s.serial_no')->join('inv_serials s', 's.serial_id = ls.serial_id', 'left')
-            ->where('ls.document_id', (int) $doc['document_id'])->get()->getResultArray();
-        $byLine = [];
-        foreach ($serials as $s) {
-            $byLine[(int) $s['line_id']][] = ['serial_id' => (int) $s['serial_id'], 'serial_no' => $s['serial_no']];
-        }
-        foreach ($lines as &$line) {
-            $line['serials'] = $byLine[(int) $line['line_id']] ?? [];
-        }
-        unset($line);
+        $documentId = (int) $doc['document_id'];
+        $lines = $this->loadLines([$documentId])[$documentId] ?? [];
         $doc['metadata'] = json_decode((string) ($doc['metadata_json'] ?? ''), true) ?: null;
         $doc['accounting_effects'] = json_decode((string) ($doc['accounting_effects_json'] ?? ''), true) ?: [];
         unset($doc['metadata_json'], $doc['accounting_effects_json']);
@@ -226,7 +326,78 @@ class DocumentService
         return $doc;
     }
 
+    /**
+     * Lines for a set of documents in one read.
+     *
+     * A caller that wants many documents' lines and nothing else — Books building ITC-04 out of a
+     * whole quarter of job-work challans — would otherwise fetch each document on its own, one
+     * HTTP round trip and one API timeout of exposure per document.
+     *
+     * @param list<int|string> $documentIds
+     * @return array<int, list<array<string, mixed>>> document_id => lines
+     */
+    public function linesForDocuments(int $cmpId, array $documentIds): array
+    {
+        $ids = [];
+        foreach ($documentIds as $id) {
+            $id = (int) $id;
+            if ($id > 0) {
+                $ids[$id] = $id;
+            }
+        }
+
+        return $this->loadLines(array_values($ids), $cmpId);
+    }
+
     // ------------------------------------------------------------------ helpers
+
+    /**
+     * @param list<int> $documentIds
+     * @return array<int, list<array<string, mixed>>> document_id => lines
+     */
+    private function loadLines(array $documentIds, ?int $cmpId = null): array
+    {
+        if ($documentIds === []) {
+            return [];
+        }
+        $db = \Config\Database::connect();
+        $b = $db->table('inv_document_lines l')
+            ->select('l.*, i.item_name, i.print_name AS item_print_name, i.item_sku, u.unit_symbol, u.unit_name, w.warehouse_name, dw.warehouse_name AS dest_warehouse_name, b.batch_no, b.expiry_date')
+            ->join('inv_items i', 'i.item_id = l.item_id', 'left')
+            ->join('inv_uom u', 'u.unit_id = l.unit_id', 'left')
+            ->join('inv_warehouses w', 'w.warehouse_id = l.warehouse_id', 'left')
+            ->join('inv_warehouses dw', 'dw.warehouse_id = l.dest_warehouse_id', 'left')
+            ->join('inv_batches b', 'b.batch_id = l.batch_id', 'left')
+            ->whereIn('l.document_id', $documentIds);
+        // Only the cross-document read needs this: hydrate() has already established the company
+        // by reading the header, while an id list arrives straight off a request.
+        if ($cmpId !== null) {
+            $b->where('l.cmp_id', $cmpId);
+        }
+        $lines = $b->orderBy('l.document_id', 'ASC')->orderBy('l.sort_order', 'ASC')->orderBy('l.line_id', 'ASC')
+            ->get()->getResultArray();
+        $serials = $db->table('inv_document_line_serials ls')->select('ls.line_id, s.serial_id, s.serial_no')->join('inv_serials s', 's.serial_id = ls.serial_id', 'left')
+            ->whereIn('ls.document_id', $documentIds)->get()->getResultArray();
+        $byLine = [];
+        foreach ($serials as $s) {
+            $byLine[(int) $s['line_id']][] = ['serial_id' => (int) $s['serial_id'], 'serial_no' => $s['serial_no']];
+        }
+        $out = [];
+        foreach ($lines as $line) {
+            $line['metadata'] = json_decode((string) ($line['metadata_json'] ?? ''), true) ?: null;
+            unset($line['metadata_json']);
+            foreach (['qty', 'base_qty', 'conversion_factor', 'source_transaction_rate', 'source_transaction_amount', 'valuation_rate', 'valuation_amount', 'landed_cost_amount', 'book_qty', 'physical_qty'] as $k) {
+                if (array_key_exists($k, $line) && $line[$k] !== null) {
+                    $line[$k] = (float) $line[$k];
+                }
+            }
+            $line['item_label'] = $line['item_print_name'] ?: $line['item_name'];
+            $line['serials'] = $byLine[(int) $line['line_id']] ?? [];
+            $out[(int) $line['document_id']][] = $line;
+        }
+
+        return $out;
+    }
 
     /** @return array<string, mixed> */
     private function headerFromPayload(int $cmpId, int $fyId, int $boId, string $type, array $p, string $sourceApp): array

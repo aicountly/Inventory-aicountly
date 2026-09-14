@@ -91,6 +91,24 @@ export function canCreate(documentType: string, can: Can): boolean {
   return can(permissionKeysFor('create', documentType))
 }
 
+/**
+ * Document types that still take a challan value once posted — DocumentService::
+ * VALUE_AMENDABLE_TYPES. A Job Work Out is status_only and carries no valuation, and its source
+ * rate is not a cost anywhere, so the commercial figure Table 4 of ITC-04 declares can be
+ * recorded without touching stock. On a type where that rate IS the cost the same write would
+ * re-price closing stock, which is why the list is one entry long.
+ */
+export const VALUE_AMENDABLE_TYPES = ['JOB_WORK_OUT']
+
+/**
+ * Every Job Work Out migrated out of Smart Books is posted and carries no value, and Books has
+ * no job-work screen left to type one on. Without this the quarterly ITC-04 names challans whose
+ * value nothing can supply.
+ */
+export function canRecordChallanValue(status: DocumentStatus | string, documentType: string, can: Can): boolean {
+  return VALUE_AMENDABLE_TYPES.includes(documentType) && isPosted(status) && can(['documents.edit', 'documents.create'])
+}
+
 /** Packing-list state actions (PackingController). Only meaningful on a posted PACKING document. */
 export type PackingAction = 'unpack' | 'lock' | 'unlock'
 

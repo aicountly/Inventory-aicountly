@@ -31,6 +31,7 @@ class DocumentPostingService
         protected ?OutboxService $outbox = null,
         protected ?AuditService $audit = null,
         protected ?AccessService $access = null,
+        protected ?PackingService $packing = null,
     ) {
         $this->units ??= new UnitConversionService();
         $this->documents ??= new DocumentService($this->units);
@@ -43,6 +44,7 @@ class DocumentPostingService
         $this->outbox ??= new OutboxService();
         $this->audit ??= new AuditService();
         $this->access ??= new AccessService();
+        $this->packing ??= new PackingService($this->documents, $this->status, $this->audit);
     }
 
     /**
@@ -172,6 +174,7 @@ class DocumentPostingService
         if (trim($reason) === '') {
             throw InventoryException::validation('A reason is required to reverse a posted document');
         }
+        $this->packing->assertReversible($cmpId, $doc);
         $this->assertPeriodOpen($cmpId, (int) $doc['bo_id'], (string) $doc['document_date']);
         $spec = DocumentTypeRegistry::get((string) $doc['document_type']);
         $db = \Config\Database::connect();
@@ -199,6 +202,7 @@ class DocumentPostingService
             }
             // 3. Status buckets and pending quantities.
             $this->status->reverseForDocument($cmpId, $documentId, $documentId);
+            $this->packing->releaseConsumedBy($cmpId, $documentId, $actor);
             $this->pending->unsettleForDocument($cmpId, $documentId);
             $this->pending->cancelForDocument($cmpId, $documentId);
             // 4. Serials back to their prior state.
@@ -294,6 +298,10 @@ class DocumentPostingService
                 if (!empty($spec['valuation'])) {
                     if ($direction === 'in') {
                         $unitCost = $this->inwardUnitCost($cmpId, $doc, $line, $lines);
+                        $zeroCost = self::zeroInwardCostWarning($type, $itemId, (int) $line['line_id'], $unitCost);
+                        if ($zeroCost !== null) {
+                            $warnings[] = $zeroCost;
+                        }
                         $val = $this->valuation->recordReceipt($cmpId, $fyId, $itemId, $wh, $baseQty, $unitCost, $date . ' 00:00:00', $documentId, (int) $line['line_id'], $type === 'OPENING_STOCK' ? 'opening' : 'receipt');
                     } else {
                         $val = $this->valuation->issueStock($cmpId, $fyId, $itemId, $wh, $baseQty, $date . ' 00:00:00', $documentId, (int) $line['line_id']);
@@ -324,6 +332,12 @@ class DocumentPostingService
                     $this->status->apply($cmpId, $documentId, StockStatusService::MOV_SALE_ISSUE, [['item_id' => $itemId, 'unit_id' => $line['unit_id'], 'warehouse_id' => $wh, 'batch_id' => $batchId, 'qty' => (float) $line['qty']]]);
                 }
             }
+        }
+
+        // A sale raised against a packing list closes that list, so the next invoice naming it is
+        // refused instead of issuing the same consignment again.
+        if ($type === 'SALES_ISSUE') {
+            $this->packing->consumeForSale($cmpId, $doc, $actor, $movesStock && $stockEffect === 'from_packing');
         }
 
         // Pending quantities: open / settle.
@@ -436,6 +450,27 @@ class DocumentPostingService
         }
 
         return round($value / $qty, 4);
+    }
+
+    /**
+     * Stock that enters at zero understates closing stock now and COGS when that layer is issued,
+     * and nothing refuses the zero: a job-work receipt whose cost column was left blank has no
+     * typed cost, no cost-bearing source rate and, for a first-ever receipt, no cost history to
+     * fall back on. Posting says so rather than booking the zero in silence.
+     *
+     * @return array<string, mixed>|null
+     */
+    public static function zeroInwardCostWarning(string $type, int $itemId, int $lineId, float $unitCost): ?array
+    {
+        if ($unitCost > 0) {
+            return null;
+        }
+
+        return [
+            'code'    => 'zero_valuation_inward',
+            'message' => sprintf('Item #%d enters stock at zero cost: no unit cost on the line and none known for the item', $itemId),
+            'details' => ['item_id' => $itemId, 'line_id' => $lineId, 'document_type' => $type],
+        ];
     }
 
     private function enforceNegativeStock(int $cmpId, int $itemId, ?int $wh, ?int $batchId, float $baseQty, string $policy, bool $override, array $line, array &$warnings, array $options): void

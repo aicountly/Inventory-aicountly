@@ -15,6 +15,7 @@ Roles: DBA (PostgreSQL), release engineer (deploys, env), accountant/owner (sign
    ```
 4. Rehearse (sections 2–5) against a restore of last night's Books backup into a scratch database, with `BOOKS_DB_NAME` pointing at the restore and a scratch Inventory database. Keep the summaries.
 5. Cron on the Inventory host: `* * * * * cd …/api && php spark inventory:outbox-dispatch`, `* * * * * php spark inventory:recalc-worker`. On the Books host: `* * * * * php spark books:inventory-retry`.
+6. Books has no scheduled GST-profile job and must not be given one. A WEF tax-category / HSN change dated forward is remembered when it is entered and pushed to Inventory's item cache on the next action for that company (`InventoryRetryService::settleOnContact` → `ItemGstProfileService::settleDuePushes`), so it settles as people use the app. `php spark books:push-due-gst-profiles [--date YYYY-MM-DD] [--company N] [--dry-run]` is the operator's catch-up for what contact cannot reach — a company nobody has touched since the transition date. It is idempotent: it writes the value Inventory should already hold.
 
 ## 1. Freeze and back up Books (T0)
 1. Announce maintenance; put Books in maintenance mode (no vouchers may post while the copy runs — the migration is a point-in-time copy).

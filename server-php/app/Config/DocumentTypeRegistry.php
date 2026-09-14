@@ -62,14 +62,18 @@ class DocumentTypeRegistry
      *
      * Every other inward type carries a COMMERCIAL rate that belongs to Books: the selling price
      * on a credit note (SALES_RETURN), the journal value on a journal with items
-     * (JOURNAL_ADJUSTMENT). Books owns what the goods were sold for; Inventory owns what the stock
-     * cost — so those rates must never be adopted as an inventory unit cost. Goods coming back in
-     * on such a document are valued at the cost they went out at (the originating issue's cost
-     * layer consumptions) or at the item's current cost, never at the commercial rate.
+     * (JOURNAL_ADJUSTMENT), the value agreed with the job worker on the challan the goods come
+     * back on (JOB_WORK_IN) — the one figure Table 5 of FORM GST ITC-04 declares, so costing
+     * stock from it both re-prices closing stock at whatever was agreed and files a return whose
+     * Value column is half challan value and half cost. Books owns what the goods were sold for;
+     * Inventory owns what the stock cost — so those rates must never be adopted as an inventory
+     * unit cost. Goods coming back in on such a document are valued at the line's own
+     * valuation_rate, at the cost they went out at (the originating issue's cost layer
+     * consumptions) or at the item's current cost, never at the commercial rate.
      */
     public const COST_BEARING_SOURCE_RATE = [
         'PURCHASE_RECEIPT', 'OPENING_STOCK', 'INWARD_CHALLAN', 'MATERIAL_RECEIPT', 'WRITE_IN',
-        'PHYSICAL_ADJUSTMENT', 'STOCK_JOURNAL', 'PRODUCTION', 'ASSEMBLY', 'DISASSEMBLY', 'JOB_WORK_IN',
+        'PHYSICAL_ADJUSTMENT', 'STOCK_JOURNAL', 'PRODUCTION', 'ASSEMBLY', 'DISASSEMBLY',
     ];
 
     /**
