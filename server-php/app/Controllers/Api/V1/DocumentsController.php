@@ -15,6 +15,9 @@ use Config\PermissionRegistry;
  */
 class DocumentsController extends BaseController
 {
+    /** Documents one bulk line read may ask about — the list endpoint's own page ceiling. */
+    private const MAX_LINE_DOCUMENTS = 500;
+
     protected DocumentService $documents;
     protected DocumentPostingService $posting;
     protected IdempotencyService $idempotency;
@@ -96,6 +99,54 @@ class DocumentsController extends BaseController
         } catch (\Throwable $e) {
             return $this->failFromException($e);
         }
+    }
+
+    /**
+     * Lines for several documents in one call.
+     *
+     * The bulk form of show(): a reader that needs the lines of every document in a set — Books
+     * building ITC-04 out of a quarter of job-work challans — otherwise spends one request and one
+     * API timeout per document, inside the report request that is waiting for them.
+     */
+    public function lines()
+    {
+        $a = $this->authorize('documents.read');
+        if (isset($a['response'])) {
+            return $a['response'];
+        }
+        $ids = self::documentIdsParam($this->request->getGet('document_ids'));
+        if ($ids === []) {
+            return $this->failStructured(400, 'validation_failed', 'document_ids is required');
+        }
+        if (count($ids) > self::MAX_LINE_DOCUMENTS) {
+            return $this->failStructured(422, 'validation_failed', 'document_ids takes at most ' . self::MAX_LINE_DOCUMENTS . ' documents per call', ['limit' => self::MAX_LINE_DOCUMENTS]);
+        }
+        $byDoc = $this->documents->linesForDocuments((int) $a['ctx']['cmp_id'], $ids);
+        // Answer for every id asked about, so the caller reads "this document has no lines" and
+        // "this document is not yours" the same way: as nothing, never as a gap in the response.
+        $data = [];
+        foreach ($ids as $id) {
+            $data[$id] = $byDoc[$id] ?? [];
+        }
+
+        return $this->respond(['data' => $data, 'meta' => ['documents' => count($data)]]);
+    }
+
+    /**
+     * @param mixed $raw comma-separated list or array of document ids
+     * @return list<int> distinct, in the order asked for
+     */
+    private static function documentIdsParam($raw): array
+    {
+        $ids = [];
+        foreach (is_array($raw) ? $raw : explode(',', (string) $raw) as $part) {
+            $id = (int) trim((string) $part);
+            if ($id > 0) {
+                $ids[$id] = $id;
+            }
+        }
+
+        return array_values($ids);
     }
 
     public function bySource()

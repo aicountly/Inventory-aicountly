@@ -179,37 +179,8 @@ class DocumentService
     public function hydrate(array $doc): array
     {
         $db = \Config\Database::connect();
-        $lines = $db->table('inv_document_lines l')
-            ->select('l.*, i.item_name, i.print_name AS item_print_name, i.item_sku, u.unit_symbol, u.unit_name, w.warehouse_name, dw.warehouse_name AS dest_warehouse_name, b.batch_no, b.expiry_date')
-            ->join('inv_items i', 'i.item_id = l.item_id', 'left')
-            ->join('inv_uom u', 'u.unit_id = l.unit_id', 'left')
-            ->join('inv_warehouses w', 'w.warehouse_id = l.warehouse_id', 'left')
-            ->join('inv_warehouses dw', 'dw.warehouse_id = l.dest_warehouse_id', 'left')
-            ->join('inv_batches b', 'b.batch_id = l.batch_id', 'left')
-            ->where('l.document_id', (int) $doc['document_id'])
-            ->orderBy('l.sort_order', 'ASC')->orderBy('l.line_id', 'ASC')
-            ->get()->getResultArray();
-        foreach ($lines as &$line) {
-            $line['metadata'] = json_decode((string) ($line['metadata_json'] ?? ''), true) ?: null;
-            unset($line['metadata_json']);
-            foreach (['qty', 'base_qty', 'conversion_factor', 'source_transaction_rate', 'source_transaction_amount', 'valuation_rate', 'valuation_amount', 'landed_cost_amount', 'book_qty', 'physical_qty'] as $k) {
-                if (array_key_exists($k, $line) && $line[$k] !== null) {
-                    $line[$k] = (float) $line[$k];
-                }
-            }
-            $line['item_label'] = $line['item_print_name'] ?: $line['item_name'];
-        }
-        unset($line);
-        $serials = $db->table('inv_document_line_serials ls')->select('ls.line_id, s.serial_id, s.serial_no')->join('inv_serials s', 's.serial_id = ls.serial_id', 'left')
-            ->where('ls.document_id', (int) $doc['document_id'])->get()->getResultArray();
-        $byLine = [];
-        foreach ($serials as $s) {
-            $byLine[(int) $s['line_id']][] = ['serial_id' => (int) $s['serial_id'], 'serial_no' => $s['serial_no']];
-        }
-        foreach ($lines as &$line) {
-            $line['serials'] = $byLine[(int) $line['line_id']] ?? [];
-        }
-        unset($line);
+        $documentId = (int) $doc['document_id'];
+        $lines = $this->loadLines([$documentId])[$documentId] ?? [];
         $doc['metadata'] = json_decode((string) ($doc['metadata_json'] ?? ''), true) ?: null;
         $doc['accounting_effects'] = json_decode((string) ($doc['accounting_effects_json'] ?? ''), true) ?: [];
         unset($doc['metadata_json'], $doc['accounting_effects_json']);
@@ -226,7 +197,78 @@ class DocumentService
         return $doc;
     }
 
+    /**
+     * Lines for a set of documents in one read.
+     *
+     * A caller that wants many documents' lines and nothing else — Books building ITC-04 out of a
+     * whole quarter of job-work challans — would otherwise fetch each document on its own, one
+     * HTTP round trip and one API timeout of exposure per document.
+     *
+     * @param list<int|string> $documentIds
+     * @return array<int, list<array<string, mixed>>> document_id => lines
+     */
+    public function linesForDocuments(int $cmpId, array $documentIds): array
+    {
+        $ids = [];
+        foreach ($documentIds as $id) {
+            $id = (int) $id;
+            if ($id > 0) {
+                $ids[$id] = $id;
+            }
+        }
+
+        return $this->loadLines(array_values($ids), $cmpId);
+    }
+
     // ------------------------------------------------------------------ helpers
+
+    /**
+     * @param list<int> $documentIds
+     * @return array<int, list<array<string, mixed>>> document_id => lines
+     */
+    private function loadLines(array $documentIds, ?int $cmpId = null): array
+    {
+        if ($documentIds === []) {
+            return [];
+        }
+        $db = \Config\Database::connect();
+        $b = $db->table('inv_document_lines l')
+            ->select('l.*, i.item_name, i.print_name AS item_print_name, i.item_sku, u.unit_symbol, u.unit_name, w.warehouse_name, dw.warehouse_name AS dest_warehouse_name, b.batch_no, b.expiry_date')
+            ->join('inv_items i', 'i.item_id = l.item_id', 'left')
+            ->join('inv_uom u', 'u.unit_id = l.unit_id', 'left')
+            ->join('inv_warehouses w', 'w.warehouse_id = l.warehouse_id', 'left')
+            ->join('inv_warehouses dw', 'dw.warehouse_id = l.dest_warehouse_id', 'left')
+            ->join('inv_batches b', 'b.batch_id = l.batch_id', 'left')
+            ->whereIn('l.document_id', $documentIds);
+        // Only the cross-document read needs this: hydrate() has already established the company
+        // by reading the header, while an id list arrives straight off a request.
+        if ($cmpId !== null) {
+            $b->where('l.cmp_id', $cmpId);
+        }
+        $lines = $b->orderBy('l.document_id', 'ASC')->orderBy('l.sort_order', 'ASC')->orderBy('l.line_id', 'ASC')
+            ->get()->getResultArray();
+        $serials = $db->table('inv_document_line_serials ls')->select('ls.line_id, s.serial_id, s.serial_no')->join('inv_serials s', 's.serial_id = ls.serial_id', 'left')
+            ->whereIn('ls.document_id', $documentIds)->get()->getResultArray();
+        $byLine = [];
+        foreach ($serials as $s) {
+            $byLine[(int) $s['line_id']][] = ['serial_id' => (int) $s['serial_id'], 'serial_no' => $s['serial_no']];
+        }
+        $out = [];
+        foreach ($lines as $line) {
+            $line['metadata'] = json_decode((string) ($line['metadata_json'] ?? ''), true) ?: null;
+            unset($line['metadata_json']);
+            foreach (['qty', 'base_qty', 'conversion_factor', 'source_transaction_rate', 'source_transaction_amount', 'valuation_rate', 'valuation_amount', 'landed_cost_amount', 'book_qty', 'physical_qty'] as $k) {
+                if (array_key_exists($k, $line) && $line[$k] !== null) {
+                    $line[$k] = (float) $line[$k];
+                }
+            }
+            $line['item_label'] = $line['item_print_name'] ?: $line['item_name'];
+            $line['serials'] = $byLine[(int) $line['line_id']] ?? [];
+            $out[(int) $line['document_id']][] = $line;
+        }
+
+        return $out;
+    }
 
     /** @return array<string, mixed> */
     private function headerFromPayload(int $cmpId, int $fyId, int $boId, string $type, array $p, string $sourceApp): array
