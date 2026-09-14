@@ -84,6 +84,65 @@ final class PostingEngineTest extends IntegrationTestCase
         $this->assertGreaterThan(0, $this->db->table('inv_valuation_recalc_jobs')->where('trigger_kind', 'reversal')->countAllResults());
     }
 
+    /**
+     * A credit note carries the SELLING rate. Books owns that number; Inventory must never adopt it
+     * as a cost. Returned goods come back in at the cost the originating issue consumed, or at the
+     * item's current cost when the return does not say which issue it reverses.
+     */
+    public function testSalesReturnIsValuedAtCostNotAtTheCreditNoteSellingRate(): void
+    {
+        $pcs = $this->makeUnit();
+        $wh = $this->makeWarehouse();
+        $item = $this->makeItem('Returnable', $pcs, 'FIFO');
+        $this->postDoc([
+            'document_type' => 'PURCHASE_RECEIPT', 'document_date' => '2026-04-01', 'source_document_type' => 'books.purchase', 'source_document_id' => 701,
+            'lines' => [['item_id' => $item, 'warehouse_id' => $wh, 'unit_id' => $pcs, 'qty' => 10, 'rate' => 100, 'amount' => 1000]],
+        ], 'books');
+        $sale = $this->postDoc([
+            'document_type' => 'SALES_ISSUE', 'document_date' => '2026-04-05', 'source_document_type' => 'books.sales', 'source_document_id' => 702,
+            'lines' => [['item_id' => $item, 'warehouse_id' => $wh, 'unit_id' => $pcs, 'qty' => 4, 'rate' => 250, 'amount' => 1000]],
+        ], 'books');
+        $this->assertEqualsWithDelta(100.0, $sale['lines'][0]['valuation_rate'], 0.0001);
+
+        // Credit note against that invoice: 2 pcs back at a selling rate of 250.
+        $return = $this->postDoc([
+            'document_type' => 'SALES_RETURN', 'document_date' => '2026-04-08', 'source_document_type' => 'books.credit_note', 'source_document_id' => 703,
+            'metadata' => ['originating_document_id' => (int) $sale['document_id']],
+            'lines' => [['item_id' => $item, 'warehouse_id' => $wh, 'unit_id' => $pcs, 'qty' => 2, 'rate' => 250, 'amount' => 500]],
+        ], 'books');
+        $this->assertSame('POSTED', $return['status']);
+        $this->assertEqualsWithDelta(250.0, $return['lines'][0]['source_transaction_rate'], 0.0001, 'the commercial rate stays a snapshot');
+        $this->assertEqualsWithDelta(100.0, $return['lines'][0]['valuation_rate'], 0.0001, 'returned stock is worth what it cost, not what it sold for');
+        $this->assertEqualsWithDelta(200.0, $return['lines'][0]['valuation_amount'], 0.0001);
+        $layer = $this->db->table('inv_cost_layers')->where('source_document_id', (int) $return['document_id'])->get()->getRowArray();
+        $this->assertEqualsWithDelta(100.0, (float) $layer['unit_cost'], 0.0001, 'the FIFO layer opens at cost');
+
+        // Unlinked credit note: still cost, never the selling rate — the item's current cost.
+        $orphan = $this->postDoc([
+            'document_type' => 'SALES_RETURN', 'document_date' => '2026-04-09', 'source_document_type' => 'books.credit_note', 'source_document_id' => 704,
+            'lines' => [['item_id' => $item, 'warehouse_id' => $wh, 'unit_id' => $pcs, 'qty' => 1, 'rate' => 250, 'amount' => 250]],
+        ], 'books');
+        $this->assertEqualsWithDelta(100.0, $orphan['lines'][0]['valuation_rate'], 0.0001);
+
+        // Closing stock: 10 - 4 + 2 + 1 = 9 pcs, all at 100.
+        $snap = (new ValuationReplayService())->snapshot($this->cmpId, $this->fyId, 0, '2026-04-30');
+        $this->assertEqualsWithDelta(9.0, $snap['rows'][0]['closing_qty'], 0.0001);
+        $this->assertEqualsWithDelta(900.0, $snap['rows'][0]['stock_value'], 0.0001);
+
+        // The returned goods then go out again: COGS is cost, not the margin-inflated return rate.
+        $reissue = $this->postDoc([
+            'document_type' => 'SALES_ISSUE', 'document_date' => '2026-04-20', 'source_document_type' => 'books.sales', 'source_document_id' => 705,
+            'lines' => [['item_id' => $item, 'warehouse_id' => $wh, 'unit_id' => $pcs, 'qty' => 9, 'rate' => 400, 'amount' => 3600]],
+        ], 'books');
+        $this->assertEqualsWithDelta(900.0, $reissue['accounting_effects'][0]['amount'], 0.0001);
+
+        // A backdated recalculation must reach the same cost, not fall back to the selling rate.
+        $recalc = new \App\Services\RecalculationService();
+        $recalc->run($recalc->enqueue($this->cmpId, $this->fyId, $item, '2026-04-01', 'test', null, 'tester'));
+        $returnLine = $this->db->table('inv_document_lines')->where('document_id', (int) $return['document_id'])->get()->getRowArray();
+        $this->assertEqualsWithDelta(100.0, (float) $returnLine['valuation_rate'], 0.0001, 'recalculation keeps the return at cost');
+    }
+
     public function testDuplicateSourcePostingIsRejectedByConstraint(): void
     {
         $pcs = $this->makeUnit();

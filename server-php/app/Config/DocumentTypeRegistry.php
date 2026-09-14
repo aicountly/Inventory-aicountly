@@ -57,6 +57,27 @@ class DocumentTypeRegistry
     ];
 
     /**
+     * Inward document types whose source_transaction_rate IS the cost of the goods — a purchase
+     * rate, an opening rate, a GRN rate, a production/adjustment cost typed in Inventory.
+     *
+     * Every other inward type carries a COMMERCIAL rate that belongs to Books: the selling price
+     * on a credit note (SALES_RETURN), the journal value on a journal with items
+     * (JOURNAL_ADJUSTMENT). Books owns what the goods were sold for; Inventory owns what the stock
+     * cost — so those rates must never be adopted as an inventory unit cost. Goods coming back in
+     * on such a document are valued at the cost they went out at (the originating issue's cost
+     * layer consumptions) or at the item's current cost, never at the commercial rate.
+     */
+    public const COST_BEARING_SOURCE_RATE = [
+        'PURCHASE_RECEIPT', 'OPENING_STOCK', 'INWARD_CHALLAN', 'MATERIAL_RECEIPT', 'WRITE_IN',
+        'PHYSICAL_ADJUSTMENT', 'STOCK_JOURNAL', 'PRODUCTION', 'ASSEMBLY', 'DISASSEMBLY', 'JOB_WORK_IN',
+    ];
+
+    /** Types whose inward lines carry their own valuation_rate (an explicit cost, not a commercial rate). */
+    public const LINE_VALUATION_RATE_TYPES = [
+        'PRODUCTION', 'PHYSICAL_ADJUSTMENT', 'STOCK_JOURNAL', 'WRITE_IN', 'MATERIAL_RECEIPT', 'JOB_WORK_IN', 'ASSEMBLY', 'DISASSEMBLY',
+    ];
+
+    /**
      * Books voucher types whose direction was driven by the line's dr_cr rather than the type
      * (InventoryMovementClassifier::drCrDrivenTypeIds): 15, 20, 10, 14, 6.
      */

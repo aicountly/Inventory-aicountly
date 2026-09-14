@@ -40,7 +40,11 @@ class BaseController extends ResourceController
     }
 
     /**
-     * @return array{uuid:string, ses_key?:string, acs_type?:int|null, kind:string, source_app:string}|null
+     * `source_app` is the owning product of anything this caller writes and is decided here,
+     * not by the request: a service key resolves to its product, a human session is always
+     * 'inventory'. `client_app` keeps the X-Source-App label for telemetry only.
+     *
+     * @return array{uuid:string, ses_key?:string, acs_type?:int|null, kind:string, source_app:string, client_app?:string}|null
      */
     protected function auth(): ?array
     {
@@ -71,15 +75,43 @@ class BaseController extends ResourceController
         if (!$ses || ($ses['status'] ?? 0) !== 1) {
             return null;
         }
-        $sourceApp = strtolower(trim($this->request->getHeaderLine('X-Source-App'))) ?: 'inventory';
-
+        // A human session is always Inventory's own, whichever SPA the browser came from.
+        // X-Source-App is a client-controlled header, so it may label the caller for telemetry
+        // but must never decide which product owns a row it writes — only a service key,
+        // resolved above, can claim to be Books / Sales / POS.
         return [
             'uuid'       => $ses['uuid_aictly'] ?? ($ses['uuid'] ?? ''),
             'ses_key'    => $sesKey,
             'acs_type'   => isset($ses['acs_type']) ? (int) $ses['acs_type'] : null,
             'kind'       => 'user',
-            'source_app' => $sourceApp,
+            'source_app' => 'inventory',
+            'client_app' => strtolower(trim($this->request->getHeaderLine('X-Source-App'))) ?: 'inventory',
         ];
+    }
+
+    /**
+     * The owning product for a row this request is about to write.
+     *
+     * Never the caller's word for it: a trusted service key resolves to the calling product,
+     * every human session is Inventory's own. A body that claims a different app is a caller
+     * trying to mint another product's document — answered with 403, not silently honoured.
+     *
+     * @param array<string, mixed> $session
+     * @param array<string, mixed> $body
+     * @return array{app?:string, response?:mixed}
+     */
+    protected function resolveSourceApp(array $session, array $body, ?string $expected = null): array
+    {
+        $app = $expected ?? (($session['kind'] ?? '') === 'service' ? strtolower((string) ($session['source_app'] ?? '')) : 'inventory');
+        if ($app === '') {
+            $app = 'inventory';
+        }
+        $claimed = strtolower(trim((string) ($body['source_app'] ?? '')));
+        if ($claimed !== '' && $claimed !== $app) {
+            return ['response' => $this->failStructured(403, 'forbidden', 'source_app must be the authenticated caller (' . $app . '), not "' . $claimed . '"')];
+        }
+
+        return ['app' => $app];
     }
 
     protected function enrichSessionAccessType(array $session, ?array $ctx): array

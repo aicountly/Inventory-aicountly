@@ -88,7 +88,11 @@ class ReservationsController extends BaseController
         if ($replay = $this->idempotency->replay($cmpId, $key, 'inventory_reservation', $hash)) {
             return $this->respond($replay['body'], $replay['status']);
         }
-        $sourceApp = strtolower((string) ($body['source_app'] ?? $session['source_app'] ?? 'inventory'));
+        $s = $this->resolveSourceApp($session, $body);
+        if (isset($s['response'])) {
+            return $s['response'];
+        }
+        $sourceApp = $s['app'];
         // Duplicate guard on the source line: a retried order never reserves the same stock twice.
         if (!empty($body['source_document_id']) && !empty($body['source_document_type']) && (int) ($body['item_id'] ?? 0) > 0) {
             $existing = $this->reservations->findOpenBySource(
