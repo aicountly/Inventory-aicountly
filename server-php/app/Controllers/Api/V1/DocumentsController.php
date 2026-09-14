@@ -150,6 +150,17 @@ class DocumentsController extends BaseController
         }
         $ctx = $a['ctx'];
         $session = $a['session'];
+        // The stock half of another product's voucher may only be minted by that product's
+        // service key. Otherwise any Inventory operator could hand Books an "invoice #123 was
+        // issued at this cost" event and rewrite that voucher's COGS and inventory lines.
+        if (($session['kind'] ?? '') !== 'service' && (DocumentTypeRegistry::get($type)['native'] ?? true) === false) {
+            return $this->failStructured(403, 'forbidden', $type . ' documents are created by the owning product, not from an Inventory session');
+        }
+        $s = $this->resolveSourceApp($session, $body);
+        if (isset($s['response'])) {
+            return $s['response'];
+        }
+        $sourceApp = $s['app'];
         $cmpId = (int) $ctx['cmp_id'];
         $key = $this->idempotencyKey();
         $hash = IdempotencyService::hashRequest($body);
@@ -158,7 +169,7 @@ class DocumentsController extends BaseController
         }
         // Duplicate-posting guard on the source document (retried invoices must never issue stock twice).
         if (!empty($body['source_document_id']) && !empty($body['source_document_type'])) {
-            $existing = $this->documents->findBySource($cmpId, (string) ($body['source_app'] ?? $session['source_app']), (string) $body['source_document_type'], (int) $body['source_document_id']);
+            $existing = $this->documents->findBySource($cmpId, $sourceApp, (string) $body['source_document_type'], (int) $body['source_document_id']);
             if ($existing) {
                 $existing['duplicate'] = true;
                 $resp = ['data' => $existing, 'duplicate' => true];
@@ -168,7 +179,6 @@ class DocumentsController extends BaseController
             }
         }
         try {
-            $sourceApp = strtolower((string) ($body['source_app'] ?? $session['source_app'] ?? 'inventory'));
             $body['idempotency_key'] = $key;
             $doc = $this->documents->create($ctx, $body, $session['uuid'], $sourceApp);
             if ($andPost) {
@@ -295,6 +305,18 @@ class DocumentsController extends BaseController
             return $perm['response'];
         }
         $body = $this->request->getJSON(true) ?? [];
+        // A revision keeps the document's identity, so its owner is the stored source_app —
+        // never a body field. A human Inventory session may not revise another product's
+        // document at all; that belongs to the product that created it.
+        $currentApp = strtolower((string) ($current['source_app'] ?? 'inventory'));
+        if (($session['kind'] ?? '') !== 'service' && $currentApp !== 'inventory') {
+            return $this->failStructured(403, 'forbidden', 'This document belongs to ' . $currentApp . ' and is revised from there, not from an Inventory session');
+        }
+        $s = $this->resolveSourceApp($session, $body, $currentApp);
+        if (isset($s['response'])) {
+            return $s['response'];
+        }
+        $sourceApp = $s['app'];
         $key = $this->idempotencyKey();
         $hash = IdempotencyService::hashRequest($body);
         if ($replay = $this->idempotency->replay($cmpId, $key, 'inventory_document_revise', $hash)) {
@@ -302,7 +324,6 @@ class DocumentsController extends BaseController
         }
         try {
             $body['document_type'] = $body['document_type'] ?? $current['document_type'];
-            $sourceApp = strtolower((string) ($body['source_app'] ?? $current['source_app'] ?? $session['source_app'] ?? 'inventory'));
             $body['idempotency_key'] = $key;
             $doc = $this->posting->revise($ctx, (int) $id, $body, $session['uuid'], (string) ($body['reason'] ?? ''), $sourceApp, [
                 'session' => $session, 'actor' => $session['uuid'],

@@ -183,11 +183,17 @@ class RecalculationService
                     $unitCost = $transferCost[(int) $m['document_id'] . ':' . $meta['transfer_pair']] ?? null;
                 }
                 if ($unitCost === null) {
+                    // Same precedence as DocumentPostingService::inwardUnitCost: the line's own
+                    // valuation rate outranks the source rate, and the source rate is only a cost
+                    // on a cost-bearing document — on a sales return or a journal with items it is
+                    // the Books commercial rate and must never become an inventory cost.
+                    $lineRate = (float) ($m['line_valuation_rate'] ?? 0);
+                    $srcIsCost = in_array($m['document_type'], \Config\DocumentTypeRegistry::COST_BEARING_SOURCE_RATE, true);
                     $srcRate = UnitConversionService::effectiveRate((float) $m['line_qty'], (float) ($m['source_transaction_rate'] ?? 0), (float) ($m['source_transaction_amount'] ?? 0));
-                    if ($srcRate > 0) {
+                    if ($lineRate > 0) {
+                        $unitCost = $lineRate;
+                    } elseif ($srcIsCost && $srcRate > 0) {
                         $unitCost = UnitConversionService::toBaseUnitCost($srcRate, (float) ($m['conversion_factor'] ?: 1));
-                    } elseif ((float) ($m['line_valuation_rate'] ?? 0) > 0 && in_array($m['document_type'], ['PRODUCTION', 'PHYSICAL_ADJUSTMENT', 'STOCK_JOURNAL', 'WRITE_IN', 'MATERIAL_RECEIPT', 'JOB_WORK_IN', 'ASSEMBLY', 'DISASSEMBLY'], true)) {
-                        $unitCost = (float) $m['line_valuation_rate'];
                     } else {
                         $unitCost = $this->engine->resolveFallbackUnitCost($db, $cmpId, $itemId, $this->engine->scopeWarehouse($cmpId, $m['warehouse_id'] !== null ? (int) $m['warehouse_id'] : null));
                     }

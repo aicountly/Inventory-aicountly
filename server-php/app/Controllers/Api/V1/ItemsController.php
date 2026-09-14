@@ -240,6 +240,9 @@ class ItemsController extends BaseController
             return $this->failStructured(404, 'not_found', 'Item not found');
         }
         $body = $this->request->getJSON(true) ?? [];
+        if (($owned = $this->booksOwnedStatutoryEdit($a['session'], $body, $existing)) !== null) {
+            return $this->booksOwnedFieldRefusal($owned);
+        }
         try {
             $row = $this->buildRow($cmpId, array_merge($existing, $body), $existing);
             $methodChanged = strtoupper((string) $existing['valuation_method']) !== $row['valuation_method'];
@@ -275,6 +278,55 @@ class ItemsController extends BaseController
 
             return $this->failFromException($e);
         }
+    }
+
+    /**
+     * HSN and the Books tax category belong to Smart Books, which files the returns that depend
+     * on them. Inventory stores them so the item screen reads whole, and Books pushes them here
+     * with its service key — but an Inventory operator changing one is not a second opinion, it
+     * is a value Books will re-assert from books_item_gst_profile_history within the minute.
+     * That round trip used to discard the typed value with nothing shown on either screen, so
+     * the write is refused here instead, where the person can still see why.
+     *
+     * Only a CHANGE is refused. The item form PUTs the whole row back, so a request that merely
+     * echoes the stored value must pass through untouched.
+     *
+     * @param array<string, mixed> $session
+     * @param array<string, mixed> $body
+     * @param array<string, mixed> $existing
+     * @return array{field:string, label:string}|null the field the caller may not change
+     */
+    private function booksOwnedStatutoryEdit(array $session, array $body, array $existing = []): ?array
+    {
+        if (($session['kind'] ?? '') === 'service' && strtolower((string) ($session['source_app'] ?? '')) === 'books') {
+            return null;
+        }
+        foreach (['hsn_sac' => 'HSN / SAC', 'books_tax_cat_id' => 'tax category'] as $col => $label) {
+            if (!array_key_exists($col, $body)) {
+                continue;
+            }
+            $new = trim((string) ($body[$col] ?? ''));
+            $old = trim((string) ($existing[$col] ?? ''));
+            if ($new === $old) {
+                continue;
+            }
+
+            return ['field' => $col, 'label' => $label];
+        }
+
+        return null;
+    }
+
+    /** @param array{field:string, label:string} $owned */
+    private function booksOwnedFieldRefusal(array $owned): mixed
+    {
+        return $this->failStructured(
+            409,
+            'books_owned_field',
+            'The ' . $owned['label'] . ' is maintained in Smart Books, which files the returns that use it. '
+            . 'Change it on the item there and Inventory will receive it; an edit made here is overwritten within the minute.',
+            ['field' => $owned['field'], 'owner' => 'books'],
+        );
     }
 
     public function delete($id = null)
@@ -327,6 +379,12 @@ class ItemsController extends BaseController
             $changes = self::normalizeBulkRows($body);
         } catch (\Throwable $e) {
             return $this->failFromException($e);
+        }
+        // A bulk edit always means a change, so there is no unchanged value to wave through.
+        foreach ($changes as $change) {
+            if (($owned = $this->booksOwnedStatutoryEdit($a['session'], $change)) !== null) {
+                return $this->booksOwnedFieldRefusal($owned);
+            }
         }
         if ($changes === []) {
             return $this->failStructured(400, 'validation_error', 'Select at least one item and one field to change');

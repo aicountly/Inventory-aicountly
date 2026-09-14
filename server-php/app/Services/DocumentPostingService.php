@@ -135,7 +135,10 @@ class DocumentPostingService
         $db = \Config\Database::connect();
         $db->transStart();
         try {
-            $old = $this->reverse($cmpId, $documentId, $actor, $reason !== '' ? $reason : 'Revised', $options);
+            // 'superseded' marks the reverse leg of a revise on the outbox event it emits. Without
+            // it Books cannot tell this apart from an operator reversing a live document, and files
+            // an ordinary edit as a cross-service reversal.
+            $old = $this->reverse($cmpId, $documentId, $actor, $reason !== '' ? $reason : 'Revised', $options + ['superseded' => true]);
             $payload['metadata'] = array_merge(is_array($payload['metadata'] ?? null) ? $payload['metadata'] : [], ['revises_document_id' => $documentId, 'revision_reason' => $reason]);
             $created = $this->documents->create($ctx, $payload, $actor, $sourceApp);
             $posted = $this->post($cmpId, (int) $created['document_id'], $actor, $options);
@@ -210,7 +213,11 @@ class DocumentPostingService
                     ->enqueue($cmpId, (int) $doc['fy_id'], null, (string) $doc['document_date'], 'reversal', $documentId, $actor);
             }
             $reversed = $this->documents->get($cmpId, $documentId);
-            $this->outbox->enqueue($cmpId, 'inventory.document.reversed', 'document', $documentId, (string) $reversed['document_uuid'], $this->eventPayload($reversed, $reversed['accounting_effects'] ?? [], ['reason' => $reason]));
+            $extra = ['reason' => $reason];
+            if (!empty($options['superseded'])) {
+                $extra['superseded'] = true;
+            }
+            $this->outbox->enqueue($cmpId, 'inventory.document.reversed', 'document', $documentId, (string) $reversed['document_uuid'], $this->eventPayload($reversed, $reversed['accounting_effects'] ?? [], $extra));
             $this->audit->log($cmpId, 'document', $documentId, 'document.reverse', $actor, ['reason' => $reason, 'reversal_ref' => $documentId, 'source_document_uuid' => $doc['source_document_uuid']], ['status' => $doc['status']], ['status' => 'REVERSED']);
             $db->transComplete();
             if ($db->transStatus() === false) {
@@ -359,13 +366,17 @@ class DocumentPostingService
      * Unit cost (base units) of an inward line.
      *  - transfer in-side: cost the out-side was issued at
      *  - explicit valuation_rate on the line (physical adjustment, write-in, production finished goods)
-     *  - source rate ÷ factor (purchase, sales return, opening)
+     *  - source rate ÷ factor, but ONLY for a cost-bearing document (purchase, GRN, opening,
+     *    production/adjustment): on a sales return or a journal with items the source rate is the
+     *    Books COMMERCIAL rate (selling price) and is never a cost
+     *  - goods returned on a non-cost-bearing document: the cost the originating issue consumed
      *  - fallback: last known cost of the item
      */
     private function inwardUnitCost(int $cmpId, array $doc, array $line, array $lines): float
     {
         $itemId = (int) $line['item_id'];
         $factor = (float) ($line['conversion_factor'] ?: 1);
+        $type = (string) $doc['document_type'];
         $meta = $line['metadata'] ?? [];
         if (is_array($meta) && ($meta['side'] ?? '') === 'in' && !empty($meta['transfer_pair'])) {
             foreach ($lines as $other) {
@@ -381,13 +392,50 @@ class DocumentPostingService
         if ($line['valuation_rate'] !== null && (float) $line['valuation_rate'] > 0) {
             return round((float) $line['valuation_rate'], 4);
         }
-        $rate = UnitConversionService::effectiveRate((float) $line['qty'], (float) ($line['source_transaction_rate'] ?? 0), (float) ($line['source_transaction_amount'] ?? 0));
-        if ($rate > 0) {
-            return UnitConversionService::toBaseUnitCost($rate, $factor);
-        }
         $db = \Config\Database::connect();
+        if (in_array($type, DocumentTypeRegistry::COST_BEARING_SOURCE_RATE, true)) {
+            $rate = UnitConversionService::effectiveRate((float) $line['qty'], (float) ($line['source_transaction_rate'] ?? 0), (float) ($line['source_transaction_amount'] ?? 0));
+            if ($rate > 0) {
+                return UnitConversionService::toBaseUnitCost($rate, $factor);
+            }
+        } else {
+            $returned = $this->originatingIssueUnitCost($db, $cmpId, $doc, $line, $itemId);
+            if ($returned !== null) {
+                return $returned;
+            }
+        }
 
         return $this->valuation->resolveFallbackUnitCost($db, $cmpId, $itemId, $this->valuation->scopeWarehouse($cmpId, $line['warehouse_id'] !== null ? (int) $line['warehouse_id'] : null));
+    }
+
+    /**
+     * Cost the originating issue actually consumed for this item, weighted over its cost-layer
+     * consumptions. Used when goods come back in on a document whose own rate is commercial
+     * (a credit note, a journal with items) and the document says which issue it reverses.
+     * Null when no originating document is referenced or it consumed nothing for the item.
+     */
+    private function originatingIssueUnitCost($db, int $cmpId, array $doc, array $line, int $itemId): ?float
+    {
+        $docMeta = is_array($doc['metadata'] ?? null) ? $doc['metadata'] : [];
+        $lineMeta = is_array($line['metadata'] ?? null) ? $line['metadata'] : [];
+        $sourceId = (int) ($lineMeta['originating_document_id'] ?? $lineMeta['linked_source_document_id']
+            ?? $docMeta['originating_document_id'] ?? $docMeta['linked_source_document_id'] ?? 0);
+        if ($sourceId <= 0) {
+            return null;
+        }
+        $result = $db->table('inv_cost_layer_consumptions c')
+            ->select('SUM(c.qty) AS qty, SUM(c.qty * c.unit_cost) AS value', false)
+            ->join('inv_document_lines l', 'l.line_id = c.line_id', 'inner')
+            ->where('c.cmp_id', $cmpId)->where('c.document_id', $sourceId)->where('l.item_id', $itemId)
+            ->get();
+        $row = $result === false ? null : $result->getRowArray();
+        $qty = (float) ($row['qty'] ?? 0);
+        $value = (float) ($row['value'] ?? 0);
+        if ($qty <= 0 || $value <= 0) {
+            return null;
+        }
+
+        return round($value / $qty, 4);
     }
 
     private function enforceNegativeStock(int $cmpId, int $itemId, ?int $wh, ?int $batchId, float $baseQty, string $policy, bool $override, array $line, array &$warnings, array $options): void

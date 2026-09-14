@@ -62,7 +62,8 @@ class OutboxService
             ];
             $result = $books->postEvent($envelope);
             $attempts = (int) $row['attempts'] + 1;
-            if ($result['ok']) {
+            $outcome = self::deliveryOutcome($result);
+            if ($outcome['ack']) {
                 $db->table('inv_integration_events')->where('event_id', (int) $row['event_id'])->update([
                     'status' => 'ACKED', 'attempts' => $attempts, 'sent_at' => date('Y-m-d H:i:s'), 'acked_at' => date('Y-m-d H:i:s'), 'last_error' => null,
                 ]);
@@ -74,13 +75,61 @@ class OutboxService
             $db->table('inv_integration_events')->where('event_id', (int) $row['event_id'])->update([
                 'status'          => $dead ? 'DEAD' : 'FAILED',
                 'attempts'        => $attempts,
-                'last_error'      => substr((string) $result['error'], 0, 2000),
+                'last_error'      => substr($outcome['error'], 0, 2000),
                 'next_attempt_at' => date('Y-m-d H:i:s', time() + $delay),
             ]);
             $dead ? $out['dead']++ : $out['failed']++;
         }
 
         return $out;
+    }
+
+    /**
+     * What one delivery attempt did to the outbox row.
+     *
+     * An event Books could not apply must never be ACKed: the row would be closed with
+     * last_error null while the COGS revision (or posting acknowledgement) it carried never
+     * reached the ledger, and nothing would ever redeliver it. Books now answers non-2xx when
+     * it failed to apply anything in the batch, but the per-event status in the body is checked
+     * too, so a Books build that still answers 200 (or a deploy where Inventory is ahead)
+     * cannot silently drop an event either.
+     *
+     * @param array{ok:bool, status:int, body:?array, error:?string} $result
+     * @return array{ack:bool, error:string}
+     */
+    public static function deliveryOutcome(array $result): array
+    {
+        $applyError = self::applyFailure($result);
+        if (($result['ok'] ?? false) && $applyError === null) {
+            return ['ack' => true, 'error' => ''];
+        }
+
+        return ['ack' => false, 'error' => (string) (($result['error'] ?? null) ?: $applyError ?: 'Books did not acknowledge the event')];
+    }
+
+    /**
+     * The reason Books gave for not applying a delivery, or null when it applied everything it
+     * was sent. Books returns {data:[{event_id, status, error}, ...]} — one entry per event in
+     * the POST — and status='failed' there means the event must be redelivered.
+     *
+     * @param array{ok:bool, status:int, body:?array, error:?string} $result
+     */
+    private static function applyFailure(array $result): ?string
+    {
+        $events = $result['body']['data'] ?? null;
+        if (!is_array($events)) {
+            return null;
+        }
+        $messages = [];
+        foreach ($events as $event) {
+            if (!is_array($event) || ($event['status'] ?? '') !== 'failed') {
+                continue;
+            }
+            $messages[] = trim((string) ($event['event_type'] ?? $event['event_id'] ?? 'event')) . ': '
+                . (string) ($event['error'] ?? 'not applied');
+        }
+
+        return $messages === [] ? null : 'Books did not apply the event — ' . implode('; ', $messages);
     }
 
     public function replay(int $cmpId, int $eventId): bool

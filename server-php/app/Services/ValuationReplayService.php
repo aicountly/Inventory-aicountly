@@ -241,7 +241,9 @@ class ValuationReplayService
                 $unitCost = 0.0;
                 if ($direction === 'in') {
                     $srcRate = UnitConversionService::effectiveRate((float) ($r['line_qty'] ?? 0), (float) ($r['source_transaction_rate'] ?? 0), (float) ($r['source_transaction_amount'] ?? 0));
-                    if ($srcRate > 0 && in_array($r['document_type'], ['PURCHASE_RECEIPT', 'SALES_RETURN', 'JOURNAL_ADJUSTMENT', 'OPENING_STOCK', 'MATERIAL_RECEIPT', 'WRITE_IN', 'JOB_WORK_IN', 'PRODUCTION', 'PHYSICAL_ADJUSTMENT', 'STOCK_JOURNAL'], true) && $r['movement_kind'] === 'physical') {
+                    // SALES_RETURN / JOURNAL_ADJUSTMENT deliberately excluded: their source rate is
+                    // the Books commercial rate, so the replay reads the posted cost instead.
+                    if ($srcRate > 0 && in_array($r['document_type'], ['PURCHASE_RECEIPT', 'OPENING_STOCK', 'MATERIAL_RECEIPT', 'WRITE_IN', 'JOB_WORK_IN', 'PRODUCTION', 'PHYSICAL_ADJUSTMENT', 'STOCK_JOURNAL'], true) && $r['movement_kind'] === 'physical') {
                         $unitCost = UnitConversionService::toBaseUnitCost($srcRate, (float) ($r['conversion_factor'] ?: 1));
                     } else {
                         $unitCost = (float) ($r['unit_cost'] ?? $r['valuation_rate'] ?? 0);

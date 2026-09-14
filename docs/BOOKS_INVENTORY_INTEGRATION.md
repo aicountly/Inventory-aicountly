@@ -51,6 +51,13 @@ In-place edit (`updatePostedCommercialVoucher`): Books calls `POST /v1/inventory
 | `inventory.valuation.revised` | Apply COGS deltas per `INVENTORY_COGS_REVISION_MODE`; audit rows in `books_inventory_cogs_revisions`. |
 | `inventory.item.upserted` / `inventory.uom.upserted` / `inventory.warehouse.upserted` | Upsert the read-only mirror rows. |
 
+The response is `{data:[{event_id, event_type, status, ...}], received}` with one entry per event
+in the POST. Books answers **HTTP 500** (`error.code = event_apply_failed`) when any entry came
+back `status: "failed"`, and the dispatcher refuses to ACK a delivery whose body reports a failed
+event even on a 2xx — the row stays `FAILED` with back-off and is redelivered. An event Books
+applied (`processed`) or deliberately declined (`ignored`) is an ACK. Redelivery is safe: events
+already `processed`/`ignored` short-circuit on the `event_id` duplicate check.
+
 Books → Inventory events (`POST /v1/integration/events`): `books.voucher.cancelled`, `books.valuation_revision.acknowledged`, `books.company.default_stock`.
 
 ## What Books no longer does in live mode
