@@ -32,6 +32,7 @@ class BaseController extends ResourceController
 
     protected AppCommonModel $appCommon;
     protected AccessService $access;
+    private ?\App\Services\OutboxService $outboxDispatcher = null;
 
     public function __construct()
     {
@@ -192,7 +193,39 @@ class BaseController extends ResourceController
             }
         }
 
+        if ($ctx !== null && $permission !== null) {
+            $this->settleOutboxOnContact((int) $ctx['cmp_id']);
+        }
+
         return ['session' => $session, 'ctx' => $ctx];
+    }
+
+    /**
+     * Send this company's outbox rows that are still waiting.
+     *
+     * Every Inventory-to-Books event is enqueued durably and delivered by
+     * OutboxService::dispatch(), which nothing in this deployment calls on its own: there is no
+     * cron, and the operator's Dispatch button is not a delivery mechanism. So the app asks on the
+     * next action for the company, exactly as Books settles its own deferred work before it posts
+     * a voucher. Here, not in the controllers, because every enqueue site — documents, item and
+     * warehouse mirrors, valuation revisions, year-end carry-forward — comes through this one door.
+     *
+     * Only writes pay for it: an enqueue only ever happens on a write, and this runs before the
+     * action, so no transaction of ours is open and no live call to Books can land inside one.
+     * Only a call that actually asserted a permission reaches here, so the company drained is one
+     * the caller is allowed on rather than one it merely named in the query string.
+     */
+    private function settleOutboxOnContact(int $cmpId): void
+    {
+        if ($cmpId <= 0 || !in_array(strtoupper($this->request->getMethod()), ['POST', 'PUT', 'PATCH', 'DELETE'], true)) {
+            return;
+        }
+        $this->outboxDispatcher()->settleOnContact($cmpId);
+    }
+
+    protected function outboxDispatcher(): \App\Services\OutboxService
+    {
+        return $this->outboxDispatcher ??= new \App\Services\OutboxService();
     }
 
     /** @param list<string> $permissions */

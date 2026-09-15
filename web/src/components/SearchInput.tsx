@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { forwardRef, useEffect, useState } from 'react'
 import { useDebounce } from '../hooks/useDebounce'
+import { SearchBox } from '../ui/SearchBox'
 
 interface SearchInputProps {
   value: string
@@ -7,10 +8,20 @@ interface SearchInputProps {
   placeholder?: string
   delayMs?: number
   autoFocus?: boolean
+  className?: string
 }
 
-/** Text search box that reports its value after the user pauses typing. */
-export function SearchInput({ value, onChange, placeholder = 'Search…', delayMs = 350, autoFocus }: SearchInputProps) {
+/**
+ * Text search box that reports its value after the user pauses typing.
+ *
+ * Same contract as before (debounced, resettable from outside); it now renders
+ * the shared SearchBox, and forwards a ref so a page can hand it to
+ * `usePageKeyboard({ searchInputRef })` and focus it with `/`.
+ */
+export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(function SearchInput(
+  { value, onChange, placeholder = 'Search…', delayMs = 350, autoFocus, className },
+  ref,
+) {
   const [draft, setDraft] = useState(value)
   const debounced = useDebounce(draft, delayMs)
 
@@ -24,5 +35,15 @@ export function SearchInput({ value, onChange, placeholder = 'Search…', delayM
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only fire on the debounced value
   }, [debounced])
 
-  return <input type="search" className="input search" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder={placeholder} aria-label={placeholder} autoFocus={autoFocus} />
-}
+  return (
+    <SearchBox
+      ref={ref}
+      value={draft}
+      onChange={setDraft}
+      placeholder={placeholder}
+      autoFocus={autoFocus}
+      className={className ?? 'w-full max-w-xs'}
+      kbd="/"
+    />
+  )
+})

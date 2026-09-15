@@ -3,9 +3,79 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
     <title>Inventory · Aicountly</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=Mooli&family=Noto+Sans:wght@400;500;600;700&family=Nunito:ital,wght@0,200..1000;1,200..1000&family=Roboto+Slab:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      // Pre-paint appearance — mirrors books-react-app/web/index.html with the
+      // storage key changed to `inventory.appearance`. It runs before the first
+      // paint so a dark-mode user never sees a white flash.
+      //
+      // Key and shape MUST match src/theme/ThemeProvider.tsx:
+      //   { mode, colorPreset, customPrimary, customVars: { light, dark },
+      //     fontId, sizeId }
+      // The font / zoom lookup tables below mirror src/config/brandColors.ts —
+      // they are duplicated on purpose: this script cannot import a module and
+      // still run before the bundle loads.
+      ;(function () {
+        var FONTS = {
+          noto: '"Noto Sans", sans-serif',
+          nunito: '"Nunito", sans-serif',
+          montserrat: '"Montserrat", sans-serif',
+          mooli: '"Mooli", sans-serif',
+          roboto: '"Roboto Slab", serif',
+        }
+        var SIZES = {
+          zoomcompact: '13px',
+          zoomsmall: '14px',
+          zoomnormal: '16px',
+          zoomin: '18px',
+          zoommore: '20px',
+        }
+        try {
+          var saved = JSON.parse(localStorage.getItem('inventory.appearance') || '{}') || {}
+          var mode = saved.mode === 'light' || saved.mode === 'dark' ? saved.mode : 'system'
+          var dark =
+            mode === 'dark' ||
+            (mode === 'system' &&
+              window.matchMedia &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches)
+          var root = document.documentElement
+          if (dark) root.classList.add('dark')
+
+          if (saved.customPrimary && saved.customVars) {
+            root.setAttribute('data-theme', 'custom')
+            var vars = (dark ? saved.customVars.dark : saved.customVars.light) || {}
+            for (var k in vars) root.style.setProperty(k, vars[k])
+          } else if (saved.colorPreset && saved.colorPreset !== 'default') {
+            root.setAttribute('data-theme', saved.colorPreset)
+          }
+
+          var font = FONTS[saved.fontId]
+          if (font) root.style.setProperty('--font-family', font)
+          // Falling back is the point: with nothing stored ThemeProvider will
+          // still apply its own default on mount, so skipping it here is what
+          // makes a first load paint at one size and reflow to another.
+          var size = SIZES[saved.sizeId] || SIZES.zoomcompact
+          root.style.setProperty('--font-size-base', size)
+          root.style.fontSize = size
+        } catch (e) {
+          /* a blocked or corrupt localStorage must never stop the app booting */
+        }
+      })()
+    </script>
   </head>
-  <body>
+  <!-- Tailwind's preflight is off (see tailwind.config.js), so the equivalent
+       reset is scoped to `.aic`. It sits on the document body: a subtree that
+       forgets the class — a portal, a new shell, a screen mounted outside
+       AppShell — renders borderless and with UA button chrome, and nothing in
+       the build, the types or the tests would say so. -->
+  <body class="aic">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

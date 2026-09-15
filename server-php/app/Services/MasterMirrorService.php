@@ -14,7 +14,7 @@ class MasterMirrorService
     public const EVENT_UOM = 'inventory.uom.upserted';
     public const EVENT_WAREHOUSE = 'inventory.warehouse.upserted';
 
-    private const ITEM_COLUMNS = 'item_id, item_uuid, cmp_id, item_name, item_alias, print_name, item_sku, item_upc, hsn_sac, mrp, unit_id, stock_cat_id, item_grp_id, books_sales_acc_id, books_purchase_acc_id, books_tax_cat_id, valuation_method, is_active, deleted_at, updated_at';
+    private const ITEM_COLUMNS = 'item_id, item_uuid, cmp_id, item_name, item_alias, print_name, item_sku, item_upc, hsn_sac, mrp, unit_id, stock_cat_id, item_grp_id, books_sales_acc_id, books_purchase_acc_id, books_tax_cat_id, itc_eligibility, valuation_method, is_active, deleted_at, updated_at';
     private const UOM_COLUMNS = 'unit_id, unit_uuid, cmp_id, unit_name, unit_symbol, print_name, uqc_gst, is_active, deleted_at, updated_at';
     private const WAREHOUSE_COLUMNS = 'warehouse_id, warehouse_uuid, cmp_id, warehouse_name, warehouse_group_id, bo_id, is_active, deleted_at, updated_at';
     private const UOM_LINE_COLUMNS = 'item_unit_line_id, item_id, unit_id, is_default, conversion_factor, mc_qty_wise';
@@ -153,6 +153,10 @@ class MasterMirrorService
             'books_sales_acc_id'    => self::nullableInt($row['books_sales_acc_id'] ?? null),
             'books_purchase_acc_id' => self::nullableInt($row['books_purchase_acc_id'] ?? null),
             'books_tax_cat_id'      => self::nullableInt($row['books_tax_cat_id'] ?? null),
+            // An attribute of the goods (inherit | claim | block), mirrored so Books sees the same
+            // value on the event that it would read from GET /v1/items. Inventory makes no tax
+            // determination from it and attaches no consequence to it here either.
+            'itc_eligibility'       => $row['itc_eligibility'] ?? 'inherit',
             'valuation_method'      => $row['valuation_method'] ?? null,
             'is_active'             => (int) ($row['is_active'] ?? 0),
             'deleted_at'            => $row['deleted_at'] ?? null,

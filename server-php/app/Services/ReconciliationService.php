@@ -15,7 +15,7 @@ use Config\DocumentTypeRegistry;
  *   pending_posting                     Books-sourced documents Inventory has not posted yet (DRAFT / PENDING_APPROVAL / APPROVED)
  *   failed_posting                      documents whose posting FAILED
  *   unacknowledged_valuation_revisions  COGS revisions published to Books but not acknowledged
- *   revaluation                         REVALUATION documents (STOCK_REVALUATION effect) vs the revaluations Books holds
+ *   revaluation                         REVALUATION and LANDED_COST documents (STOCK_REVALUATION effect) vs the revaluations Books holds
  *   manual_journal                      manual journals Books posted straight to the stock ledger
  *   cancelled_reversed                  documents REVERSED in Inventory vs vouchers Books cancelled / reversed
  *   missing_source                      Books postings with no Inventory document at all
@@ -51,6 +51,7 @@ class ReconciliationService
     public const SYNC_FAILED_BOOKS = 'FAILED_IN_BOOKS';
     public const SYNC_BOOKS_UNAVAILABLE = 'BOOKS_UNAVAILABLE';
     public const SYNC_CANCELLED_BOTH = 'CANCELLED_BOTH';
+    public const SYNC_BOOKS_STATUS_UNKNOWN = 'BOOKS_STATUS_UNKNOWN';
 
     public function __construct(
         protected ?BooksApiClient $books = null,
@@ -272,7 +273,7 @@ class ReconciliationService
     {
         $db = \Config\Database::connect();
         $b = $db->table('inv_documents d')
-            ->select('d.document_id, d.document_uuid, d.document_type, d.document_no, d.document_date, d.status, d.source_app, d.source_document_type, d.source_document_id, d.source_document_uuid, d.source_document_no, d.posted_at, d.cancelled_at, d.failure_reason, d.bo_id, (SELECT COALESCE(SUM(CASE WHEN l.direction = \'out\' THEN -1 ELSE 1 END * COALESCE(l.valuation_amount, l.source_transaction_amount, l.source_transaction_rate * l.qty, 0)), 0) FROM inv_document_lines l WHERE l.document_id = d.document_id) AS stock_effect', false)
+            ->select('d.document_id, d.document_uuid, d.document_type, d.document_no, d.document_date, d.status, d.stock_effect, d.source_app, d.source_document_type, d.source_document_id, d.source_document_uuid, d.source_document_no, d.posted_at, d.cancelled_at, d.failure_reason, d.bo_id, ' . self::lineValuationEffectSql() . ' AS valuation_effect', false)
             ->where('d.cmp_id', $cmpId)->where('d.fy_id', $fyId)->where('d.source_app', 'books')
             ->orderBy('d.document_date', 'ASC')->orderBy('d.document_id', 'ASC');
         if ($boId > 0) {
@@ -314,7 +315,7 @@ class ReconciliationService
                 'inventory'   => [
                     'document_id' => (int) $d['document_id'], 'document_uuid' => $d['document_uuid'], 'document_type' => $d['document_type'], 'document_no' => $d['document_no'],
                     'document_date' => substr((string) $d['document_date'], 0, 10), 'status' => $d['status'], 'posted_at' => $d['posted_at'], 'cancelled_at' => $d['cancelled_at'],
-                    'failure_reason' => $d['failure_reason'], 'stock_effect' => round((float) $d['stock_effect'], 4), 'bo_id' => (int) $d['bo_id'],
+                    'failure_reason' => $d['failure_reason'], 'stock_effect' => self::valuationEffect($d), 'bo_id' => (int) $d['bo_id'],
                 ],
                 'source'      => ['source_app' => $d['source_app'], 'source_document_type' => $d['source_document_type'], 'source_document_id' => $sid ?: null, 'source_document_uuid' => $d['source_document_uuid'], 'source_document_no' => $d['source_document_no']],
                 'books'       => $books,
@@ -343,6 +344,47 @@ class ReconciliationService
             'summary'         => $summary,
             'entries'         => $entries,
         ];
+    }
+
+    /**
+     * Signed valuation effect of a document's lines (in +, out −), as a correlated subquery on
+     * `inv_documents d`.
+     *
+     * A line that has been valued answers for itself. A line that has not — the document is still
+     * DRAFT, or its posting failed — may only be estimated from its source rate when that rate is
+     * the cost of the goods, which is what COST_BEARING_SOURCE_RATE names: a purchase rate, a GRN
+     * rate, an opening or adjustment cost typed in Inventory. On every other type the source rate
+     * is the COMMERCIAL figure Books owns — the selling price on a credit note, the challan value
+     * agreed with a job worker — and a stock value is not a selling price. Reading one as the
+     * other is the confusion this reconciliation exists to surface, so it may not commit it.
+     */
+    public static function lineValuationEffectSql(): string
+    {
+        $costBearing = "'" . implode("', '", DocumentTypeRegistry::COST_BEARING_SOURCE_RATE) . "'";
+
+        return "(SELECT COALESCE(SUM(CASE WHEN l.direction = 'out' THEN -1 ELSE 1 END"
+            . ' * COALESCE(l.valuation_amount, CASE WHEN d.document_type IN (' . $costBearing . ')'
+            . ' THEN COALESCE(l.source_transaction_amount, l.source_transaction_rate * l.qty) END, 0)), 0)'
+            . ' FROM inv_document_lines l WHERE l.document_id = d.document_id)';
+    }
+
+    /**
+     * Valuation effect of one document row read with lineValuationEffectSql().
+     *
+     * A document that carries no valuation on its lines — a packing list, a challan_only challan,
+     * a purchase whose goods arrive on a later challan — has no effect on the stock value at all.
+     * Zero is the answer; the commercial document behind it is Books' to report.
+     *
+     * @param array<string, mixed> $row
+     */
+    public static function valuationEffect(array $row): float
+    {
+        $type = (string) $row['document_type'];
+        if (!DocumentPostingService::valuesLinesNow($type, DocumentTypeRegistry::get($type), (string) ($row['stock_effect'] ?? ''))) {
+            return 0.0;
+        }
+
+        return round((float) ($row['valuation_effect'] ?? 0), 4);
     }
 
     // ------------------------------------------------------------------ buckets
@@ -421,7 +463,7 @@ class ReconciliationService
     {
         $db = \Config\Database::connect();
         $b = $db->table('inv_documents d')
-            ->select('d.document_id, d.document_uuid, d.document_type, d.document_no, d.document_date, d.status, d.stock_effect, d.source_app, d.source_document_type, d.source_document_id, d.source_document_uuid, d.source_document_no, d.failure_reason, d.cancel_reason, (SELECT COALESCE(SUM(CASE WHEN l.direction = \'out\' THEN -1 ELSE 1 END * COALESCE(l.valuation_amount, l.source_transaction_amount, l.source_transaction_rate * l.qty, 0)), 0) FROM inv_document_lines l WHERE l.document_id = d.document_id) AS value_effect', false)
+            ->select('d.document_id, d.document_uuid, d.document_type, d.document_no, d.document_date, d.status, d.stock_effect, d.source_app, d.source_document_type, d.source_document_id, d.source_document_uuid, d.source_document_no, d.failure_reason, d.cancel_reason, ' . self::lineValuationEffectSql() . ' AS valuation_effect', false)
             ->where('d.cmp_id', $cmpId)->where('d.fy_id', $fyId)->whereIn('d.status', $statuses)
             ->where('d.document_date <=', $asOf)
             ->orderBy('d.document_date', 'ASC')->orderBy('d.document_id', 'ASC');
@@ -447,11 +489,7 @@ class ReconciliationService
         $rows = [];
         $sum = 0.0;
         foreach ($b->get()->getResultArray() as $r) {
-            $spec = DocumentTypeRegistry::get((string) $r['document_type']);
-            // Documents that never carry valuation (packing, reservation, a challan_only challan ...)
-            // explain nothing. An inward challan that would have moved stock does: it is valued.
-            $valued = DocumentPostingService::valuesLines((string) $r['document_type'], $spec, (string) ($r['stock_effect'] ?? ''));
-            $effect = $valued ? round((float) $r['value_effect'], 4) : 0.0;
+            $effect = self::valuationEffect($r);
             if ((string) $r['status'] === 'REVERSED' && (string) $r['source_app'] === 'books'
                 && (isset($cancelledInBooks['id:' . (int) $r['source_document_id']]) || isset($cancelledInBooks['uuid:' . strtolower((string) $r['source_document_uuid'])]))) {
                 $effect = 0.0;
@@ -506,9 +544,15 @@ class ReconciliationService
      */
     private function revaluationBucket(int $cmpId, int $fyId, int $boId, string $asOf, array $booksReported): array
     {
+        // LANDED_COST belongs here beside REVALUATION: it raises the value of stock on hand without
+        // moving any quantity, emits the same STOCK_REVALUATION effect for Books to journal, and is
+        // read back the same way. Left out, the uplift it caused lands in `unexplained`, which is
+        // the bucket that means nobody knows — the one thing a reconciliation must never say about
+        // a figure it could name. No historical number moves: the type had no allocator until now,
+        // so no document of it has ever emitted an effect.
         $b = \Config\Database::connect()->table('inv_documents d')
-            ->select('d.document_id, d.document_uuid, d.document_no, d.document_date, d.status, d.accounting_effects_json')
-            ->where('d.cmp_id', $cmpId)->where('d.fy_id', $fyId)->where('d.document_type', 'REVALUATION')
+            ->select('d.document_id, d.document_uuid, d.document_type, d.document_no, d.document_date, d.status, d.accounting_effects_json')
+            ->where('d.cmp_id', $cmpId)->where('d.fy_id', $fyId)->whereIn('d.document_type', ['REVALUATION', 'LANDED_COST'])
             ->whereIn('d.status', ['POSTED', 'COMPLETED', 'PARTIALLY_FULFILLED'])
             ->where('d.document_date <=', $asOf)
             ->orderBy('d.document_date', 'ASC')->orderBy('d.document_id', 'ASC');
@@ -527,7 +571,7 @@ class ReconciliationService
             }
             $amount = round($amount, 4);
             $sum += $amount;
-            $rows[] = ['document_id' => (int) $r['document_id'], 'document_uuid' => $r['document_uuid'], 'document_no' => $r['document_no'], 'document_date' => substr((string) $r['document_date'], 0, 10), 'status' => $r['status'], 'amount' => $amount];
+            $rows[] = ['document_id' => (int) $r['document_id'], 'document_uuid' => $r['document_uuid'], 'document_type' => $r['document_type'], 'document_no' => $r['document_no'], 'document_date' => substr((string) $r['document_date'], 0, 10), 'status' => $r['status'], 'amount' => $amount];
         }
         $reported = self::sumEntries($booksReported);
 
@@ -651,20 +695,31 @@ class ReconciliationService
             'CANCELLED' => self::SYNC_CANCELLED_BOOKS,
             'PENDING' => self::SYNC_PENDING_BOOKS,
             'FAILED' => self::SYNC_FAILED_BOOKS,
-            default => self::SYNC_IN_SYNC,
+            // A word this side does not know is not agreement. Reporting IN_SYNC for it made the
+            // vocabularies drift apart in silence, which is how the composite statuses above went
+            // unnoticed for as long as they did.
+            default => self::SYNC_BOOKS_STATUS_UNKNOWN,
         };
     }
 
-    /** POSTED | CANCELLED | PENDING | FAILED | UNKNOWN */
+    /**
+     * POSTED | CANCELLED | PENDING | FAILED | UNKNOWN
+     *
+     * The first group of each arm is the generic vocabulary; the composite words after it are the
+     * ones Books' posting-status endpoint actually emits (InventoryIntegrationController::
+     * postingStatus()), which say what happened on BOTH sides in one token. Left unlisted they
+     * normalised to UNKNOWN, and a voucher cancelled in Books read as a document Inventory had
+     * reversed on its own.
+     */
     public static function normalizeBooksStatus(?string $status): string
     {
         $s = strtoupper(trim((string) $status));
 
         return match (true) {
             $s === '' => 'UNKNOWN',
-            in_array($s, ['POSTED', 'ACKED', 'ACKNOWLEDGED', 'SYNCED', 'OK', 'DONE', 'COMPLETED', 'SUCCESS'], true) => 'POSTED',
-            in_array($s, ['CANCELLED', 'CANCELED', 'REVERSED', 'DELETED', 'VOID'], true) => 'CANCELLED',
-            in_array($s, ['PENDING', 'QUEUED', 'DRAFT', 'IN_PROGRESS', 'PROCESSING', 'SENT'], true) => 'PENDING',
+            in_array($s, ['POSTED', 'ACKED', 'ACKNOWLEDGED', 'SYNCED', 'OK', 'DONE', 'COMPLETED', 'SUCCESS', 'MIGRATED', 'INVENTORY_NATIVE'], true) => 'POSTED',
+            in_array($s, ['CANCELLED', 'CANCELED', 'REVERSED', 'DELETED', 'VOID', 'CANCELLED_IN_BOOKS', 'CANCELLED_BOTH'], true) => 'CANCELLED',
+            in_array($s, ['PENDING', 'QUEUED', 'DRAFT', 'IN_PROGRESS', 'PROCESSING', 'SENT', 'INVENTORY_PENDING', 'REVERSAL_PENDING'], true) => 'PENDING',
             in_array($s, ['FAILED', 'ERROR', 'DEAD', 'REJECTED'], true) => 'FAILED',
             default => 'UNKNOWN',
         };

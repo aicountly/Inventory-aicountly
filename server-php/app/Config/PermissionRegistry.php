@@ -25,7 +25,10 @@ class PermissionRegistry
         'serials'          => 'Serial Numbers',
     ];
 
-    /** Document types (each gets read / create / edit / approve / post / reverse). */
+    /**
+     * Document types (each gets read / create / edit / approve / post / reverse). An unimplemented
+     * type is left out: a permission to create what nothing can create is a promise of its own.
+     */
     public const DOCUMENT_TYPES = [
         'opening_stock'         => 'Opening Stock',
         'stock_transfer'        => 'Stock Transfer',

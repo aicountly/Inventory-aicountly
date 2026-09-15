@@ -54,18 +54,33 @@ CREATE TABLE IF NOT EXISTS inv_wac_state (
     PRIMARY KEY (cmp_id, item_id, warehouse_id)
 );
 
--- Landed cost allocations (freight, duty, insurance ... spread over receipt lines)
+-- Landed cost allocations (freight, duty, insurance ... spread over receipt lines).
+--
+-- A charge that arrives WITH the receipt has document_id = target_document_id = the receipt: Books
+-- allocated it and sent a per-line rupee amount, and the receipt capitalised it. A charge that
+-- arrives LATER is a LANDED_COST document, and document_id is that document while
+-- target_document_id stays the receipt it loads.
+--
+-- These rows are derived allocation detail, not audit: posting deletes and rewrites them for the
+-- document being posted (008_landed_cost.sql adds the index that makes the delete cheap). Nothing
+-- here is append-only and nothing here carries a retention rule.
 CREATE TABLE IF NOT EXISTS inv_landed_costs (
     landed_cost_id      BIGSERIAL PRIMARY KEY,
     cmp_id              BIGINT      NOT NULL,
-    document_id         BIGINT      NOT NULL,                      -- LANDED_COST document
+    document_id         BIGINT      NOT NULL,                      -- LANDED_COST document, or the receipt itself when the cost arrived with it
     target_document_id  BIGINT      NOT NULL,                      -- receipt being loaded
-    cost_type           VARCHAR(32) NOT NULL,                      -- freight | duty | insurance | handling | other
+    cost_type           VARCHAR(32) NOT NULL,                      -- freight | duty | insurance | handling | other | non_creditable_tax
     amount              NUMERIC(18,4) NOT NULL,
-    allocation_basis    VARCHAR(16) NOT NULL DEFAULT 'value',      -- value | qty | weight | manual
+    allocation_basis    VARCHAR(16) NOT NULL DEFAULT 'value',      -- value | qty | manual | direct
     books_acc_ref       BIGINT      NULL,
     created_at          TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+-- 'weight' was named here and never supported. It stays out: there is no item weight master to
+-- allocate by, so offering the basis would be a control that silently falls back to something else
+-- — a charge the user believes was spread by weight and was in fact spread by value. The four that
+-- remain are each computable from what Inventory holds: value (the line's own valuation amount),
+-- qty (its base quantity), manual (amounts typed per line) and direct (a charge that belongs to one
+-- line by nature, which is what a non-creditable tax is).
 CREATE TABLE IF NOT EXISTS inv_landed_cost_lines (
     id                  BIGSERIAL PRIMARY KEY,
     landed_cost_id      BIGINT      NOT NULL,
@@ -73,6 +88,7 @@ CREATE TABLE IF NOT EXISTS inv_landed_cost_lines (
     target_line_id      BIGINT      NOT NULL,
     allocated_amount    NUMERIC(18,4) NOT NULL,
     per_unit_amount     NUMERIC(18,4) NOT NULL
+    -- + allocation_basis, created_at (008_landed_cost.sql)
 );
 CREATE INDEX IF NOT EXISTS idx_inv_landed_cost_lines_lc ON inv_landed_cost_lines (landed_cost_id);
 

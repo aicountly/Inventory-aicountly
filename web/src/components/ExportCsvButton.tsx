@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { Download } from 'lucide-react'
+import { Button } from '../ui/Button'
 import { useToast } from '../ui/ToastContext'
 import { errorMessage } from '../services/api'
 import { downloadCsv, toCsv } from '../utils/csv'
@@ -39,8 +41,15 @@ export function ExportCsvButton<T>({ filename, columns, rows, fetchAll, disabled
   }
 
   return (
-    <button type="button" className="btn btn-sm" onClick={() => void run()} disabled={disabled || busy}>
+    <Button
+      variant="secondary"
+      size="xs"
+      icon={Download}
+      loading={busy}
+      onClick={() => void run()}
+      disabled={disabled}
+    >
       {busy ? 'Exporting…' : label}
-    </button>
+    </Button>
   )
 }

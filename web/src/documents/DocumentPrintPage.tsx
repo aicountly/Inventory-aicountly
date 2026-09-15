@@ -1,150 +1,242 @@
-import { Link, useParams } from 'react-router-dom'
-import { Notice } from '../components/Notice'
+import { useCallback, useMemo, useState } from 'react'
+import { useParams } from 'react-router-dom'
+import { FileText, Printer, ShieldCheck, TriangleAlert } from 'lucide-react'
+import { Badge } from '../ui/Badge'
+import { Select } from '../ui/Select'
+import { Button } from '../ui/Button'
+import { ErrorState } from '../ui/ErrorState'
+import { LoadingState } from '../ui/LoadingState'
+import { notify } from '../ui/notify'
+import { PageShell } from '../ui/shell/PageShell'
+import { BreadcrumbHeader } from '../ui/shell/BreadcrumbHeader'
 import { useQuery } from '../hooks/useQuery'
+import { usePageKeyboard } from '../keyboard/usePageKeyboard'
 import { errorMessage, isApiError } from '../services/api'
 import { documentsApi } from '../services/documentsApi'
-import { formatDate, formatMoney, formatQty } from '../utils/format'
+import { formatGeneratedStamp } from '../utils/format'
+import { COPY_SETS, COPY_SET_LABELS, buildDocumentSheet, defaultCopySet } from '../export/documentSheet'
+import type { CopySetId } from '../export/documentSheet'
+import { DocumentSheetPreview } from '../export/DocumentSheetPreview'
+import { exportDocumentPdf, printDocumentSheet } from '../export/documentExport'
+import { exportErrorMessage } from '../export/exportActions'
+import { getExportTheme } from '../export/exportTheme'
+import { useExportIdentity } from '../export/useExportIdentity'
+import type { DocumentSheetOptions } from '../export/sheetHtml'
 import { labelForCode } from './registry'
 import { useReferenceData } from './useReferenceData'
-import './documents.css'
 
-type Row = Record<string, unknown>
-
-const TITLE_KEYS = ['title', 'document_title', 'variant_label']
-
-function text(v: unknown): string {
-  if (v === null || v === undefined || v === '') return ''
-  if (typeof v === 'object') return ''
-  return String(v)
-}
-
-function first(row: Row, keys: string[]): unknown {
-  for (const k of keys) if (row[k] !== undefined && row[k] !== null && row[k] !== '') return row[k]
-  return undefined
-}
-
-/** `/documents/:id/print` — the immutable print snapshot, or the live document when none was captured. */
+/**
+ * `/documents/:id/print` — the immutable print snapshot, or the live document
+ * when none was captured.
+ *
+ * The fallback order is the whole point and is unchanged from the screen this
+ * replaces: ask for the snapshot; only a 404 (no snapshot exists) falls through
+ * to the live document, and the page says which one it is showing. What is new
+ * is that the preview, the print sheet and the PDF are all built from one
+ * `DocumentSheetBody`, so a printed challan is the same document as the one on
+ * screen — and it is drawn in the same house style as a printed register.
+ *
+ * See `src/export/documentSheet.ts` for why a snapshot print never touches a
+ * live master.
+ */
 export function DocumentPrintPage() {
   const { id } = useParams()
   const docId = Number(id)
   const { warehouseName } = useReferenceData()
-  const snapshot = useQuery((signal) => documentsApi.printSnapshot(docId, signal), [docId], { enabled: Number.isFinite(docId) })
+  const identity = useExportIdentity()
+  const [busy, setBusy] = useState<'print' | 'pdf' | null>(null)
+  const [copySet, setCopySet] = useState<CopySetId | null>(null)
+
+  const snapshot = useQuery((signal) => documentsApi.printSnapshot(docId, signal), [docId], {
+    enabled: Number.isFinite(docId),
+  })
+  // Only a 404 means "no snapshot was captured". Any other failure is a real
+  // error and must not be papered over with a live render.
   const missing = !!snapshot.error && isApiError(snapshot.error) && snapshot.error.status === 404
   const live = useQuery((signal) => documentsApi.get(docId, signal), [docId], { enabled: missing })
 
+  const sheet = useMemo(
+    () =>
+      buildDocumentSheet({
+        snapshot: snapshot.data ?? null,
+        live: live.data ?? null,
+        warehouseName,
+        typeLabel: (code) => labelForCode(code),
+      }),
+    [snapshot.data, live.data, warehouseName],
+  )
+
+  // A goods movement defaults to three captioned copies; an internal record to
+  // one. The reader can override, and the choice applies to print and PDF alike.
+  const effectiveCopySet: CopySetId = copySet ?? (sheet ? defaultCopySet(sheet.documentCode) : 'single')
+
+  const sheetOptions = useMemo<DocumentSheetOptions | null>(() => {
+    if (!sheet) return null
+    return {
+      ...identity,
+      title: sheet.title,
+      documentNo: sheet.documentNo,
+      documentDate: sheet.documentDate,
+      headerPairs: sheet.headerPairs,
+      blocks: sheet.blocks,
+      columns: sheet.columns,
+      rows: sheet.rows,
+      totalsRow: sheet.totalsRow,
+      totalsLabel: sheet.totalsLabel,
+      footerPairs: sheet.footerPairs,
+      footerNotes: sheet.footerNotes,
+      provenance: sheet.provenance,
+      copies: COPY_SETS[effectiveCopySet],
+      orientation: 'portrait',
+      paperSize: 'A4',
+      theme: getExportTheme(),
+    }
+  }, [sheet, identity, effectiveCopySet])
+
+  const runPrint = useCallback(() => {
+    if (!sheetOptions) return
+    setBusy('print')
+    try {
+      // Stamped here, not in the memo: the sheet says when it was printed.
+      if (!printDocumentSheet({ ...sheetOptions, generatedAt: formatGeneratedStamp() })) {
+        notify.error('The print sheet could not be opened. Check the browser’s popup settings.')
+      }
+    } finally {
+      setBusy(null)
+    }
+  }, [sheetOptions])
+
+  const runPdf = useCallback(async () => {
+    if (!sheetOptions || !sheet) return
+    setBusy('pdf')
+    try {
+      await exportDocumentPdf({ ...sheetOptions, filenameBase: sheet.filenameBase, generatedAt: formatGeneratedStamp() })
+      notify.success(`${sheet.title} downloaded as PDF.`)
+    } catch (err) {
+      notify.error(exportErrorMessage(err, 'PDF export failed.'))
+    } finally {
+      setBusy(null)
+    }
+  }, [sheetOptions, sheet])
+
+  // Ctrl+P prints the sheet, not the surrounding app.
+  usePageKeyboard({ onPrint: runPrint })
+
   if (snapshot.loading || (missing && live.loading)) {
     return (
-      <div className="page">
-        <p className="muted">Loading…</p>
-      </div>
+      <PageShell compact>
+        <LoadingState label="Loading document…" />
+      </PageShell>
     )
   }
+
   if (snapshot.error && !missing) {
     return (
-      <div className="page">
-        <Notice kind="error">{errorMessage(snapshot.error)}</Notice>
-      </div>
+      <PageShell compact>
+        <ErrorState
+          title="This document could not be loaded"
+          description={errorMessage(snapshot.error)}
+          onRetry={snapshot.reload}
+        />
+      </PageShell>
     )
   }
 
-  const snap = snapshot.data
-  const doc = live.data
-  if (!snap && !doc) {
+  if (!sheet || !sheetOptions) {
     return (
-      <div className="page">
-        <Notice kind="error">{live.error ? errorMessage(live.error) : 'Nothing to print.'}</Notice>
-      </div>
+      <PageShell compact>
+        <ErrorState
+          title="Nothing to print"
+          description={live.error ? errorMessage(live.error) : 'This document has no printable content.'}
+          onRetry={missing ? live.reload : snapshot.reload}
+        />
+      </PageShell>
     )
   }
 
-  const header: Row = snap?.header_snapshot ?? {}
-  const sourceDest: Row = snap?.source_dest_snapshot ?? {}
-  const lines: Row[] = snap ? (snap.item_lines_snapshot ?? []) : (doc?.lines ?? []).map((l) => ({ item_name: l.item_label ?? l.item_name, item_sku: l.item_sku, warehouse_name: l.warehouse_name ?? warehouseName(l.warehouse_id), batch_no: l.batch_no, qty: l.qty, unit_symbol: l.unit_symbol, rate: l.source_transaction_rate ?? l.valuation_rate, amount: l.source_transaction_amount ?? l.valuation_amount, direction: l.direction }))
-  const footer: Row = snap?.footer_snapshot ?? {}
-  const title = snap ? text(first(header, TITLE_KEYS)) || snap.document_variant.replace(/_/g, ' ') : `${doc?.document_type_label ?? labelForCode(doc?.document_type ?? '')}`
-  const number = snap?.document_no ?? doc?.document_no ?? `#${docId}`
-  const date = snap?.document_date ?? doc?.document_date ?? ''
-  const metaPairs = Object.entries({ ...header, ...sourceDest }).filter(([k, v]) => text(v) !== '' && !TITLE_KEYS.includes(k))
+  const fromSnapshot = sheet.source === 'snapshot'
 
   return (
-    <div className="page">
-      <div className="row no-print">
-        <Link className="btn" to={`/documents/${docId}`}>
-          ← Back to document
-        </Link>
-        <button type="button" className="btn btn-primary" onClick={() => window.print()}>
-          Print
-        </button>
-        {!snap ? <span className="hint">No print snapshot was captured for this document; showing the live document instead.</span> : <span className="hint">Immutable snapshot captured {formatDate(snap.created_at)} · template {snap.template_version}</span>}
-      </div>
-      <div className="print-sheet">
-        <h1>{title}</h1>
-        <div>
-          <strong>{number}</strong> · {formatDate(date)}
-          {doc?.party_name ? ` · ${doc.party_name}` : ''}
-        </div>
-        {metaPairs.length > 0 ? (
-          <div className="print-meta">
-            {metaPairs.map(([k, v]) => (
-              <div key={k}>
-                <span>{k.replace(/_/g, ' ')}: </span>
-                {text(v)}
-              </div>
-            ))}
-          </div>
-        ) : null}
-        {!snap && doc ? (
-          <div className="print-meta">
-            {doc.from_warehouse_id ? <div><span>From: </span>{warehouseName(doc.from_warehouse_id)}</div> : null}
-            {doc.to_warehouse_id ? <div><span>To: </span>{warehouseName(doc.to_warehouse_id)}</div> : null}
-            {doc.narration ? <div><span>Narration: </span>{doc.narration}</div> : null}
-          </div>
-        ) : null}
-        <table>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Item</th>
-              <th>Warehouse</th>
-              <th>Batch</th>
-              <th className="align-right">Qty</th>
-              <th className="align-right">Rate</th>
-              <th className="align-right">Amount</th>
-            </tr>
-          </thead>
-          <tbody>
-            {lines.map((l, i) => (
-              <tr key={i}>
-                <td>{i + 1}</td>
-                <td>
-                  {text(first(l, ['item_name', 'item_label', 'description', 'name']))}
-                  {text(first(l, ['item_sku', 'sku'])) ? ` · ${text(first(l, ['item_sku', 'sku']))}` : ''}
-                </td>
-                <td>{text(first(l, ['warehouse_name', 'mc_name', 'warehouse']))}</td>
-                <td>{text(first(l, ['batch_no', 'batch']))}</td>
-                <td className="align-right">
-                  {formatQty(first(l, ['qty', 'quantity']), '')} {text(first(l, ['unit_symbol', 'unit', 'uom']))}
-                  {text(l.direction) && text(l.direction) !== 'none' ? ` (${text(l.direction)})` : ''}
-                </td>
-                <td className="align-right">{formatMoney(first(l, ['rate', 'unit_rate', 'valuation_rate']), '')}</td>
-                <td className="align-right">{formatMoney(first(l, ['amount', 'line_amount', 'valuation_amount']), '')}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {Object.keys(footer).length > 0 ? (
-          <div className="print-meta">
-            {Object.entries(footer)
-              .filter(([, v]) => text(v) !== '')
-              .map(([k, v]) => (
-                <div key={k}>
-                  <span>{k.replace(/_/g, ' ')}: </span>
-                  {text(v)}
-                </div>
+    <PageShell compact>
+      <BreadcrumbHeader
+        breadcrumbs={[
+          { label: 'Documents', to: '/documents' },
+          { label: sheet.documentNo || `#${docId}`, to: `/documents/${docId}` },
+          { label: 'Print' },
+        ]}
+        title={sheet.title}
+        description={sheet.documentNo ? `${sheet.documentNo} · ${sheet.documentDate}` : sheet.documentDate}
+        icon={FileText}
+        backTo={`/documents/${docId}`}
+        backLabel="Back to document"
+        badge={
+          <Badge tone={fromSnapshot ? 'success' : 'warning'}>
+            {fromSnapshot ? 'Snapshot' : 'Live document'}
+          </Badge>
+        }
+        actions={
+          <div className="flex flex-wrap items-center gap-1.5 print:hidden">
+            <Select
+              size="sm"
+              aria-label="Copies to print"
+              value={effectiveCopySet}
+              onChange={(e) => setCopySet(e.target.value as CopySetId)}
+              className="w-56"
+            >
+              {(Object.keys(COPY_SETS) as CopySetId[]).map((id) => (
+                <option key={id} value={id}>
+                  {COPY_SET_LABELS[id]}
+                </option>
               ))}
+            </Select>
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={FileText}
+              onClick={() => void runPdf()}
+              loading={busy === 'pdf'}
+              disabled={busy !== null}
+            >
+              Download PDF
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              icon={Printer}
+              onClick={runPrint}
+              loading={busy === 'print'}
+              disabled={busy !== null}
+              kbd="Ctrl+P"
+            >
+              Print
+            </Button>
           </div>
-        ) : null}
+        }
+      />
+
+      {/*
+        Provenance is not decoration. A reader holding two copies of the same
+        challan needs to know which one is the record and which one is a view
+        of something that can still change.
+      */}
+      <div
+        className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-xs print:hidden ${
+          fromSnapshot
+            ? 'border-primary/30 bg-primary-light/50 text-gray-700'
+            : 'border-amber-300 bg-amber-50 text-amber-900'
+        }`}
+      >
+        {fromSnapshot ? (
+          <ShieldCheck className="mt-px h-4 w-4 shrink-0 text-primary" />
+        ) : (
+          <TriangleAlert className="mt-px h-4 w-4 shrink-0 text-amber-600" />
+        )}
+        <span>{sheet.provenance}</span>
       </div>
-    </div>
+
+      <DocumentSheetPreview sheet={sheet} identity={identity} />
+    </PageShell>
   )
 }
+
+export default DocumentPrintPage

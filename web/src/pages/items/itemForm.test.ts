@@ -45,6 +45,18 @@ describe('itemPayload', () => {
     expect(body).toMatchObject({ item_name: 'Bolt', item_type: 'stock', unit_id: 1, hsn_sac: '7318AB', valuation_method: 'WAC', track_batch: 1, track_serial: 0, is_active: 1, item_grp_id: null, mrp: null })
     expect(body.unit_lines).toEqual([{ unit_id: 1, is_default: 1, conversion_factor: 1, uom_role: 'base' }])
   })
+
+  /**
+   * The ITC attribute is a fact about the goods that Books resolves; Inventory only carries it. It
+   * has to survive the form round trip exactly, and a new item has to say nothing rather than pick
+   * a side — every item that predates the attribute reads as 'inherit', so Books decides as before.
+   */
+  it('carries the item ITC attribute, defaulting to saying nothing', () => {
+    expect(emptyItemForm().itc_eligibility).toBe('inherit')
+    expect(itemPayload({ ...emptyItemForm(), item_name: 'Bolt', unit_id: '1' }).itc_eligibility).toBe('inherit')
+    expect(itemPayload({ ...emptyItemForm(), item_name: 'Company car', unit_id: '1', itc_eligibility: 'block' }).itc_eligibility).toBe('block')
+    expect(itemPayload({ ...emptyItemForm(), item_name: 'Raw material', unit_id: '1', itc_eligibility: 'claim' }).itc_eligibility).toBe('claim')
+  })
 })
 
 describe('validateItemForm', () => {
@@ -116,6 +128,7 @@ describe('itemToForm', () => {
       lead_time_days: null,
       default_warehouse_id: null,
       standard_cost: null,
+      itc_eligibility: 'block',
       attributes: null,
       variant_attributes: null,
       unit_lines: [
@@ -129,7 +142,7 @@ describe('itemToForm', () => {
       { fy_id: 31, warehouse_id: 4, unit_id: 1, batch_id: null, opening_qty: '60.0000', opening_valuation_rate: '2.1000' },
     ]
     const f = itemToForm(item, openings, 31)
-    expect(f).toMatchObject({ item_name: 'Bolt', unit_id: '1', purchase_unit_id: '2', valuation_method: 'FIFO', track_batch: true, mrp: '12.5000', min_stock_qty: '10.0000', item_grp_id: '3' })
+    expect(f).toMatchObject({ item_name: 'Bolt', unit_id: '1', purchase_unit_id: '2', valuation_method: 'FIFO', track_batch: true, mrp: '12.5000', min_stock_qty: '10.0000', item_grp_id: '3', itc_eligibility: 'block' })
     expect(f.unitLines).toHaveLength(1)
     expect(f.unitLines[0]).toMatchObject({ unit_id: '2', conversion_factor: '100', uom_role: 'purchase' })
     expect(f.openings).toHaveLength(1)

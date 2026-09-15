@@ -18,7 +18,7 @@ class StockMovementsController extends BaseController
         . 'i.item_name, i.item_alias, i.item_sku, i.unit_id, u.unit_symbol, w.warehouse_name, w.warehouse_code, bt.batch_no, '
         . 'd.document_no, d.status AS document_status, d.source_app, d.source_document_type, d.source_document_id, d.source_document_no, d.party_ref, d.party_name';
 
-    private const SORTABLE = ['movement_date' => 'm.movement_date', 'movement_id' => 'm.movement_id', 'item_id' => 'm.item_id', 'item_name' => 'i.item_name', 'qty' => 'm.qty', 'value' => 'm.value', 'document_type' => 'm.document_type', 'document_no' => 'd.document_no', 'warehouse_id' => 'm.warehouse_id', 'created_at' => 'm.created_at'];
+    public const SORTABLE = ['movement_date' => 'm.movement_date', 'movement_id' => 'm.movement_id', 'item_id' => 'm.item_id', 'item_name' => 'i.item_name', 'qty' => 'm.qty', 'value' => 'm.value', 'unit_cost' => 'm.unit_cost', 'direction' => 'm.direction', 'document_type' => 'm.document_type', 'document_no' => 'd.document_no', 'warehouse_id' => 'm.warehouse_id', 'created_at' => 'm.created_at'];
 
     /**
      * GET /stock-movements

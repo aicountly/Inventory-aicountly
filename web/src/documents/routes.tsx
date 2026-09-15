@@ -1,7 +1,7 @@
 import { Route } from 'react-router-dom'
 import type { RouteObject } from 'react-router-dom'
 import { PackingListsPage } from '../pages/PackingListsPage'
-import { PendingQuantitiesPage } from '../pages/PendingQuantitiesPage'
+import { LegacyRedirect } from '../registers/LegacyRedirect'
 import { ReservationsPage } from '../pages/ReservationsPage'
 import { DocumentDetailPage } from './DocumentDetailPage'
 import { DocumentFormPage } from './DocumentFormPage'
@@ -20,7 +20,8 @@ export const documentRoutes: RouteObject[] = [
   { path: 'documents/:id/print', element: <DocumentPrintPage /> },
   { path: 'packing-lists', element: <PackingListsPage /> },
   { path: 'reservations', element: <ReservationsPage /> },
-  { path: 'pending-quantities', element: <PendingQuantitiesPage /> },
+  // The pending list is a register now; the old path keeps resolving.
+  { path: 'pending-quantities', element: <LegacyRedirect to="/registers/pending-quantities" /> },
 ]
 
 /** The same screens as `<Route>` elements for a JSX `<Routes>` tree. */
@@ -33,5 +34,5 @@ export const documentNavItems = [
   { to: '/documents', label: 'Documents', permission: 'documents.read' },
   { to: '/packing-lists', label: 'Packing lists', permission: ['documents.packing.read', 'documents.read'] },
   { to: '/reservations', label: 'Reservations', permission: ['documents.reservation.read', 'documents.read'] },
-  { to: '/pending-quantities', label: 'Pending quantities', permission: 'documents.read' },
+  { to: '/registers/pending-quantities', label: 'Pending quantities', permission: 'documents.read' },
 ] as const

@@ -43,6 +43,7 @@ $routes->group('', ['namespace' => 'App\Controllers\Api', 'filter' => 'cors'], s
         $routes->delete('access/members/(:segment)', 'AccessController::removeMember/$1');
         $routes->get('settings', 'SettingsController::show');
         $routes->put('settings', 'SettingsController::update');
+        $routes->get('settings/landed-cost-policy', 'SettingsController::landedCostPolicy');
         $routes->get('settings/period-locks', 'SettingsController::periodLocks');
         $routes->post('settings/period-locks', 'SettingsController::lockPeriod');
         $routes->delete('settings/period-locks/(:num)', 'SettingsController::releasePeriodLock/$1');

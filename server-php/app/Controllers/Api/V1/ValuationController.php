@@ -18,6 +18,20 @@ use App\Services\ValuationReplayService;
 class ValuationController extends BaseController
 {
     public const REPORT_METHODS = ['FIFO', 'LIFO', 'WAC', 'AS_PER_MASTER'];
+
+    /**
+     * Columns the valuation register can order by, and how each compares. The
+     * register renders a sort header for exactly these; `item_name` is in the
+     * list because it is the register's own default sort and used to be ignored.
+     */
+    public const SNAPSHOT_SORTABLE = [
+        'item_name'   => 'text',
+        'closing_qty' => 'numeric',
+        'unit_cost'   => 'numeric',
+        'stock_value' => 'numeric',
+        'item_id'     => 'numeric',
+    ];
+
     private const JOB_STATUSES = ['QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED'];
 
     /**
@@ -44,14 +58,7 @@ class ValuationController extends BaseController
         } catch (\Throwable $e) {
             return $this->failFromException($e);
         }
-        $rows = $snap['rows'];
-        if (in_array($p['sort'], ['closing_qty', 'unit_cost', 'stock_value', 'item_id'], true)) {
-            $key = $p['sort'];
-            usort($rows, static fn ($x, $y) => (float) $x[$key] <=> (float) $y[$key]);
-        }
-        if ($p['order'] === 'DESC') {
-            $rows = array_reverse($rows);
-        }
+        $rows = self::sortSnapshotRows($snap['rows'], $p['sort'], $p['order']);
         $total = count($rows);
         $page = array_slice($rows, $p['offset'], $p['limit']);
 
@@ -62,6 +69,29 @@ class ValuationController extends BaseController
             'total_value' => $snap['total_value'],
             'item_count'  => $total,
         ]]);
+    }
+
+    /**
+     * Order a valuation snapshot by one of SNAPSHOT_SORTABLE.
+     *
+     * The snapshot is replayed in item-name order, so an unknown sort key keeps
+     * that order and only the direction applies — never a silent reordering by
+     * something the caller did not ask for.
+     *
+     * @param list<array<string, mixed>> $rows
+     * @return list<array<string, mixed>>
+     */
+    public static function sortSnapshotRows(array $rows, string $sort, string $order): array
+    {
+        $desc = strtoupper($order) === 'DESC';
+        $kind = self::SNAPSHOT_SORTABLE[$sort] ?? null;
+        if ($kind !== null) {
+            usort($rows, static fn ($x, $y) => $kind === 'text'
+                ? strcasecmp((string) ($x[$sort] ?? ''), (string) ($y[$sort] ?? ''))
+                : (float) ($x[$sort] ?? 0) <=> (float) ($y[$sort] ?? 0));
+        }
+
+        return $desc ? array_reverse($rows) : array_values($rows);
     }
 
     /**

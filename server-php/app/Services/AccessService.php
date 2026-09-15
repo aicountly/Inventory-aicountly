@@ -231,10 +231,7 @@ class AccessService
             if ($memberCount === 0) {
                 $owner = $templates->getProfileByTemplate($cmpId, 'owner');
                 if ($owner) {
-                    $db->table('inv_company_members')->insert([
-                        'cmp_id' => $cmpId, 'uuid' => $uuid, 'profile_id' => (int) $owner['profile_id'],
-                        'status' => 'active', 'accepted_at' => $now, 'created_at' => $now, 'updated_at' => $now,
-                    ]);
+                    $this->insertMemberIfAbsent($db, $cmpId, $uuid, (int) $owner['profile_id'], $now);
                 }
 
                 return;
@@ -242,14 +239,39 @@ class AccessService
             if ($this->isPortalOwner($session)) {
                 $admin = $templates->getProfileByTemplate($cmpId, 'administrator');
                 if ($admin) {
-                    $db->table('inv_company_members')->insert([
-                        'cmp_id' => $cmpId, 'uuid' => $uuid, 'profile_id' => (int) $admin['profile_id'],
-                        'status' => 'active', 'accepted_at' => $now, 'created_at' => $now, 'updated_at' => $now,
-                    ]);
+                    $this->insertMemberIfAbsent($db, $cmpId, $uuid, (int) $admin['profile_id'], $now);
                 }
             }
         } catch (\Throwable $e) {
             log_message('error', 'ensureMemberBootstrap cmp_id=' . $cmpId . ': ' . $e->getMessage());
         }
+    }
+
+    /**
+     * Insert the bootstrap member row, or do nothing if another request got there first.
+     *
+     * This runs from assert(), so every authorised request reaches it. Two requests arriving
+     * together both read "no member", both insert, and the loser hits
+     * uq_inv_company_members_cmp_uuid. That is not a harmless duplicate: PostgreSQL aborts the
+     * WHOLE transaction on a failed statement, so the request that lost the race fails at whatever
+     * it was actually there to do. Production logged this repeatedly on 2026-09-14.
+     *
+     * ON CONFLICT infers the index from the columns rather than naming the constraint, so it holds
+     * even if the index is ever renamed.
+     */
+    private function insertMemberIfAbsent(
+        \CodeIgniter\Database\BaseConnection $db,
+        int $cmpId,
+        string $uuid,
+        int $profileId,
+        string $now,
+    ): void {
+        $db->query(
+            'INSERT INTO inv_company_members'
+            . ' (cmp_id, uuid, profile_id, status, accepted_at, created_at, updated_at)'
+            . ' VALUES (?, ?, ?, ?, ?, ?, ?)'
+            . ' ON CONFLICT (cmp_id, uuid) DO NOTHING',
+            [$cmpId, $uuid, $profileId, 'active', $now, $now, $now],
+        );
     }
 }

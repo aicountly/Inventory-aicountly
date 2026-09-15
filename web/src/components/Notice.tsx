@@ -1,4 +1,7 @@
+import { AlertCircle, AlertTriangle, CheckCircle2, Info } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
+import { AIC, cx } from '../ui/cx'
 
 export type NoticeKind = 'error' | 'warning' | 'success' | 'info'
 
@@ -7,6 +10,7 @@ interface NoticeProps {
   title?: ReactNode
   children?: ReactNode
   actions?: ReactNode
+  className?: string
 }
 
 const ROLE: Record<NoticeKind, 'alert' | 'status'> = {
@@ -16,14 +20,43 @@ const ROLE: Record<NoticeKind, 'alert' | 'status'> = {
   info: 'status',
 }
 
-export function Notice({ kind = 'info', title, children, actions }: NoticeProps) {
+/**
+ * Tone classes live in theme/primitives.css rather than as Tailwind tints:
+ * the dark-mode retrofit layer remaps the grey text utilities, which would
+ * otherwise put light text on a pale banner. `currentColor` keeps the icon and
+ * the title in step with the body text in both modes.
+ */
+const STYLE: Record<NoticeKind, { box: string; icon: LucideIcon }> = {
+  error: { box: 'aic-notice-error', icon: AlertCircle },
+  warning: { box: 'aic-notice-warning', icon: AlertTriangle },
+  success: { box: 'aic-notice-success', icon: CheckCircle2 },
+  info: { box: 'aic-notice-info', icon: Info },
+}
+
+/**
+ * Inline banner. Re-skinned onto the Books design language in place, keeping
+ * its props exactly, so all ~25 screens that already render one pick up the
+ * new look without an edit.
+ */
+export function Notice({ kind = 'info', title, children, actions, className }: NoticeProps) {
+  const style = STYLE[kind]
+  const Icon = style.icon
   return (
-    <div className={`notice notice-${kind}`} role={ROLE[kind]}>
-      <div className="notice-body">
-        {title ? <span className="notice-title">{title}</span> : null}
+    <div
+      className={cx(
+        AIC,
+        'flex items-start gap-2.5 rounded-xl border px-3 py-2.5 text-sm',
+        style.box,
+        className,
+      )}
+      role={ROLE[kind]}
+    >
+      <Icon className="mt-0.5 h-4 w-4 shrink-0 opacity-80" aria-hidden />
+      <div className="min-w-0 flex-1 leading-snug">
+        {title ? <span className="mr-1.5 font-semibold">{title}</span> : null}
         {children}
       </div>
-      {actions ? <div className="notice-actions">{actions}</div> : null}
+      {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
     </div>
   )
 }

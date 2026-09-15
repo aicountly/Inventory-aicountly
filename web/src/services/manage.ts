@@ -40,6 +40,31 @@ export async function fetchCompanyInfo(cmpId: number, signal?: AbortSignal): Pro
   return parseCompanyInfo(body)
 }
 
+/**
+ * The company logo as a data URL, or null.
+ *
+ * A data URL and not a remote one: the print iframe is a fresh document that
+ * may reach the print dialog before a network image has loaded, and a
+ * letterhead that is sometimes there is worse than one that never is. Any
+ * failure — no logo uploaded, Manage unreachable, an unreadable body — resolves
+ * to null, because a missing logo must never stop a document printing.
+ */
+export async function fetchCompanyLogo(cmpId: number, signal?: AbortSignal): Promise<string | null> {
+  try {
+    const blob = await api.blob('manage/company/logo', { scope: false, signal, query: { comp_id: cmpId } })
+    if (!blob.size || !blob.type.startsWith('image/')) return null
+
+    return await new Promise<string | null>((resolve) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : null)
+      reader.onerror = () => resolve(null)
+      reader.readAsDataURL(blob)
+    })
+  } catch {
+    return null
+  }
+}
+
 export async function fetchBranches(cmpId: number, signal?: AbortSignal): Promise<BranchOption[]> {
   const body = await api.get<unknown>('manage/branch/list', { scope: false, signal, query: { cmp_id: cmpId } })
   return parseBranchList(body)

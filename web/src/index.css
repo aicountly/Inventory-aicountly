@@ -29,8 +29,6 @@
   --header-h: 3.5rem;
 
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  line-height: 1.6;
-  color-scheme: light dark;
 }
 
 @media (prefers-color-scheme: dark) {

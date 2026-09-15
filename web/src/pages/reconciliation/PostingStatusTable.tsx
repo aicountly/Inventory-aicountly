@@ -18,6 +18,7 @@ const SYNC_TONE: Record<string, 'good' | 'warning' | 'critical' | 'neutral' | 'i
   CANCELLED_IN_BOOKS: 'warning',
   CANCELLED_BOTH: 'neutral',
   BOOKS_UNAVAILABLE: 'warning',
+  BOOKS_STATUS_UNKNOWN: 'warning',
 }
 
 export function syncTone(status: string) {

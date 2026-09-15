@@ -4,7 +4,12 @@ namespace App\Services;
 
 /**
  * Outbox pattern: integration events are written in the same transaction as the domain
- * change, then delivered by the dispatcher (spark inventory:outbox-dispatch) with retries.
+ * change, then delivered with retries.
+ *
+ * Delivery is on contact, not scheduled: this deployment has no cron, so every authenticated
+ * write for a company drains that company's due rows ({@see settleOnContact()}, called from
+ * App\Controllers\Api\BaseController::authorize()). The CLI sweep and the operator's Dispatch
+ * button remain as the unattended and manual paths over the same rows.
  */
 class OutboxService
 {
@@ -30,21 +35,63 @@ class OutboxService
     }
 
     /**
-     * Deliver due events. Returns counts.
+     * Deliver this company's due events on a request somebody is already waiting on.
+     *
+     * There is no cron in this deployment, so an enqueue nothing drains is a promise never kept:
+     * the row is durable and stays PENDING for ever. The moment left is the next action on the
+     * same company, which is how Books settles its own deferred work
+     * (InventoryRetryService::settleOnContact). Built to be invisible there: a handful of rows on
+     * the indexed due predicate (almost always none), the same back-off as the dispatcher so a row
+     * Books keeps refusing is not re-fired on every click, and it stops at the first undelivered
+     * row so a Books outage costs the user one timeout rather than $limit of them.
+     *
+     * Its own failure is never the caller's problem — they asked to post a document, not to
+     * deliver an older event; the row simply stays queued for the next contact.
      *
      * @return array{sent:int, failed:int, dead:int, skipped:int}
      */
-    public function dispatch(int $limit = 100, ?BooksApiClient $books = null): array
+    public function settleOnContact(int $cmpId, int $limit = 3, ?BooksApiClient $books = null): array
+    {
+        if ($cmpId <= 0) {
+            return ['sent' => 0, 'failed' => 0, 'dead' => 0, 'skipped' => 0];
+        }
+        try {
+            return $this->dispatch($limit, $books, $cmpId, true);
+        } catch (\Throwable $e) {
+            log_message('warning', 'On-contact outbox dispatch for company {cmp} stopped early: {msg}', ['cmp' => $cmpId, 'msg' => $e->getMessage()]);
+
+            return ['sent' => 0, 'failed' => 0, 'dead' => 0, 'skipped' => 0];
+        }
+    }
+
+    /**
+     * Deliver due events. Returns counts.
+     *
+     * $cmpId narrows the sweep to one company (the on-contact drain: only the company whose
+     * request is in flight); $stopOnFailure leaves the rest of the batch for later as soon as one
+     * row is not acknowledged, which is what keeps that drain off a user's clock during an outage.
+     *
+     * @return array{sent:int, failed:int, dead:int, skipped:int}
+     */
+    public function dispatch(int $limit = 100, ?BooksApiClient $books = null, ?int $cmpId = null, bool $stopOnFailure = false): array
     {
         $db = \Config\Database::connect();
         $books ??= new BooksApiClient();
-        $rows = $db->table('inv_integration_events')
+        $b = $db->table('inv_integration_events')
             ->whereIn('status', ['PENDING', 'FAILED'])
-            ->where('next_attempt_at <=', date('Y-m-d H:i:s'))
-            ->orderBy('event_id', 'ASC')->limit($limit)
-            ->get()->getResultArray();
+            ->where('next_attempt_at <=', date('Y-m-d H:i:s'));
+        if ($cmpId !== null) {
+            $b->where('cmp_id', $cmpId);
+        }
+        $q = $b->orderBy('event_id', 'ASC')->limit($limit)->get();
         $out = ['sent' => 0, 'failed' => 0, 'dead' => 0, 'skipped' => 0];
-        foreach ($rows as $row) {
+        // DBDebug is off in every deployed environment, so a failed read answers false rather than
+        // throwing, and this now runs on a request path: reading it bare would turn a transient
+        // database error into a fatal on somebody's document posting.
+        if ($q === false) {
+            return $out;
+        }
+        foreach ($q->getResultArray() as $row) {
             if (($row['target_app'] ?? 'books') !== 'books') {
                 $out['skipped']++;
                 continue;
@@ -79,6 +126,9 @@ class OutboxService
                 'next_attempt_at' => date('Y-m-d H:i:s', time() + $delay),
             ]);
             $dead ? $out['dead']++ : $out['failed']++;
+            if ($stopOnFailure) {
+                break;
+            }
         }
 
         return $out;

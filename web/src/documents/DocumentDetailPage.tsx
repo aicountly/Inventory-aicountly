@@ -199,6 +199,9 @@ export function DocumentDetailPage() {
   const badgeTone = statusTone(doc.status)
   const showBook = doc.lines.some((l) => l.book_qty !== null || l.physical_qty !== null)
   const showSerials = doc.lines.some((l) => l.serials.length > 0)
+  // The gap between what the goods were invoiced at and what the stock is carried at, on the screen
+  // a user actually opens rather than only in the reconciliation report.
+  const showLanded = doc.lines.some((l) => (Number(l.landed_cost_amount) || 0) !== 0)
   const valuationTotal = doc.lines.reduce((s, l) => s + (l.direction === 'in' ? 1 : l.direction === 'out' ? -1 : 0) * (Number(l.valuation_amount) || 0), 0)
   const dialogTitle = dialog ? { reverse: 'Reverse document', reject: 'Reject document', cancel: 'Cancel document', unpack: 'Unpack goods', lock: 'Lock packing list', unlock: 'Unlock packing list' }[dialog.kind] : ''
 
@@ -414,6 +417,7 @@ export function DocumentDetailPage() {
                 ) : null}
                 <th className="align-right">Rate</th>
                 <th className="align-right">Amount</th>
+                {showLanded ? <th className="align-right">Landed cost</th> : null}
                 <th className="align-right">Val. rate</th>
                 <th className="align-right">Val. amount</th>
                 <th>Method</th>
@@ -444,6 +448,7 @@ export function DocumentDetailPage() {
                   ) : null}
                   <td className="align-right">{l.source_transaction_rate !== null ? formatMoney(l.source_transaction_rate) : <span className="muted">—</span>}</td>
                   <td className="align-right">{l.source_transaction_amount !== null ? formatMoney(l.source_transaction_amount) : <span className="muted">—</span>}</td>
+                  {showLanded ? <td className="align-right">{(Number(l.landed_cost_amount) || 0) !== 0 ? formatMoney(l.landed_cost_amount) : <span className="muted">—</span>}</td> : null}
                   <td className="align-right">{l.valuation_rate !== null ? formatMoney(l.valuation_rate) : <span className="muted">—</span>}</td>
                   <td className="align-right">{l.valuation_amount !== null ? formatMoney(l.valuation_amount) : <span className="muted">—</span>}</td>
                   <td className="muted">{l.valuation_method_applied ?? '—'}</td>
@@ -454,7 +459,7 @@ export function DocumentDetailPage() {
             {doc.lines.some((l) => l.valuation_amount !== null) ? (
               <tfoot>
                 <tr>
-                  <td colSpan={showBook ? 12 : 10} className="align-right muted">
+                  <td colSpan={(showBook ? 12 : 10) + (showLanded ? 1 : 0)} className="align-right muted">
                     Net stock value change
                   </td>
                   <td className="align-right">

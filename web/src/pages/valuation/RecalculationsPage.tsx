@@ -16,7 +16,7 @@ import { useListParams } from '../../hooks/useListParams'
 import { useQuery } from '../../hooks/useQuery'
 import { P } from '../../services/access'
 import { ApiError } from '../../services/api'
-import { RECALC_STATUSES, valuationApi } from '../../services/valuationApi'
+import { RECALC_STATUS_FILTERS, valuationApi } from '../../services/valuationApi'
 import type { RecalcJob } from '../../services/valuationApi'
 import { useToast } from '../../ui/ToastContext'
 import { formatDate, formatDateTime, formatInt, formatMoney, todayIso } from '../../utils/format'
@@ -91,10 +91,9 @@ export function RecalculationsPage() {
       <RequirePermission permission={P.report('valuation')} what="recalculations">
         <div className="toolbar">
           <select className="select" value={state.filters.status ?? ''} onChange={(e) => params.setFilter('status', e.target.value)} aria-label="Status">
-            <option value="">All statuses</option>
-            {RECALC_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {s}
+            {RECALC_STATUS_FILTERS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
               </option>
             ))}
           </select>

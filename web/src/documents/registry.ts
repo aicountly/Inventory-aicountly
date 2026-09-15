@@ -101,14 +101,30 @@ export const NATIVE_DOCUMENT_TYPES: DocumentTypeSpec[] = [
   spec({ code: 'BATCH_ADJUSTMENT', label: 'Batch Adjustment', description: 'Correct batch allocations without changing value.', lineMode: 'by_line', formKind: 'lines', valuation: false, cogs: false, reason: true, movesStock: false }),
   spec({ code: 'SERIAL_ADJUSTMENT', label: 'Serial Adjustment', description: 'Correct serial numbers without changing value.', lineMode: 'by_line', formKind: 'lines', valuation: false, cogs: false, reason: true, movesStock: false }),
   spec({ code: 'REVALUATION', label: 'Stock Revaluation', description: 'Re-price the cost of stock on hand.', lineMode: 'status_only', formKind: 'revaluation', valuation: true, cogs: false, reason: true, valuationRate: true }),
-  spec({ code: 'LANDED_COST', label: 'Landed Cost Allocation', description: 'Allocate freight, duty and other landing costs to received stock.', lineMode: 'status_only', formKind: 'landed_cost', valuation: true, cogs: false, party: 'supplier', rate: true }),
+  // rate: false. The charges are not line rates — collecting them in the commercial
+  // source_transaction_* pair Books owns was the broken shape of this type before it was built, an
+  // amount that may never become a cost by falling through to valuation. A landed cost allocation
+  // carries no item lines at all: it names a posted receipt and the charges to spread over it.
+  spec({ code: 'LANDED_COST', label: 'Landed Cost Allocation', description: 'Allocate freight, duty and other landing costs to received stock.', lineMode: 'status_only', formKind: 'landed_cost', valuation: true, cogs: false, party: 'supplier', rate: false }),
   spec({ code: 'DELIVERY_CHALLAN', label: 'Delivery Challan / Dispatch', description: 'Dispatch goods to a customer ahead of the invoice.', lineMode: 'pending_only', formKind: 'delivery_challan', valuation: false, cogs: false, party: 'customer', stockEffects: [CHALLAN_ONLY, PHYSICAL], returnable: true }),
   spec({ code: 'INWARD_CHALLAN', label: 'Inward Challan / GRN', description: 'Receive goods from a supplier ahead of, or against, the purchase.', lineMode: 'pending_only', formKind: 'inward_challan', valuation: false, cogs: false, party: 'supplier', stockEffects: [CHALLAN_ONLY, SETTLE_DEFERRED, PHYSICAL] }),
   spec({ code: 'PACKING', label: 'Packing List', description: 'Pack goods for a consignee; packed stock is held until sold or unpacked.', lineMode: 'status_only', formKind: 'packing', valuation: false, cogs: false, party: 'consignee' }),
 ]
 
-/** Types with their own screens elsewhere (reservations) or created only by other products. */
-export const HIDDEN_FROM_NEW_MENU = new Set(['RESERVATION', 'RESERVATION_RELEASE'])
+/**
+ * Declared so an existing document and every register that lists one keep their label, but not
+ * available to create: the server refuses one (Config\DocumentTypeRegistry::UNIMPLEMENTED),
+ * because nothing happens when the type posts. Mirror of the server list, which is the truth.
+ *
+ * Empty, as the server's list now is. LANDED_COST was the only entry and is built on both sides:
+ * a receipt line carries the landed cost Books allocated to it, and a landed cost allocation
+ * spreads later-arriving charges over a posted receipt. The set stays for the next type declared
+ * ahead of its implementation.
+ */
+export const UNAVAILABLE_TYPES = new Set<string>([])
+
+/** Types with their own screens elsewhere (reservations), unavailable, or created only by other products. */
+export const HIDDEN_FROM_NEW_MENU = new Set(['RESERVATION', 'RESERVATION_RELEASE', ...UNAVAILABLE_TYPES])
 
 const BY_CODE = new Map(NATIVE_DOCUMENT_TYPES.map((s) => [s.code, s]))
 

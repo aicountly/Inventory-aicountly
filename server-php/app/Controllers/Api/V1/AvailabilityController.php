@@ -59,25 +59,23 @@ class AvailabilityController extends BaseController
         }
         $cmpId = (int) $a['ctx']['cmp_id'];
         $p = $this->listParams(100, 1000);
-        $db = \Config\Database::connect();
-        $b = $db->table('inv_stock_balances b')
-            ->select('b.*, i.item_name, i.item_sku, w.warehouse_name, bt.batch_no, (b.on_hand_qty - b.reserved_qty - b.packed_qty - b.quality_hold_qty - b.damaged_qty - b.blocked_qty) AS available_qty', false)
-            ->join('inv_items i', 'i.item_id = b.item_id', 'left')
-            ->join('inv_warehouses w', 'w.warehouse_id = b.warehouse_id', 'left')
-            ->join('inv_batches bt', 'bt.batch_id = b.batch_id', 'left')
-            ->where('b.cmp_id', $cmpId);
-        if ($wh = (int) $this->request->getGet('warehouse_id')) {
-            $b->where('b.warehouse_id', $wh);
-        }
-        if ($item = (int) $this->request->getGet('item_id')) {
-            $b->where('b.item_id', $item);
-        }
-        if ((int) $this->request->getGet('nonzero') === 1) {
-            $b->groupStart()->where('b.on_hand_qty !=', 0)->orWhere('b.reserved_qty !=', 0)->orWhere('b.packed_qty !=', 0)->orWhere('b.job_worker_qty !=', 0)->groupEnd();
-        }
-        $total = (clone $b)->countAllResults(false);
-        $rows = $b->orderBy('i.item_name', 'ASC')->orderBy('w.warehouse_name', 'ASC')->limit($p['limit'], $p['offset'])->get()->getResultArray();
+        $result = (new StockBalanceService())->listBalances(
+            $cmpId,
+            (int) $a['ctx']['bo_id'],
+            [
+                'warehouse_id' => (int) $this->request->getGet('warehouse_id') ?: null,
+                'item_id'      => (int) $this->request->getGet('item_id') ?: null,
+                'batch_id'     => (int) $this->request->getGet('batch_id') ?: null,
+                'nonzero'      => (int) $this->request->getGet('nonzero') === 1,
+                // The dashboard's negative-stock card drills straight in here.
+                'negative'     => (int) $this->request->getGet('negative') === 1,
+                'sort'         => $p['sort'],
+                'order'        => $p['order'],
+            ],
+            $p['limit'],
+            $p['offset'],
+        );
 
-        return $this->respondList($rows, $total, $p['limit'], $p['offset']);
+        return $this->respondList($result['rows'], $result['total'], $p['limit'], $p['offset']);
     }
 }

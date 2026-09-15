@@ -29,6 +29,16 @@ export interface ListParams {
   /** Sort by `key`; clicking the active key flips the order. */
   toggleSort: (key: string) => void
   setFilter: (key: string, value: string) => void
+  /**
+   * Several filters in ONE navigation.
+   *
+   * Necessary, not a convenience: react-router's `setSearchParams` reads the
+   * query string from the render closure and navigates immediately, so two
+   * `setFilter` calls in the same handler both start from the pre-update URL
+   * and the second silently drops the first. A date-range preset writes both
+   * ends of the period at once and has to go through here.
+   */
+  setFilters: (patch: Record<string, string>) => void
   reset: () => void
 }
 
@@ -87,6 +97,7 @@ export function useListParams(defaults: ListParamDefaults): ListParams {
   const setPage = useCallback((page: number) => update({ page: page > 1 ? page : null }, false), [update])
   const setLimit = useCallback((limit: number) => update({ limit: limit === defaultLimit ? null : limit }), [update, defaultLimit])
   const setFilter = useCallback((key: string, value: string) => update({ [key]: value }), [update])
+  const setFilters = useCallback((patch: Record<string, string>) => update({ ...patch }), [update])
   const toggleSort = useCallback(
     (key: string) => {
       const nextOrder: SortOrder = state.sort === key ? (state.order === 'asc' ? 'desc' : 'asc') : 'asc'
@@ -101,5 +112,5 @@ export function useListParams(defaults: ListParamDefaults): ListParams {
     [state],
   )
 
-  return { state, query, setQ, setPage, setLimit, toggleSort, setFilter, reset }
+  return { state, query, setQ, setPage, setLimit, toggleSort, setFilter, setFilters, reset }
 }

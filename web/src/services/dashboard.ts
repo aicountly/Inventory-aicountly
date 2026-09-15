@@ -37,8 +37,15 @@ export interface DashboardData {
     posted_by_type: Record<string, number>
   }
   stock: {
+    /** Balance rows below zero — item x warehouse x batch, what ?negative=1 lists. */
+    negative_stock_rows: number
+    /** Items still net-negative once a branch's warehouses offset each other. */
     negative_stock_items: number
-    negative_stock_warehouse_rows: number
+    /**
+     * Counted on the server's own default window, not the one the user picked.
+     * The dashboard's expiry figures come from the near-expiry report; read
+     * these only if you also send `near_expiry_days`.
+     */
     near_expiry_batches: number
     expired_batches: number
     near_expiry_days: number
@@ -55,7 +62,14 @@ export interface DashboardData {
   last_reconciliation: DashboardReconciliationRun | null
 }
 
-export async function fetchDashboard(nearExpiryDays: number, signal?: AbortSignal): Promise<DashboardData> {
-  const res = await api.get<ItemResponse<DashboardData>>('v1/dashboard', { signal, query: { near_expiry_days: nearExpiryDays } })
+/**
+ * No `near_expiry_days`: the two counters it would tune are not on the screen —
+ * the expiry window the user picks drives the near-expiry report, which is its
+ * own request. Sending it here would tie the whole payload (masters, documents,
+ * outbox, inbound, revisions, reconciliation and two negative-stock scans) to a
+ * control that changes nothing in it.
+ */
+export async function fetchDashboard(signal?: AbortSignal): Promise<DashboardData> {
+  const res = await api.get<ItemResponse<DashboardData>>('v1/dashboard', { signal })
   return res.data
 }

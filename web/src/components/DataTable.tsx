@@ -1,15 +1,18 @@
 import type { ReactNode } from 'react'
 import type { SortOrder } from '../services/api'
-import { errorMessage } from '../services/api'
+import { EmptyState } from '../ui/EmptyState'
+import { SmartTable } from '../ui/shell/SmartTable'
+import type { SmartColumn } from '../ui/shell/SmartTable'
 
 export interface Column<T> {
   key: string
   header: ReactNode
   /** Sort parameter sent to the API; omit for unsortable columns. */
   sortKey?: string
-  render?: (row: T) => ReactNode
+  /** `index` is the row's position on the current page. */
+  render?: (row: T, index: number) => ReactNode
   align?: 'left' | 'right' | 'center'
-  width?: string
+  width?: string | number
   className?: string
 }
 
@@ -28,80 +31,96 @@ interface DataTableProps<T> {
   rowClassName?: (row: T) => string | undefined
   /** Rows rendered inside <tfoot> (totals). */
   footer?: ReactNode
+  /** Opt in to the register layout: sticky header, scrolling body. */
+  stickyHeader?: boolean
+  scrollBody?: boolean
+  fillAvailable?: boolean
 }
 
-function cellValue<T>(row: T, key: string): ReactNode {
-  const v = (row as Record<string, unknown>)[key]
-  if (v === null || v === undefined || v === '') return <span className="muted">—</span>
-  if (typeof v === 'object') return JSON.stringify(v)
-  return String(v)
-}
+/**
+ * The original Inventory list table, re-expressed on top of SmartTable.
+ *
+ * Its props are unchanged on purpose: 22 screens render one of these, and they
+ * all pick up the Books table — sticky-capable header, skeleton loading, real
+ * empty and error states, keyboard row navigation — without an edit. Sorting,
+ * row actions and the `<tfoot>` slot behave exactly as before.
+ *
+ * New screens should use SmartTable directly; this stays until the last
+ * caller is converted.
+ */
+export function DataTable<T>({
+  columns,
+  rows,
+  rowKey,
+  loading,
+  error,
+  emptyMessage = 'Nothing here yet.',
+  sort,
+  onSort,
+  onRowClick,
+  rowActions,
+  rowClassName,
+  footer,
+  stickyHeader,
+  scrollBody,
+  fillAvailable,
+}: DataTableProps<T>) {
+  const smartColumns: SmartColumn<T>[] = columns.map((c) => ({
+    key: c.key,
+    header: c.header,
+    sortKey: c.sortKey,
+    align: c.align,
+    width: c.width,
+    cellClassName: c.className,
+    headerClassName: c.className,
+    render: c.render ? (row, index) => c.render?.(row, index) : undefined,
+  }))
 
-export function DataTable<T>({ columns, rows, rowKey, loading, error, emptyMessage = 'Nothing here yet.', sort, onSort, onRowClick, rowActions, rowClassName, footer }: DataTableProps<T>) {
-  const colCount = columns.length + (rowActions ? 1 : 0)
-  const showState = rows.length === 0
+  if (rowActions) {
+    smartColumns.push({
+      key: '__actions',
+      header: '',
+      align: 'right',
+      headerClassName: 'print:hidden',
+      cellClassName: 'print:hidden',
+      render: (row) => (
+        // Row actions must not also trigger the row's own click handler.
+        <div
+          className="flex items-center justify-end gap-1.5"
+          onClick={(e) => e.stopPropagation()}
+          role="presentation"
+        >
+          {rowActions(row)}
+        </div>
+      ),
+    })
+  }
 
   return (
-    <div className="table-wrap">
-      <table className={`table${loading && rows.length > 0 ? ' dimmed' : ''}`} aria-busy={loading || undefined}>
-        <thead>
-          <tr>
-            {columns.map((c) => {
-              const alignClass = c.align ? ` align-${c.align}` : ''
-              const sortable = !!c.sortKey && !!onSort
-              const active = sortable && sort?.key === c.sortKey
-              return (
-                <th key={c.key} className={`${alignClass}${c.className ? ` ${c.className}` : ''}`} style={c.width ? { width: c.width } : undefined} aria-sort={active ? (sort?.order === 'desc' ? 'descending' : 'ascending') : undefined}>
-                  {sortable ? (
-                    <button type="button" className={`th-sort${active ? ' active' : ''}`} onClick={() => onSort?.(c.sortKey as string)}>
-                      {c.header}
-                      <span className="arrow" aria-hidden>
-                        {active ? (sort?.order === 'desc' ? '▼' : '▲') : '▲'}
-                      </span>
-                    </button>
-                  ) : (
-                    c.header
-                  )}
-                </th>
-              )
-            })}
-            {rowActions ? <th className="align-right" aria-label="Actions" /> : null}
-          </tr>
-        </thead>
-        <tbody>
-          {showState ? (
-            <tr>
-              <td colSpan={colCount} className="table-state">
-                {error ? <span style={{ color: 'var(--danger)' }}>{errorMessage(error)}</span> : loading ? 'Loading…' : emptyMessage}
-              </td>
-            </tr>
-          ) : (
-            rows.map((row) => {
-              const extra = rowClassName?.(row)
-              const clickable = !!onRowClick
-              return (
-                <tr
-                  key={rowKey(row)}
-                  className={`${clickable ? 'clickable' : ''}${extra ? ` ${extra}` : ''}` || undefined}
-                  onClick={clickable ? () => onRowClick?.(row) : undefined}
-                >
-                  {columns.map((c) => (
-                    <td key={c.key} className={`${c.align ? `align-${c.align}` : ''}${c.className ? ` ${c.className}` : ''}` || undefined}>
-                      {c.render ? c.render(row) : cellValue(row, c.key)}
-                    </td>
-                  ))}
-                  {rowActions ? (
-                    <td className="align-right" onClick={(e) => e.stopPropagation()}>
-                      <div className="row-actions">{rowActions(row)}</div>
-                    </td>
-                  ) : null}
-                </tr>
-              )
-            })
-          )}
-        </tbody>
-        {footer && !showState ? <tfoot>{footer}</tfoot> : null}
-      </table>
-    </div>
+    <SmartTable<T>
+      columns={smartColumns}
+      rows={rows}
+      rowKey={(row) => rowKey(row)}
+      loading={loading}
+      error={error ?? null}
+      empty={
+        typeof emptyMessage === 'string' ? (
+          <EmptyState size="sm" title={emptyMessage} />
+        ) : (
+          emptyMessage
+        )
+      }
+      sort={sort}
+      onSort={onSort}
+      onRowClick={onRowClick ? (row) => onRowClick(row) : undefined}
+      // These screens have always opened a record on a single click.
+      activateOnSingleClick
+      rowClassName={(row) => rowClassName?.(row)}
+      tfoot={footer}
+      stickyHeader={stickyHeader}
+      scrollBody={scrollBody}
+      fillAvailable={fillAvailable}
+      minWidth={520}
+    />
   )
 }

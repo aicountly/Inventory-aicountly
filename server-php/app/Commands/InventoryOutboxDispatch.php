@@ -10,7 +10,12 @@ use CodeIgniter\CLI\CLI;
  * php spark inventory:outbox-dispatch [--limit=N]
  *
  * Delivers due integration events (inv_integration_events PENDING / FAILED whose retry time has
- * passed) to Books through OutboxService::dispatch(). Meant to run every minute from cron.
+ * passed) to Books through OutboxService::dispatch().
+ *
+ * There is no cron in this deployment, so this is a sweep an operator runs, not the delivery
+ * mechanism: ordinary delivery happens on contact, on the next authenticated write for the
+ * company ({@see OutboxService::settleOnContact()}). Useful for a company nobody is touching, or
+ * to drain every company at once after a Books outage.
  */
 class InventoryOutboxDispatch extends BaseCommand
 {

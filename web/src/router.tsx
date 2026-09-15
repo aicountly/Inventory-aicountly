@@ -1,5 +1,5 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
-import { AppLayout } from './layout/AppLayout'
+import { AppShell } from './layout/AppShell'
 import Dashboard from './pages/Dashboard'
 import { renderDocumentRoutes } from './documents/routes'
 import NotFound from './pages/NotFound'
@@ -18,6 +18,9 @@ import { PostingStatusPage } from './pages/reconciliation/PostingStatusPage'
 import { ReconciliationLayout } from './pages/reconciliation/ReconciliationLayout'
 import { ReconciliationRunPage } from './pages/reconciliation/ReconciliationRunPage'
 import { ReconciliationRunsPage } from './pages/reconciliation/ReconciliationRunsPage'
+import { LegacyRedirect } from './registers/LegacyRedirect'
+import { RegisterRoutePage } from './registers/RegisterRoutePage'
+import { RegistersHubPage } from './registers/RegistersHubPage'
 import { ReportRoutePage } from './pages/reports/ReportRoutePage'
 import { ReportsIndexPage } from './pages/reports/ReportsIndexPage'
 import { AccessPage } from './pages/settings/AccessPage'
@@ -25,15 +28,10 @@ import { CompanySettingsPage } from './pages/settings/CompanySettingsPage'
 import { DocumentTypesPage } from './pages/settings/DocumentTypesPage'
 import { PeriodLocksPage } from './pages/settings/PeriodLocksPage'
 import { SettingsLayout } from './pages/settings/SettingsLayout'
-import { StockBalancesPage } from './pages/stock/StockBalancesPage'
-import { StockLayout } from './pages/stock/StockLayout'
-import { StockLedgerPage } from './pages/stock/StockLedgerPage'
-import { StockMovementsPage } from './pages/stock/StockMovementsPage'
 import { CostLayersPage } from './pages/valuation/CostLayersPage'
 import { RecalculationsPage } from './pages/valuation/RecalculationsPage'
 import { RevisionsPage } from './pages/valuation/RevisionsPage'
 import { ValuationLayout } from './pages/valuation/ValuationLayout'
-import { ValuationSnapshotPage } from './pages/valuation/ValuationSnapshotPage'
 
 /**
  * Authenticated route table. The portal callback (`/auth/callback`) is consumed
@@ -42,7 +40,7 @@ import { ValuationSnapshotPage } from './pages/valuation/ValuationSnapshotPage'
 export function AppRoutes() {
   return (
     <Routes>
-      <Route element={<AppLayout />}>
+      <Route element={<AppShell />}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="auth/callback" element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
@@ -69,19 +67,24 @@ export function AppRoutes() {
         </Route>
 
         {renderDocumentRoutes()}
-        <Route path="stock" element={<StockLayout />}>
-          <Route index element={<StockBalancesPage />} />
-          <Route path="ledger" element={<StockLedgerPage />} />
-          <Route path="movements" element={<StockMovementsPage />} />
-        </Route>
+        {/* Stock balances, the ledger and the movement list are registers now.
+            One screen, one door: the old paths redirect rather than render a
+            second copy in a second visual language. */}
+        <Route path="stock" element={<LegacyRedirect to="/registers/stock-balances" />} />
+        <Route path="stock/ledger" element={<LegacyRedirect to="/registers/stock-ledger" />} />
+        <Route path="stock/movements" element={<LegacyRedirect to="/registers/movement-register" />} />
         <Route path="valuation" element={<ValuationLayout />}>
-          <Route index element={<ValuationSnapshotPage />} />
+          <Route index element={<LegacyRedirect to="/registers/valuation" />} />
           <Route path="cost-layers" element={<CostLayersPage />} />
           <Route path="recalculations" element={<RecalculationsPage />} />
           <Route path="revisions" element={<RevisionsPage />} />
         </Route>
         <Route path="reports" element={<ReportsIndexPage />} />
         <Route path="reports/:path" element={<ReportRoutePage />} />
+        {/* Registers share the engine with reports; the /reports/* URLs stay
+            valid so existing links and bookmarks keep resolving. */}
+        <Route path="registers" element={<RegistersHubPage />} />
+        <Route path="registers/:path" element={<RegisterRoutePage />} />
         <Route path="reconciliation" element={<ReconciliationLayout />}>
           <Route index element={<ReconciliationRunsPage />} />
           <Route path="posting-status" element={<PostingStatusPage />} />

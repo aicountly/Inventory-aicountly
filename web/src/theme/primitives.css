@@ -1,0 +1,191 @@
+/**
+ * Bespoke classes used by the ported UI primitives.
+ *
+ * Plain CSS, deliberately outside `@layer`: Tailwind's purge only keeps
+ * `@layer` rules whose class name it finds in the content globs, and a class
+ * that reaches the DOM through a class-name joiner is easy to lose that way —
+ * silently, and only in the production build. These are a handful of rules;
+ * shipping them unconditionally is cheaper than debugging that.
+ *
+ * Imported after theme/tokens.css (see main.tsx), and every value is expressed
+ * in the semantic tokens declared there, so they follow the theme and the
+ * light / dark toggle without a second definition.
+ */
+
+/* --- Scrollbars -----------------------------------------------------------
+   Scroll-body tables and the sidebar rail. A default 15px chrome bar eats a
+   whole column of a compact register. */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--color-border-strong)) transparent;
+}
+.scrollbar-thin::-webkit-scrollbar {
+  width: 0.5rem;
+  height: 0.5rem;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: rgb(var(--color-border-strong));
+  border-radius: 9999px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(var(--color-fg-subtle));
+}
+
+/* --- Skeletons ------------------------------------------------------------
+   A shimmer reads as "loading" far more clearly than a pulsing grey box. */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background-color: rgb(var(--color-surface-2));
+}
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background-image: linear-gradient(
+    90deg,
+    rgb(var(--color-surface-2) / 0) 0%,
+    rgb(var(--color-surface-3) / 0.9) 50%,
+    rgb(var(--color-surface-2) / 0) 100%
+  );
+  animation: skeleton-shimmer 1.6s ease-in-out infinite;
+}
+@keyframes skeleton-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* --- Entrances ------------------------------------------------------------
+   Toasts, popovers, flyouts and drawers. Short and eased: chrome that takes
+   its time to appear reads as lag, not polish. */
+.animate-slide-in-right {
+  animation: slide-in-right 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(0.75rem);
+  }
+}
+.animate-fade-in {
+  animation: fade-in 140ms ease-out;
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+.animate-rise-in {
+  animation: rise-in 160ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.375rem) scale(0.99);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton::after,
+  .animate-slide-in-right,
+  .animate-fade-in,
+  .animate-rise-in {
+    animation: none;
+  }
+}
+
+/* --- Notices --------------------------------------------------------------
+   A tinted banner cannot use the grey text utilities: theme/dark-overrides.css
+   remaps those to a light foreground, which would leave light text on a pale
+   tint. These carry both modes explicitly, so an error banner is legible in
+   either. Prefixed `aic-` to stay clear of the legacy `.notice` rules in
+   components/ui.css while both exist. */
+.aic-notice-error {
+  background-color: rgb(254 242 242);
+  border-color: rgb(254 202 202);
+  color: rgb(127 29 29);
+}
+.aic-notice-warning {
+  background-color: rgb(255 251 235);
+  border-color: rgb(253 230 138);
+  color: rgb(120 53 15);
+}
+.aic-notice-success {
+  background-color: rgb(236 253 245);
+  border-color: rgb(167 243 208);
+  color: rgb(6 78 59);
+}
+.aic-notice-info {
+  background-color: rgb(240 249 255);
+  border-color: rgb(186 230 253);
+  color: rgb(12 74 110);
+}
+
+.dark .aic-notice-error {
+  background-color: rgb(127 29 29 / 0.2);
+  border-color: rgb(153 27 27 / 0.5);
+  color: rgb(254 202 202);
+}
+.dark .aic-notice-warning {
+  background-color: rgb(120 53 15 / 0.2);
+  border-color: rgb(146 64 14 / 0.5);
+  color: rgb(253 230 138);
+}
+.dark .aic-notice-success {
+  background-color: rgb(6 78 59 / 0.22);
+  border-color: rgb(6 95 70 / 0.5);
+  color: rgb(167 243 208);
+}
+.dark .aic-notice-info {
+  background-color: rgb(12 74 110 / 0.22);
+  border-color: rgb(3 105 161 / 0.5);
+  color: rgb(186 230 253);
+}
+
+/* --- Sub-navigation --------------------------------------------------------
+   `.sub-nav` used to live in layout/layout.css, which the new shell replaced.
+   Two screens (masters/MasterPage.tsx, pages/masters/MastersLayout.tsx) still
+   render the class, so it is kept here — restyled to match ui/shell's
+   RouteTabBar, so a screen looks the same whether it uses the class or the
+   component. Delete both blocks together when those screens are converted. */
+.sub-nav {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.125rem;
+  padding: 0.125rem;
+  border-radius: 0.5rem;
+  background-color: rgb(var(--color-surface-2));
+}
+
+.sub-nav-link {
+  padding: 0.25rem 0.625rem;
+  border-radius: 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+  text-decoration: none;
+  color: rgb(var(--color-fg-muted));
+  transition: color 120ms ease, background-color 120ms ease;
+}
+
+.sub-nav-link:hover {
+  color: rgb(var(--color-fg-strong));
+}
+
+.sub-nav-link.active {
+  color: rgb(var(--color-primary));
+  background-color: rgb(var(--color-surface));
+  box-shadow: var(--shadow-card);
+}
+
+@media print {
+  .sub-nav {
+    display: none;
+  }
+}

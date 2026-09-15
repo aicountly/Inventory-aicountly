@@ -21,7 +21,14 @@ Idempotency: `Idempotency-Key` header on `POST …/post`, `/{id}/reverse`, `/{id
 
 ## Masters
 `GET/POST /v1/items`, `GET/PUT/DELETE /v1/items/{id}`, `GET /v1/items/form-options`, `GET /v1/items/search?q=`, `GET /v1/items/by-barcode/{code}`, `POST /v1/items/bulk-lookup {ids|barcodes}`, `POST /v1/items/bulk-delete`, `GET /v1/items/{id}/stock`, `GET|PUT /v1/items/{id}/openings` (rows `{fy_id, warehouse_id, unit_id, opening_qty, opening_valuation_rate}`; `fy_id 0` = inception).
-Item fields: `item_name, item_alias, print_name, item_sku, item_upc, hsn_sac, mrp, unit_id (base), item_grp_id, stock_cat_id, brand_id, valuation_method (FIFO|LIFO|WAC|null=company default), track_batch, track_serial, track_expiry, shelf_life_days, reorder_point, min_stock, max_stock, lead_time_days, books_sales_acc_id, books_purchase_acc_id, books_tax_cat_id, is_active, uoms:[{unit_id, is_default, conversion_factor (base units per 1 of this unit), mc_qty_wise}]`.
+Item fields: `item_name, item_alias, print_name, item_sku, item_upc, hsn_sac, mrp, unit_id (base), item_grp_id, stock_cat_id, brand_id, valuation_method (FIFO|LIFO|WAC|null=company default), track_batch, track_serial, track_expiry, shelf_life_days, reorder_point, min_stock, max_stock, lead_time_days, books_sales_acc_id, books_purchase_acc_id, books_tax_cat_id, itc_eligibility, is_active, uoms:[{unit_id, is_default, conversion_factor (base units per 1 of this unit), mc_qty_wise}]`.
+
+#### `itc_eligibility` — an attribute of the goods
+`inherit | claim | block`, default `inherit`. Returned by `GET /v1/items`, `GET /v1/items/{id}`, `GET /v1/items/search`, `POST /v1/items/bulk-lookup` and the `inventory.item.upserted` outbox event; settable on `POST`/`PUT /v1/items`, and offered as `itc_eligibility_options` on `GET /v1/items/form-options`. A value outside the three is `422` — it is **not** coerced, because a near-miss silently becoming `inherit` would leave a caller believing the item blocks a credit that is still being claimed.
+
+**What it is.** A fact about the goods — this thing is a motor vehicle, this thing is a food and beverage — which is why it lives on the item master and travels with the item rather than being retyped on every voucher. `claim` marks an item whose input tax is ordinarily recoverable; `block` marks one whose input tax ordinarily is not; `inherit` means the item says nothing.
+
+**What it is not.** Inventory makes **no tax determination** from it. It computes no tax consequence, applies no precedence against a tax category / purchase ledger / voucher line, and has no "default claimable" fallback. It stores the attribute and reports it. The reading product — Books — resolves it against its own tax category (where the same attribute exists at category level), the purchase ledger and the voucher line, and books the result. One implementation of that precedence, in the product that files the return: two would be two answers to the same question. Nothing in Inventory reads this column to decide anything, and no valuation, movement or landed cost depends on it.
 Same CRUD shape for `/v1/item-groups`, `/v1/stock-categories`, `/v1/brands`, `/v1/uom`, `/v1/warehouse-groups`, `/v1/warehouses`, `/v1/locations`, `/v1/bill-of-materials` (header + `lines[{item_id, qty, unit_id, line_kind component|by_product|scrap, scrap_percent}]`), `/v1/batches`, `/v1/serials` (+ `POST /v1/serials/bulk`). Deletes are soft and refused (409 `delete_blocked`) while documents reference the row.
 `POST /v1/bill-of-materials/{id}/explode {production_qty, warehouse_id?, finished_rate?, document_date?, narration?}` → the ready-to-create PRODUCTION payload (component OUT lines scaled by `production_qty / yield_qty` plus scrap %, by-product IN lines, finished IN line at `finished_rate`, `metadata{bom_id, production_qty, finished_rate, warehouse_id}`). Nothing is saved.
 
@@ -31,7 +38,7 @@ Same CRUD shape for `/v1/item-groups`, `/v1/stock-categories`, `/v1/brands`, `/v
 `GET /v1/stock-balances` → item × warehouse × batch grid.
 
 ## Inventory documents
-Types (`GET /v1/document-types`): `OPENING_STOCK, STOCK_TRANSFER, STOCK_JOURNAL, PHYSICAL_ADJUSTMENT, WRITE_OFF, WRITE_IN, CONSUMPTION, MATERIAL_ISSUE, MATERIAL_RECEIPT, PRODUCTION, ASSEMBLY, DISASSEMBLY, JOB_WORK_OUT, JOB_WORK_IN, DELIVERY_CHALLAN, INWARD_CHALLAN, PACKING, REVALUATION, LANDED_COST, RESERVATION, RESERVATION_RELEASE, SALES_ISSUE, PURCHASE_RECEIPT, SALES_RETURN, PURCHASE_RETURN, JOURNAL_ADJUSTMENT`.
+Types (`GET /v1/document-types`): `OPENING_STOCK, STOCK_TRANSFER, STOCK_JOURNAL, PHYSICAL_ADJUSTMENT, WRITE_OFF, WRITE_IN, CONSUMPTION, MATERIAL_ISSUE, MATERIAL_RECEIPT, PRODUCTION, ASSEMBLY, DISASSEMBLY, JOB_WORK_OUT, JOB_WORK_IN, BATCH_ADJUSTMENT, SERIAL_ADJUSTMENT, DELIVERY_CHALLAN, INWARD_CHALLAN, PACKING, REVALUATION, LANDED_COST, RESERVATION, RESERVATION_RELEASE, SALES_ISSUE, PURCHASE_RECEIPT, SALES_RETURN, PURCHASE_RETURN, JOURNAL_ADJUSTMENT`.
 Statuses: `DRAFT → PENDING_APPROVAL → APPROVED → POSTING → POSTED → PARTIALLY_FULFILLED → COMPLETED`, plus `CANCELLED`, `REVERSED`, `FAILED`. Posted movements are never deleted: a reversal writes compensating movements.
 
 ```
@@ -47,8 +54,83 @@ POST /v1/inventory-documents/{id}/reverse   {reason, reversal_date?}
 POST /v1/inventory-documents/{id}/revise    reverse + re-create + post in one transaction (body = create payload)
 GET  /v1/inventory-documents/{id}/print-snapshot
 ```
-Create payload: `document_type, document_date, document_no?, series_id?, party_ref?, party_name?, from_warehouse_id?, to_warehouse_id?, stock_effect? (on_invoice|from_challan|defer_inward|challan_only|settle_deferred|from_packing), source_app, source_document_type, source_document_id, source_document_uuid, source_document_no, source_document_date, narration, currency_code, exchange_rate, negative_override?, fy_range?, metadata{challan_settlements:[{source_document_id, item_id, qty, warehouse_id}], linked_source_document_id, job_work_settlements:[{pending_id, qty, settlement_type consumed|returned}], bom_id, production_qty, finished_rate, …}, lines:[{source_line_ref, item_id, warehouse_id, unit_id, qty, rate, amount, direction in|out (or dr_cr 1|2 for by-line types), batch_id, serials[], book_qty, physical_qty, tax_cat_id, hsn_sac, description, fc_rate, fc_amount, exchange_rate, valuation_rate?}]`.
-Response line fields added by posting: `base_qty, conversion_factor, valuation_rate (per base unit), valuation_amount, valuation_method_applied`. `accounting_effects`: `[{effect: COGS_ISSUE, line_id, item_id, amount, base_qty, valuation_rate}, {effect: STOCK_ADJUSTMENT|STOCK_WRITE_OFF|STOCK_WRITE_IN|OPENING_STOCK|STOCK_REVALUATION|LANDED_COST, amount}]` — Inventory never posts to a ledger; the caller maps effects to accounts.
+Create payload: `document_type, document_date, document_no?, series_id?, party_ref?, party_name?, from_warehouse_id?, to_warehouse_id?, stock_effect? (on_invoice|from_challan|defer_inward|challan_only|settle_deferred|from_packing), source_app, source_document_type, source_document_id, source_document_uuid, source_document_no, source_document_date, narration, currency_code, exchange_rate, negative_override?, fy_range?, metadata{challan_settlements:[{source_document_id, item_id, qty, warehouse_id}], linked_source_document_id, job_work_settlements:[{pending_id, qty, settlement_type consumed|returned}], bom_id, production_qty, finished_rate, …}, lines:[{source_line_ref, item_id, warehouse_id, unit_id, qty, rate, amount, direction in|out (or dr_cr 1|2 for by-line types), batch_id, serials[], book_qty, physical_qty, tax_cat_id, hsn_sac, description, fc_rate, fc_amount, exchange_rate, valuation_rate?, landed_cost_amount?, landed_cost_breakdown?}]` (see **Landed cost** below).
+Response line fields added by posting: `base_qty, conversion_factor, valuation_rate (per base unit), valuation_amount, valuation_method_applied, landed_cost_amount`. `accounting_effects`: `[{effect: COGS_ISSUE, line_id, item_id, amount, base_qty, valuation_rate}, {effect: STOCK_ADJUSTMENT|STOCK_WRITE_OFF|STOCK_WRITE_IN|OPENING_STOCK|STOCK_REVALUATION, amount}]` — Inventory never posts to a ledger; the caller maps effects to accounts. The `inventory.document.posted` outbox payload carries the same line fields, `landed_cost_amount` included.
+
+### Landed cost
+Charges that are part of what received stock cost — freight, duty, insurance, handling, a non-creditable tax. **Books captures and allocates them** (a freight bill is a payable it books on its own side); **Inventory consumes the per-line amount** as part of the cost of the goods. A landed cost is a COST: it never touches `source_transaction_rate` / `source_transaction_amount` and never changes an invoice value, a taxable value or any GST figure.
+
+*Arriving WITH the receipt* — two optional fields on any create-payload line:
+```
+"landed_cost_amount": 1234.5600,
+"landed_cost_breakdown": [
+  {"cost_type": "freight",            "amount": 800.0000, "allocation_basis": "value"},
+  {"cost_type": "duty",               "amount": 200.0000, "allocation_basis": "qty"},
+  {"cost_type": "insurance",          "amount": 100.0000, "allocation_basis": "value"},
+  {"cost_type": "non_creditable_tax", "amount": 134.5600, "allocation_basis": "direct"}
+]
+```
+`cost_type`: `freight | duty | insurance | handling | other | non_creditable_tax`.
+`allocation_basis`: `value` (pro-rata by line value, the default) `| qty` (pro-rata by base quantity) `| manual` (amounts typed per line) `| direct` (the charge belongs to exactly one line by nature — a non-creditable tax). **Weight is not offered**: there is no item weight master to allocate by, so the basis would be a control that silently fell back to another one.
+
+#### The company's capitalisation policy
+Which of these charges is part of the cost of inventory — freight, insurance, customs, a tax that cannot be claimed — is an **accounting policy of the company that holds the stock**, not a per-voucher decision and not the billing product's to make. Some companies capitalise inward freight; some expense it. The policy lives here, in Inventory settings, as one setting per company.
+
+```
+GET  /v1/settings/landed-cost-policy      → what this company capitalises (permission inventory.enter)
+PUT  /v1/settings  {"landed_cost_excluded_types": ["freight", "other"]}   (permission settings.write)
+```
+`GET /v1/settings/landed-cost-policy` returns
+```
+{"data": {
+  "capitalisable_cost_types":      ["duty", "insurance", "handling", "non_creditable_tax"],
+  "excluded_cost_types":           ["freight", "other"],
+  "switchable_cost_types":         ["freight", "duty", "insurance", "handling", "other"],
+  "always_capitalised_cost_types": ["non_creditable_tax"],
+  "all_cost_types":                ["freight", "duty", "insurance", "handling", "other", "non_creditable_tax"]}}
+```
+The same resolved block is returned as `landed_cost_policy` on `GET|PUT /v1/settings`, beside the raw `landed_cost_excluded_types` column it is derived from.
+
+**Default: every type is capitalisable.** The EXCLUDED set is what is stored, so `null` and `''` both mean "nothing excluded". No company changes behaviour when the setting ships, nothing already posted restates, and a cost type added to the vocabulary later arrives switched **on** rather than silently off for every existing company. `PUT` normalises what it stores (lower-cased, de-duplicated, in vocabulary order) and refuses a word outside the vocabulary with a `422`.
+
+**`non_creditable_tax` is not switchable** and `PUT` refuses it with a `422` naming the reason. Under AS-2 the cost of purchase includes taxes that are *not* recoverable from the taxing authority, so a tax that cannot be claimed is part of what the goods cost — not an expense a company may elect to keep out of stock. A switch would create a third state in which those rupees are neither a recoverable input credit nor a cost of the goods, and they would disappear from both. The real choice about that money is made **upstream, in Books**, when the input tax credit is declared claimable or not: money that is claimable never arrives here as a landed cost at all.
+
+**A caller should OFFER only the capitalisable types** (Books' purchase screen and Inventory's own landed-cost panel both do). That offer is a courtesy, **not** the control — a screen can be cached, stale, or skipped entirely by a direct API call — so Inventory enforces the policy itself, at both intake points:
+
+* the **breakdown on a receipt line**, at `POST`/`PUT /v1/inventory-documents` and again at posting from the stored rows;
+* the **charges of a `LANDED_COST` document**, at create and again at posting from the stored `metadata.charges`.
+
+Each is a `422` naming the type and the policy: `{"error": {"code": "validation_failed", "message": "Line 2: this company does not capitalise freight into the cost of stock …", "details": {"cost_type": "freight", "capitalisable_cost_types": [...], "setting": "landed_cost_excluded_types"}}}`. **The line is refused; the amount is never accepted and dropped.** A cost quietly left out of stock value is a closing stock short by exactly that amount with nobody told, which is the failure this whole split of ownership exists to prevent. One excluded charge refuses the WHOLE allocation rather than allocating the others — allocating part of a bill and leaving the rest nowhere is the same silent drop.
+
+A `landed_cost_amount` with **no** `landed_cost_breakdown` is checked against `other`, because that is the type posting records it under. A company that has switched `other` off is told to send the breakdown rather than have an unnamed charge booked under the very type it excluded.
+
+Because a draft can outlive the policy it was saved under, a document created while a type was capitalisable is refused when it is next edited **or posted** — not posted quietly under the old policy. Documents already POSTED are untouched: the policy applies to what is entered from the moment it is set, and switching a type off never restates stock that has already been valued.
+
+Rules, all 422 with a message naming the reason — a landed cost is **never silently dropped**, because a dropped cost is a closing stock that is short by exactly that amount with nobody told:
+* accepted only on a line whose `direction` is `in`, on a document type whose registry entry has `valuation: true` (so an `INWARD_CHALLAN`, which values only the stock it moves, is refused — send those charges as a `LANDED_COST` document against the receipt that valued the goods);
+* accepted only on a document that actually **moves its stock when it posts**, which the `stock_effect` decides. A `defer_inward` `PURCHASE_RECEIPT` and a `from_physical_challan` `SALES_ISSUE` / `SALES_RETURN` / `PURCHASE_RETURN` all declare `valuation: true` and carry inward lines, but post without valuing anything — the goods arrive on a later challan, which costs them from the purchase's **rate** and never reads `landed_cost_amount`. The charge would be dropped and closing stock short by exactly it, so entry refuses it and posting refuses it again from the stored rows. Send those charges as a `LANDED_COST` document against the document that receives the goods, once it is posted;
+* `landed_cost_amount` must be `>= 0`;
+* when `landed_cost_breakdown` is present its amounts must sum to `landed_cost_amount` within `0.01`.
+
+Posting then values the line as `valuation_amount = (base cost of the goods) + landed_cost_amount`, `valuation_rate = valuation_amount / base_qty`, and the FIFO/LIFO layer and the weighted average are both opened at that rate. The allocation detail is stored in `inv_landed_costs` / `inv_landed_cost_lines` with `document_id = target_document_id =` the receipt. These rows are derived detail, not audit: reversing the receipt deletes them along with the valuation they describe, the same way re-posting an edited draft replaces them.
+
+*Arriving LATER* — a `LANDED_COST` document, which carries no item lines (a freight bill names no item and no quantity):
+```
+{"document_type": "LANDED_COST", "document_date": "2026-04-18", "metadata": {
+  "target_document_id": 41,
+  "charges": [
+    {"cost_type": "freight", "description": "Road freight", "amount": 400, "allocation_basis": "value"},
+    {"cost_type": "non_creditable_tax", "amount": 134.56, "allocation_basis": "direct",
+     "lines": [{"line_id": 918, "amount": 134.56}]}
+  ]}}
+```
+Posting spreads each charge over the target's valued inward lines, raises those lines and the cost state behind them, writes the allocation rows with `document_id =` the allocation and `target_document_id =` the receipt, and emits **`STOCK_REVALUATION`** for the amount actually absorbed. It refuses a target that is not posted, is in another company, carries no valuation on its lines, has no valued inward line, **or is dated inside a locked period** — the allocation rewrites the receipt's stored valuation and the layer the receipt opened, both of which sit in the *receipt's* period, so a charge dated after the lock may not reach back through it (a `REVALUATION` attempting the same change inside the lock is refused, and this type is not an exception to that). It also refuses `manual` / `direct` shares that do not sum to their charge within `0.01`, or a `direct` charge naming more than one line. `value` allocates by the line's current `valuation_amount`, which is the only basis Inventory can compute (Books allocates by taxable value; on an ordinary purchase they are the same number). Allocation shares are settled so they sum EXACTLY to the charge, with the residual on the largest line.
+
+**v1 limit, stated here and not only in a docblock: stock already ISSUED out of the target receipt is NOT retro-costed.** Only what is still on hand absorbs the charge; whatever is left comes back in the posting response's `warnings` as `landed_cost_not_absorbed` with `details.unabsorbed`, for the caller to expense.
+
+The receipt line is credited with **what was absorbed, never with what was allocated.** The unabsorbed remainder exists in the warning and nowhere else: it is not written onto `valuation_rate` / `valuation_amount` / `landed_cost_amount` as well, because the caller has been told to expense it and a replay would otherwise push the same rupees into COGS a second time, while `/v1/reconciliation` would report stock value that no cost layer backs. The invariant a reader may rely on is `line valuation_amount = (what has gone to COGS out of that line) + (what its cost layers still hold)`. The `inv_landed_costs` / `inv_landed_cost_lines` rows record what was **allocated** (they tie to the charge on the Books side); `inv_document_lines.landed_cost_amount` records what was **capitalised**. "Still on hand" means **of that receipt line**, not of the item: under FIFO/LIFO it is the line's own layer, and under WAC — which keeps no layers — it is `(quantity on hand) − (quantity received since)` bounded by the line's quantity, so the two methods capitalise the same rupees on the same facts.
+
+Two further consequences: a `LANDED_COST` document cannot be reversed (reversing it would report the cost taken back off stock while every layer it raised stayed raised — post a `REVALUATION` to correct a cost instead); and a later backdated recalculation covering the target's date re-prices from the stored line rate, which redistributes the absorbed amount between COGS and closing stock without changing their total. Stamping a landed cost with its own effective date is a v2 design. Rounding: the rate is `NUMERIC(18,4)`, so `valuation_amount` can differ from `(base cost + landed cost)` by up to `0.00005 x base_qty` — deriving the line, the movement, the layer and the average from one rounded rate is what makes closing stock tie.
 
 ## Pending quantities, packing, reservations
 `GET /v1/pending-quantities?kind=challan|deferred_purchase|job_work&direction&party_ref&status` (open/partial rows with `document_id`, `item_id`, `qty_original`, `qty_settled`).
@@ -65,7 +147,8 @@ Response line fields added by posting: `base_qty, conversion_factor, valuation_r
 `POST /v1/integration/events` (inbound from Books: `event_uuid, event_type, payload`), `GET /v1/integration/outbox`, `POST /v1/integration/outbox/{id}/replay`, `POST /v1/integration/outbox/dispatch`.
 Outbox events emitted: `inventory.document.posted`, `inventory.document.reversed`, `inventory.valuation.revised`, `inventory.item.upserted`, `inventory.uom.upserted`, `inventory.warehouse.upserted`, `inventory.fy.carried_forward`.
 `GET /v1/audit-log`, `GET /v1/audit-log/entity/{type}/{id}`.
-`GET|PUT /v1/settings` (`default_valuation_method, valuation_scope company|warehouse, negative_stock_policy allow|block|warn, approval_required, cogs_revision_mode`), `GET|POST|DELETE /v1/settings/period-locks`.
+`GET|PUT /v1/settings` (`default_valuation_method, valuation_scope company|warehouse, negative_stock_policy allow|block|warn, approval_required, cogs_revision_mode, landed_cost_excluded_types`), `GET|POST|DELETE /v1/settings/period-locks`.
+`GET /v1/settings/landed-cost-policy` (permission `inventory.enter`, the same one a caller creating a document already holds) → `{capitalisable_cost_types[], excluded_cost_types[], switchable_cost_types[], always_capitalised_cost_types[], all_cost_types[]}`, all lists of cost-type codes. See **Landed cost → capitalisation policy**.
 `GET /v1/access/me | check | permissions | profiles | members`, `POST /v1/access/profiles | members | members/provision`, `PUT …`, `DELETE …`.
 
 ## Compatibility rules for new products

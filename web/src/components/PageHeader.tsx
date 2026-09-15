@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { BreadcrumbHeader } from '../ui/shell/BreadcrumbHeader'
 
 export interface Crumb {
   label: string
@@ -13,21 +13,26 @@ interface PageHeaderProps {
   breadcrumbs?: Crumb[]
 }
 
+/**
+ * The original page header, re-expressed on the shared one. Same props, so
+ * every screen that renders it gains the breadcrumb bar and the Books type
+ * scale without an edit.
+ *
+ * Not Esc-to-back, though: this shim is already rendered by thirty screens,
+ * three of them data-entry forms, and none of them asked for a key that leaves
+ * the page. Esc is not held back while focus is on a checkbox, a button or
+ * nothing at all, so on a half-filled form it would discard the work with no
+ * warning. A screen opts in by rendering BreadcrumbHeader itself — and a form
+ * that does must pass `escDirty` while it holds unsaved edits.
+ */
 export function PageHeader({ title, subtitle, actions, breadcrumbs }: PageHeaderProps) {
   return (
-    <div className="page-header">
-      <div>
-        {breadcrumbs && breadcrumbs.length > 0 ? (
-          <ol className="breadcrumbs">
-            {breadcrumbs.map((c, i) => (
-              <li key={`${c.label}-${i}`}>{c.to ? <Link to={c.to}>{c.label}</Link> : c.label}</li>
-            ))}
-          </ol>
-        ) : null}
-        <h1 className="page-title">{title}</h1>
-        {subtitle ? <p className="page-subtitle">{subtitle}</p> : null}
-      </div>
-      {actions ? <div className="page-actions">{actions}</div> : null}
-    </div>
+    <BreadcrumbHeader
+      breadcrumbs={breadcrumbs}
+      title={title}
+      description={subtitle}
+      actions={actions}
+      escBack={false}
+    />
   )
 }
