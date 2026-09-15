@@ -181,8 +181,18 @@ class AccessController extends BaseController
         }
         $db = \Config\Database::connect();
         $now = date('Y-m-d H:i:s');
+        // Read the status ONCE. This used to be
+        //   in_array($body['status'] ?? 'active', [...], true) ? $body['status'] : 'active'
+        // where the condition coalesced and the true branch did not: a caller that omits status
+        // passes the check on the defaulted value and then reads a key that is not there. Under
+        // CI_ENVIRONMENT=production CodeIgniter promotes that warning to an exception, so every
+        // add-member from the UI — which never sends status — answered 500. Found in production.
+        $status = (string) ($body['status'] ?? 'active');
+        if (!in_array($status, ['active', 'invited', 'revoked'], true)) {
+            $status = 'active';
+        }
         $row = [
-            'profile_id' => $profileId, 'status' => in_array($body['status'] ?? 'active', ['active', 'invited', 'revoked'], true) ? $body['status'] : 'active',
+            'profile_id' => $profileId, 'status' => $status,
             'display_name' => $body['display_name'] ?? null, 'email' => $body['email'] ?? null,
             'allowed_warehouses_json' => isset($body['allowed_warehouses']) && is_array($body['allowed_warehouses']) && $body['allowed_warehouses'] !== [] ? json_encode(array_map('intval', $body['allowed_warehouses'])) : null,
             'updated_at' => $now,

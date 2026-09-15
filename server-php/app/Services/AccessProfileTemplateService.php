@@ -65,9 +65,7 @@ class AccessProfileTemplateService
         foreach (array_values(array_unique($permissionKeys)) as $key) {
             $rows[] = ['profile_id' => $profileId, 'permission_key' => $key, 'allowed' => 1];
         }
-        if ($rows !== []) {
-            $db->table('inv_access_profile_permissions')->insertBatch($rows);
-        }
+        $this->insertPermissionsIfAbsent($db, $profileId, array_column($rows, 'permission_key'));
     }
 
     public function syncMissingTemplatePermissions(int $profileId, string $templateKey): void
@@ -78,12 +76,45 @@ class AccessProfileTemplateService
             'permission_key'
         );
         $missing = array_diff(PermissionRegistry::templatePermissions($templateKey), $have);
-        $rows = [];
-        foreach ($missing as $key) {
-            $rows[] = ['profile_id' => $profileId, 'permission_key' => $key, 'allowed' => 1];
+        $this->insertPermissionsIfAbsent($db, $profileId, array_values($missing));
+    }
+
+    /**
+     * Grant these permissions, skipping any the profile already has.
+     *
+     * ensureSystemProfiles() runs from AccessService::assert(), so EVERY authorised request
+     * reaches this. Two requests arriving together both read the same "missing" set, both insert,
+     * and the loser violates uq_inv_access_profile_permissions. PostgreSQL then aborts the WHOLE
+     * transaction, so the request that lost the race fails at whatever it was really doing — a
+     * plain read of the item master, in the production log of 2026-09-14. A read-then-insert can
+     * never be safe here; the database has to settle it.
+     *
+     * ON CONFLICT infers the index from its columns rather than naming the constraint, so a rename
+     * cannot silently turn the guard off.
+     *
+     * @param list<string> $permissionKeys
+     */
+    private function insertPermissionsIfAbsent(
+        \CodeIgniter\Database\BaseConnection $db,
+        int $profileId,
+        array $permissionKeys,
+    ): void {
+        $keys = array_values(array_unique(array_filter($permissionKeys, static fn ($k) => (string) $k !== '')));
+        if ($keys === []) {
+            return;
         }
-        if ($rows !== []) {
-            $db->table('inv_access_profile_permissions')->insertBatch($rows);
+        $params = [];
+        $tuples = [];
+        foreach ($keys as $key) {
+            $tuples[] = '(?, ?, 1)';
+            $params[] = $profileId;
+            $params[] = $key;
         }
+        $db->query(
+            'INSERT INTO inv_access_profile_permissions (profile_id, permission_key, allowed) VALUES '
+            . implode(', ', $tuples)
+            . ' ON CONFLICT (profile_id, permission_key) DO NOTHING',
+            $params,
+        );
     }
 }
