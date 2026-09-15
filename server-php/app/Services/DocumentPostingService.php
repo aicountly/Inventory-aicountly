@@ -10,12 +10,24 @@ use Config\DocumentTypeRegistry;
  *
  * post():   validate (FY range, period lock, warehouse restriction, negative-stock policy)
  *           -> value every line (FIFO/LIFO/WAC) -> write movements + balances
- *           -> status buckets / pending quantities -> accounting effects -> outbox -> POSTED.
+ *           -> status buckets / pending quantities -> accounting effects -> outbox -> POSTED
+ *           -> COMMIT -> the journal is offered to Books and must be accepted before the
+ *              caller is told the post worked ({@see BooksJournalHandoff}).
  * reverse(): compensating movements (never deletes), layer restoration from the consumption
  *           trail, bucket/pending undo, status REVERSED, recalculation job from the date.
  *
- * Everything runs in one database transaction; a failure leaves the document in FAILED with
- * failure_reason so nothing is silently half-posted.
+ * Everything up to the commit runs in one database transaction; a failure leaves the document
+ * in FAILED with failure_reason so nothing is silently half-posted.
+ *
+ * WHY INVENTORY COMMITS FIRST AND BOOKS LAST
+ * ------------------------------------------
+ * There is always a last commit and it can always fail. Books last and it fails: Inventory
+ * holds a document, Books has no journal, and the repair is re-sending an event that is
+ * idempotent on its event_uuid, or reversing the document — a routine act here. Inventory last
+ * and it fails: Books holds a journal for stock that never moved, and the repair is reversing a
+ * general-ledger entry, which is two permanent entries in the statutory books. The side whose
+ * failure repairs cleanly is the side allowed to fail, so the order is not an accident and must
+ * not be "improved".
  */
 class DocumentPostingService
 {
@@ -32,6 +44,7 @@ class DocumentPostingService
         protected ?AuditService $audit = null,
         protected ?AccessService $access = null,
         protected ?PackingService $packing = null,
+        protected ?BooksJournalHandoff $booksHandoff = null,
     ) {
         $this->units ??= new UnitConversionService();
         $this->documents ??= new DocumentService($this->units);
@@ -45,6 +58,7 @@ class DocumentPostingService
         $this->audit ??= new AuditService();
         $this->access ??= new AccessService();
         $this->packing ??= new PackingService($this->documents, $this->status, $this->audit);
+        $this->booksHandoff ??= new BooksJournalHandoff($this->outbox);
     }
 
     /**
@@ -80,8 +94,17 @@ class DocumentPostingService
         $this->assertWarehousesAllowed($cmpId, $doc, $actor, $options['session'] ?? null);
 
         $db = \Config\Database::connect();
+        // Does this post own the outermost transaction? revise() wraps reverse() + create() +
+        // post() in ONE transaction, and a synchronous Books call from inside it could have Books
+        // accept a journal for a document Inventory then rolled back — Books holding an entry for
+        // stock that never moved, the one ordering this design exists to prevent. A nested post
+        // therefore keeps the queued delivery it has always had.
+        $ownsTransaction = (int) $db->transDepth === 0;
+        $waitForBooks = $this->booksHandoff->enabledFor((string) $doc['document_type'], $ownsTransaction);
         $db->transStart();
         $db->table('inv_documents')->where('document_id', $documentId)->update(['status' => 'POSTING', 'updated_at' => date('Y-m-d H:i:s')]);
+        $eventId = 0;
+        $handoffId = 0;
         try {
             $result = $this->applyPosting($db, $cmpId, $doc, $spec, $actor, $options, $warnings);
             $effects = $result['effects'];
@@ -97,7 +120,15 @@ class DocumentPostingService
                 'accounting_effects_json' => json_encode($effects, JSON_UNESCAPED_UNICODE),
             ]);
             $posted = $this->documents->get($cmpId, $documentId);
-            $this->outbox->enqueue($cmpId, 'inventory.document.posted', 'document', $documentId, (string) $posted['document_uuid'], $this->eventPayload($posted, $effects));
+            $eventId = $this->outbox->enqueue($cmpId, 'inventory.document.posted', 'document', $documentId, (string) $posted['document_uuid'], $this->eventPayload($posted, $effects));
+            if ($waitForBooks) {
+                // Claimed INSIDE the document's transaction, so it is on disk BEFORE the risky
+                // step rather than after it. The orphan bug earlier in this project was a tracker
+                // row written on the connection whose rollback it was meant to outlive; this one
+                // has to outlive a killed worker between the commit below and Books' answer, and
+                // the only way to guarantee that is to commit it with the document.
+                $handoffId = $this->booksHandoff->tracker()->claim($cmpId, $documentId, (string) $posted['document_uuid'], $eventId, $actor);
+            }
             $this->audit->log($cmpId, 'document', $documentId, 'document.post', $actor, [
                 'source_app' => $doc['source_app'], 'source_document_type' => $doc['source_document_type'], 'source_document_id' => $doc['source_document_id'], 'source_document_uuid' => $doc['source_document_uuid'],
                 'warnings' => $warnings,
@@ -115,10 +146,98 @@ class DocumentPostingService
             $this->audit->log($cmpId, 'document', $documentId, 'document.post_failed', $actor, ['reason' => $e->getMessage()]);
             throw $e;
         }
+        // ------------------------------------------------------------------ BOOKS LAST
+        // Inventory has committed. Everything from here is the journal handshake, and its
+        // failure mode is the cheap one: Inventory holds a document, Books has no journal, and
+        // the repair is either re-sending the event (idempotent on its event_uuid) or reversing
+        // the document — never reversing a general-ledger entry.
+        if ($waitForBooks) {
+            $delivery = $this->booksHandoff->deliver($cmpId, $eventId, $handoffId);
+            if (!$delivery['accepted']) {
+                $this->undoPostBooksWouldNotTake($cmpId, $documentId, $actor, $eventId, $handoffId, $delivery);
+            }
+            $posted['books_journal'] = 'accepted';
+        } else {
+            // Queued, as before. Named in the response so a caller can tell the two apart.
+            $posted['books_journal'] = 'queued';
+        }
         $posted['warnings'] = $warnings;
         $posted['duplicate'] = false;
 
         return $posted;
+    }
+
+    /**
+     * Books refused the journal, or could not be reached: take the stock back off the books and
+     * tell the user why.
+     *
+     * The scar lands in Inventory, where a reversal document is routine, rather than in the
+     * general ledger where it is not. Availability is what this costs — while Books is
+     * unreachable, a stock document cannot be posted at all — and the error says so, because a
+     * user who is refused without a reason retries until something breaks.
+     *
+     * @param array{accepted:bool, status:int, error:string, books_holds_no_journal:bool} $delivery
+     */
+    private function undoPostBooksWouldNotTake(int $cmpId, int $documentId, ?string $actor, int $eventId, int $handoffId, array $delivery): void
+    {
+        $refused = $delivery['books_holds_no_journal'];
+        $why = trim($delivery['error']) !== '' ? trim($delivery['error']) : 'no answer from the accounting service';
+        $reason = ($refused ? 'The books refused the accounting entry' : 'The books could not be reached')
+            . ' for this document: ' . mb_substr($why, 0, 400);
+
+        // Claimed BEFORE the reversal is attempted. The document is committed by now, so this row
+        // is the only thing on disk that knows stock has moved with no journal behind it; written
+        // afterwards it would be missing in exactly the case it exists for.
+        $this->booksHandoff->claimReversal($handoffId, $why, (int) $delivery['status']);
+
+        $reversalError = null;
+        try {
+            $this->reverse($cmpId, $documentId, $actor, $reason);
+            $this->booksHandoff->recordReversed($handoffId, $why);
+        } catch (\Throwable $e) {
+            $reversalError = $e->getMessage();
+            $this->booksHandoff->recordReversalFailed($handoffId, $reversalError);
+            log_message('error', 'Document {doc} could not be reversed after Books declined its journal: {msg}', ['doc' => $documentId, 'msg' => $reversalError]);
+        }
+
+        if ($reversalError === null && $refused) {
+            // Books ANSWERED that it applied nothing, so there is no journal to undo and nothing
+            // may be left queued: neither the posting Books refused nor the reversal of a
+            // document Books never had.
+            try {
+                $this->outbox->abandonForDocument($cmpId, $documentId, $eventId, $reason);
+            } catch (\Throwable $e) {
+                log_message('warning', 'Could not retire the outbox events of refused document {doc}: {msg}', ['doc' => $documentId, 'msg' => $e->getMessage()]);
+            }
+        }
+
+        $details = [
+            'document_id'  => $documentId,
+            'books_status' => (int) $delivery['status'],
+            'books_error'  => mb_substr($why, 0, 500),
+            'reversed'     => $reversalError === null,
+            'handoff_id'   => $handoffId,
+        ];
+        if ($reversalError !== null) {
+            $details['reversal_error'] = mb_substr($reversalError, 0, 500);
+
+            throw new InventoryException(
+                'books_handoff_unresolved',
+                'The accounting entry for this document was not accepted (' . mb_substr($why, 0, 200) . '), and the stock movement could NOT be undone automatically ('
+                . mb_substr($reversalError, 0, 200) . '). The document is still posted in Inventory with no entry in the books. It is recorded for repair and will be retried automatically; do not re-enter it.',
+                500,
+                $details,
+            );
+        }
+
+        throw new InventoryException(
+            $refused ? 'books_refused' : 'books_unavailable',
+            $refused
+                ? 'The books refused the accounting entry for this document, so nothing has been posted: the stock movement has been reversed and no stock has changed. Reason given by the books: ' . mb_substr($why, 0, 300)
+                : 'The books could not be reached, so this document has not been posted: the stock movement has been reversed and no stock has changed. Stock and the books have to record the same movement in the same moment, so Inventory cannot post while the books are unavailable. Try again once they are back. (' . mb_substr($why, 0, 200) . ')',
+            $refused ? 409 : 503,
+            $details,
+        );
     }
 
     /**

@@ -6,13 +6,27 @@ namespace App\Services;
  * Outbox pattern: integration events are written in the same transaction as the domain
  * change, then delivered with retries.
  *
- * Delivery is on contact, not scheduled: this deployment has no cron, so every authenticated
- * write for a company drains that company's due rows ({@see settleOnContact()}, called from
- * App\Controllers\Api\BaseController::authorize()). The CLI sweep and the operator's Dispatch
- * button remain as the unattended and manual paths over the same rows.
+ * THIS IS NO LONGER THE PRIMARY DELIVERY PATH FOR A POSTED DOCUMENT.
+ * A stock document's journal is now offered to Books inside the user's own request, before
+ * they are told the post worked ({@see deliverNow()}, driven by
+ * {@see BooksJournalHandoff}). The outbox is demoted to the fallback that catches what that
+ * leaves behind: the window where Inventory committed, Books accepted, and the worker died
+ * before the outcome could be recorded. Books is idempotent on the event_uuid, so a
+ * redelivery of a row that was already sent synchronously is the same journal, not a second
+ * one — which is exactly why both paths send the same row, through {@see envelopeFor()}.
+ *
+ * It remains the ONLY delivery path for everything else: master mirrors, valuation
+ * revisions, reversals, and any post that cannot wait for Books (a post Books itself issued,
+ * a nested post inside revise(), an unconfigured deployment).
+ *
+ * Three callers, over the same rows: inventory:outbox-dispatch every minute, a drain of the
+ * acting company's due rows on every authenticated write ({@see settleOnContact()}, from
+ * App\Controllers\Api\BaseController::authorize()), and the operator's Dispatch button.
  */
 class OutboxService
 {
+    protected ?BooksJournalHandoffTracker $handoffs = null;
+
     /** @param array<string, mixed> $payload */
     public function enqueue(int $cmpId, string $eventType, string $aggregateType, int $aggregateId, ?string $aggregateUuid, array $payload, string $targetApp = 'books'): int
     {
@@ -104,43 +118,213 @@ class OutboxService
                 $out['skipped']++;
                 continue;
             }
-            $payload = json_decode((string) $row['payload_json'], true) ?: [];
-            $envelope = [
-                'event_uuid'     => $row['event_uuid'],
-                'event_type'     => $row['event_type'],
-                'cmp_id'         => (int) $row['cmp_id'],
-                'aggregate_type' => $row['aggregate_type'],
-                'aggregate_id'   => (int) $row['aggregate_id'],
-                'aggregate_uuid' => $row['aggregate_uuid'],
-                'occurred_at'    => $row['created_at'],
-                'payload'        => $payload,
-            ];
-            $result = $books->postEvent($envelope);
-            $attempts = (int) $row['attempts'] + 1;
-            $outcome = self::deliveryOutcome($result);
-            if ($outcome['ack']) {
-                $db->table('inv_integration_events')->where('event_id', (int) $row['event_id'])->update([
-                    'status' => 'ACKED', 'attempts' => $attempts, 'sent_at' => date('Y-m-d H:i:s'), 'acked_at' => date('Y-m-d H:i:s'), 'last_error' => null,
-                ]);
-                $this->applyPiggybackedRevisionAcks((int) $row['cmp_id'], $result);
+            $result = $books->postEvent(self::envelopeFor($row));
+            $settled = $this->recordDelivery($row, $result);
+            if ($settled['ack']) {
                 $out['sent']++;
                 continue;
             }
-            $dead = $attempts >= 20;
-            $delay = min(3600, 30 * (2 ** min(10, $attempts)));
-            $db->table('inv_integration_events')->where('event_id', (int) $row['event_id'])->update([
-                'status'          => $dead ? 'DEAD' : 'FAILED',
-                'attempts'        => $attempts,
-                'last_error'      => substr($outcome['error'], 0, 2000),
-                'next_attempt_at' => date('Y-m-d H:i:s', time() + $delay),
-            ]);
-            $dead ? $out['dead']++ : $out['failed']++;
+            $settled['dead'] ? $out['dead']++ : $out['failed']++;
             if ($stopOnFailure) {
                 break;
             }
         }
+        // The synchronous handoff's residue: a reversal this code already decided on, in a
+        // request the user was present for, that did not finish. Only on the unattended sweep —
+        // the every-minute outbox cron and the operator's Dispatch button — never on a drain
+        // riding somebody's unrelated write, where a document reversal has no business.
+        if ($cmpId === null) {
+            $out['repaired'] = $this->settleBooksHandoffs();
+        }
 
         return $out;
+    }
+
+    /**
+     * The envelope one outbox row is delivered as.
+     *
+     * Shared by the dispatcher and the synchronous handoff ({@see deliverNow()}) so both carry
+     * the SAME event_uuid. Books is idempotent on it, so a document sent synchronously and
+     * redelivered later by the cron is one journal, not two. Building the envelope twice, in
+     * two places, is how that stops being true.
+     *
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>
+     */
+    public static function envelopeFor(array $row): array
+    {
+        return [
+            'event_uuid'     => $row['event_uuid'],
+            'event_type'     => $row['event_type'],
+            'cmp_id'         => (int) $row['cmp_id'],
+            'aggregate_type' => $row['aggregate_type'],
+            'aggregate_id'   => (int) $row['aggregate_id'],
+            'aggregate_uuid' => $row['aggregate_uuid'],
+            'occurred_at'    => $row['created_at'],
+            'payload'        => json_decode((string) $row['payload_json'], true) ?: [],
+        ];
+    }
+
+    /**
+     * Deliver ONE row now, on the request that created it, and settle it exactly as the
+     * dispatcher would.
+     *
+     * This is the synchronous Inventory -> Books posting path: the caller has committed the
+     * stock document and has not yet told the user it posted. It deliberately reuses the outbox
+     * row rather than opening a second channel — same endpoint, same envelope, same event_uuid,
+     * same ACK rules — so the two paths cannot disagree about what "Books took it" means.
+     *
+     * @return array{accepted:bool, status:int, error:string, event_uuid:?string, body:?array}
+     */
+    public function deliverNow(int $cmpId, int $eventId, ?BooksApiClient $books = null): array
+    {
+        $db = \Config\Database::connect();
+        $q = $db->table('inv_integration_events')->where('event_id', $eventId)->where('cmp_id', $cmpId)->get();
+        // DBDebug is off in every deployed environment: ->get() answers false on a query error
+        // and ->getResultArray() on false is a fatal with no usable message. The caller turns
+        // this into "Books holds no journal", which is true: nothing was sent.
+        if ($q === false) {
+            throw new \RuntimeException('Could not read inv_integration_events for event ' . $eventId . ': the outbox row could not be read, so nothing was sent to Books.');
+        }
+        $row = $q->getRowArray();
+        if (!$row) {
+            throw new \RuntimeException('Outbox event ' . $eventId . ' was not found for company ' . $cmpId . ', so nothing was sent to Books.');
+        }
+        if (($row['status'] ?? '') === 'ACKED') {
+            // Already delivered — a replayed request, or a dispatcher that got there first.
+            return ['accepted' => true, 'status' => 200, 'error' => '', 'event_uuid' => $row['event_uuid'] ?? null, 'body' => null];
+        }
+        $books ??= new BooksApiClient();
+        $result = $books->postEvent(self::envelopeFor($row));
+        $settled = $this->recordDelivery($row, $result);
+
+        return [
+            'accepted'   => $settled['ack'],
+            'status'     => (int) ($result['status'] ?? 0),
+            'error'      => $settled['error'],
+            'event_uuid' => $row['event_uuid'] ?? null,
+            'body'       => is_array($result['body'] ?? null) ? $result['body'] : null,
+        ];
+    }
+
+    /**
+     * Apply one delivery attempt's outcome to its row: ACKED, or FAILED/DEAD with the back-off.
+     *
+     * @param array<string, mixed> $row
+     * @param array{ok:bool, status:int, body:?array, error:?string} $result
+     * @return array{ack:bool, dead:bool, error:string}
+     */
+    protected function recordDelivery(array $row, array $result): array
+    {
+        $db = \Config\Database::connect();
+        $eventId = (int) $row['event_id'];
+        $attempts = (int) $row['attempts'] + 1;
+        $outcome = self::deliveryOutcome($result);
+        if ($outcome['ack']) {
+            $db->table('inv_integration_events')->where('event_id', $eventId)->update([
+                'status' => 'ACKED', 'attempts' => $attempts, 'sent_at' => date('Y-m-d H:i:s'), 'acked_at' => date('Y-m-d H:i:s'), 'last_error' => null,
+            ]);
+            $this->applyPiggybackedRevisionAcks((int) $row['cmp_id'], $result);
+            // Whatever the synchronous handoff could not finish recording, this closes: the
+            // event is delivered, so the document's journal exists.
+            $this->handoffTracker()->completeForEvent($eventId);
+
+            return ['ack' => true, 'dead' => false, 'error' => ''];
+        }
+        $dead = $attempts >= 20;
+        $delay = min(3600, 30 * (2 ** min(10, $attempts)));
+        $db->table('inv_integration_events')->where('event_id', $eventId)->update([
+            'status'          => $dead ? 'DEAD' : 'FAILED',
+            'attempts'        => $attempts,
+            'last_error'      => substr($outcome['error'], 0, 2000),
+            'next_attempt_at' => date('Y-m-d H:i:s', time() + $delay),
+        ]);
+
+        return ['ack' => false, 'dead' => $dead, 'error' => $outcome['error']];
+    }
+
+    /**
+     * Retire the events of a document whose journal Books definitively refused and which has
+     * therefore been reversed.
+     *
+     * Only called when Books ANSWERED that it applied nothing, so there is no journal to undo
+     * and no reason to spend twenty more round trips being refused the same way. DEAD is the
+     * existing terminal status — the dispatcher already skips it, the dashboard already counts
+     * it and the operator screens already list it — so the row stays visible with the reason on
+     * it rather than disappearing.
+     *
+     * Bounded to this episode by event_id: an older event for the same document, from a posting
+     * that was reversed weeks ago, is not this posting's to close.
+     */
+    public function abandonForDocument(int $cmpId, int $documentId, int $fromEventId, string $reason): int
+    {
+        $db = \Config\Database::connect();
+        $db->table('inv_integration_events')
+            ->where('cmp_id', $cmpId)
+            ->where('aggregate_type', 'document')
+            ->where('aggregate_id', $documentId)
+            ->where('event_id >=', $fromEventId)
+            ->whereIn('event_type', ['inventory.document.posted', 'inventory.document.reversed'])
+            ->whereIn('status', ['PENDING', 'FAILED'])
+            ->update([
+                'status'          => 'DEAD',
+                'last_error'      => substr('Not deliverable: ' . $reason, 0, 2000),
+                'next_attempt_at' => null,
+            ]);
+
+        return $db->affectedRows();
+    }
+
+    /**
+     * Finish the reversals the synchronous handoff decided on but could not complete.
+     *
+     * This never decides anything. A row is only REVERSAL_PENDING because, on a request a user
+     * was waiting on, Books refused or could not be reached and this code already chose to take
+     * the document back off the books; the worker then died, or the reversal itself failed. The
+     * sweep re-runs exactly that reversal.
+     *
+     * @return array{reversed:int, failed:int}
+     */
+    public function settleBooksHandoffs(int $limit = 20): array
+    {
+        $out = ['reversed' => 0, 'failed' => 0];
+        $tracker = $this->handoffTracker();
+        try {
+            $due = $tracker->dueRepairs($limit);
+        } catch (\Throwable $e) {
+            log_message('error', 'Books journal handoff repairs could not be read: {msg}', ['msg' => $e->getMessage()]);
+
+            return $out;
+        }
+        foreach ($due as $row) {
+            $handoffId = (int) $row['handoff_id'];
+            $reason = (string) ($row['last_error'] ?? 'Books did not take the journal');
+            try {
+                $posting = $this->postingService();
+                $posting->reverse((int) $row['cmp_id'], (int) $row['document_id'], (string) ($row['created_by'] ?? '') ?: null, 'Reversed: ' . mb_substr($reason, 0, 400));
+                $tracker->transition($handoffId, BooksJournalHandoffTracker::REVERSED, [
+                    'last_error' => mb_substr('Document reversed by the outbox sweep after a refused journal: ' . $reason, 0, 4000),
+                ]);
+                $out['reversed']++;
+            } catch (\Throwable $e) {
+                $tracker->recordFailure($handoffId, BooksJournalHandoffTracker::REVERSAL_PENDING, $e->getMessage());
+                log_message('error', 'Could not reverse document {doc} whose journal Books refused: {msg}', ['doc' => (int) $row['document_id'], 'msg' => $e->getMessage()]);
+                $out['failed']++;
+            }
+        }
+
+        return $out;
+    }
+
+    protected function handoffTracker(): BooksJournalHandoffTracker
+    {
+        return $this->handoffs ??= new BooksJournalHandoffTracker();
+    }
+
+    /** Built on demand: DocumentPostingService constructs an OutboxService of its own. */
+    protected function postingService(): DocumentPostingService
+    {
+        return new DocumentPostingService();
     }
 
     /**

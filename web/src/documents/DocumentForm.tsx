@@ -14,6 +14,9 @@ import { WarehouseSelect } from './WarehouseSelect'
 import { canCreate, permissionKeysFor } from './actions'
 import { countDifference, draftTotals, isBlankLine, lineBaseQty, newHeader, newLine, toPayload, validateDraft } from './formModel'
 import type { HeaderDraft, LineDraft, LineOrigin } from './formModel'
+import { BooksHandoffNotice } from './BooksHandoffNotice'
+import { parseBooksHandoff } from './booksHandoff'
+import type { BooksHandoffBlock } from './booksHandoff'
 import { offendingDraftKeys, parseNegativeStock } from './negativeStock'
 import type { NegativeStockDetail } from './negativeStock'
 import { DeferredPurchasePanel } from './panels/DeferredPurchasePanel'
@@ -59,6 +62,7 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
   const [errors, setErrors] = useState<string[]>([])
   const [apiError, setApiError] = useState<string | null>(null)
   const [negative, setNegative] = useState<NegativeStockDetail[] | null>(null)
+  const [booksBlock, setBooksBlock] = useState<BooksHandoffBlock | null>(null)
   const [override, setOverride] = useState(false)
   const [warnings, setWarnings] = useState<PostingWarning[]>([])
   const [busy, setBusy] = useState<'save' | 'post' | null>(null)
@@ -151,6 +155,7 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
     setErrors([])
     setApiError(null)
     setWarnings([])
+    setBooksBlock(null)
     if (!post) setNegative(null)
     const errs = validateDraft(header, lines, spec)
     if (errs.length) {
@@ -175,6 +180,14 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
       }
       onSaved(doc, post)
     } catch (err) {
+      // The books would not take the accounting entry, so the post was refused and no stock
+      // moved. The draft is saved; the banner says why and what to do about it.
+      const books = parseBooksHandoff(err)
+      if (books) {
+        setBooksBlock(books)
+        setApiError(id ? `Draft #${id} is saved but was not posted.` : null)
+        return
+      }
       const neg = parseNegativeStock(err)
       if (neg) {
         setNegative(neg)
@@ -343,6 +356,7 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
           </ul>
         </Notice>
       ) : null}
+      {booksBlock ? <BooksHandoffNotice block={booksBlock} /> : null}
       {apiError && !negative ? <Notice kind="error">{apiError}</Notice> : null}
       {negative ? (
         <Notice kind="error" title="Insufficient stock">
