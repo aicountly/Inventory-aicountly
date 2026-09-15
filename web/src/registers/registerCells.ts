@@ -66,7 +66,13 @@ const NOT_AMOUNT = new Set([
   'pending_id',
 ])
 
-const AMOUNT_KEY = /(^|_)(amount|value|cost|price|rate|debit|credit|total)(_|$)/i
+/**
+ * `mrp` is in the list because it is one: maximum retail PRICE. It carries no
+ * word the pattern already matches, so without it the Items master printed a
+ * money column as raw text — "1234.5" on a letterheaded PDF beside "1,234.50"
+ * on the screen, and an Excel cell typed as text that will not sum.
+ */
+const AMOUNT_KEY = /(^|_)(amount|value|cost|price|rate|debit|credit|total|mrp)(_|$)/i
 
 /** Conservative fallback for a column that declares no `format`/`amount`. */
 export function isAmountKey(key: string): boolean {

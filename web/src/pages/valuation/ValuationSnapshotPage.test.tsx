@@ -98,9 +98,9 @@ beforeEach(() => {
   })
 })
 
-function renderPage() {
+function renderPage(url = '/valuation?limit=25&method=FIFO&as_of=2026-09-15') {
   render(
-    <MemoryRouter initialEntries={['/valuation?limit=25&method=FIFO&as_of=2026-09-15']}>
+    <MemoryRouter initialEntries={[url]}>
       <ValuationSnapshotPage />
     </MemoryRouter>,
   )
@@ -141,6 +141,22 @@ describe('ValuationSnapshotPage exports', () => {
     expect(sheet.metaLines).toContain('As at: 2026-09-15')
     expect(sheet.metaLines).toContain('Method: FIFO')
     expect(sheet.rows).toHaveLength(30)
+  })
+
+  it('names the file for the date the stock is valued at, not the day it was made', async () => {
+    // An as-at date that is NOT today, so the two dates in the name are
+    // distinguishable and the assertion cannot pass by coincidence.
+    renderPage('/valuation?limit=25&method=FIFO&as_of=2026-03-31')
+    await waitFor(() => expect(screen.getByRole('button', { name: /export/i })).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: /export/i }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /CSV/ }))
+    await waitFor(() => expect(downloadCsv).toHaveBeenCalledOnce())
+
+    const filename = downloadCsv.mock.calls[0][0]
+    // Two exports on the same afternoon, one as at 31-Mar and one as at 30-Jun,
+    // must not land in the downloads folder under the same name.
+    expect(filename).toContain('2026-03-31')
+    expect(filename).toMatch(/^valuation-fifo-2026-03-31-acme-ltd-\d{4}-\d{2}-\d{2}\.csv$/)
   })
 
   it('names the cost columns as valuation, not as a price', async () => {

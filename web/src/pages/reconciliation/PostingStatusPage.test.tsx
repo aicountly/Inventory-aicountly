@@ -152,6 +152,22 @@ describe('PostingStatusPage', () => {
     expect(document.body.textContent).toContain('filters narrow the table below them')
   })
 
+  it('names the Books figure and the Inventory figure apart ON THE SCREEN too', async () => {
+    renderPage()
+    await waitFor(() => expect(screen.getByRole('button', { name: /export/i })).toBeTruthy())
+
+    /*
+     * Two right-aligned money columns, side by side, with different owners: the
+     * Books one is the voucher's commercial value (GST, receivables, turnover),
+     * the Inventory one is what the stock was valued at (COGS, closing stock).
+     * The standing rule covers a screen as much as a print.
+     */
+    expect(screen.getByRole('columnheader', { name: /Books amount \(voucher value\)/ })).toBeTruthy()
+    expect(screen.getByRole('columnheader', { name: /Stock effect \(valuation\)/ })).toBeTruthy()
+    expect(screen.queryByRole('columnheader', { name: /^Books amount$/ })).toBeNull()
+    expect(screen.queryByRole('columnheader', { name: /^Stock effect$/ })).toBeNull()
+  })
+
   it('exports every matching row, naming the Books figure and the Inventory figure apart', async () => {
     renderPage()
     await waitFor(() => expect(screen.getByRole('button', { name: /export/i })).toBeTruthy())

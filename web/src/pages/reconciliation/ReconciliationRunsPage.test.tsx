@@ -121,6 +121,38 @@ describe('ReconciliationRunsPage', () => {
     expect(lines).toHaveLength(31)
   })
 
+  it('names the two money columns on the SCREEN, not only in the file', async () => {
+    renderPage()
+    await waitFor(() => expect(screen.getByText('Inventory value (valuation)')).toBeTruthy())
+
+    // Two right-aligned money columns with different owners: one is what the
+    // stock cost, the other is the Books ledger balance. A reader has no other
+    // way to tell them apart, and "Difference" alone does not say which way.
+    expect(screen.getByRole('columnheader', { name: 'Books stock ledger balance' })).toBeTruthy()
+    expect(screen.getByRole('columnheader', { name: /Difference \(Inventory − Books\)/ })).toBeTruthy()
+    expect(screen.queryByRole('columnheader', { name: /^Difference$/ })).toBeNull()
+  })
+
+  it('never says "scheduled" — there is no scheduler — and the file says what the screen says', async () => {
+    runs.mockImplementation(async () => ({
+      data: [{ ...run(1), requested_by: null }],
+      meta: { total: 1, limit: 25, offset: 0 },
+    }))
+    renderPage()
+    await waitFor(() => expect(screen.getByText('Not recorded')).toBeTruthy())
+
+    // The explainer directly above the table states this deployment has no
+    // background job. A By column reading "scheduled" contradicts it.
+    expect(document.body.textContent).toContain('this deployment has no background job')
+    expect(document.body.textContent).not.toMatch(/\bscheduled\b/)
+
+    fireEvent.click(screen.getByRole('button', { name: /export/i }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /CSV/ }))
+    await waitFor(() => expect(downloadCsv).toHaveBeenCalledOnce())
+    // The file must reproduce the screen, not drop the cell.
+    expect(downloadCsv.mock.calls[0][1]).toContain('Not recorded')
+  })
+
   it('prints the letterheaded sheet with the sign convention in its footer', async () => {
     renderPage()
     await waitFor(() => expect(screen.getByRole('button', { name: /print/i })).toBeTruthy())

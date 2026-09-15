@@ -74,7 +74,15 @@ export function ValuationSnapshotPage() {
             columns={EXPORT_COLUMNS}
             rows={rows}
             fetchAll={() => fetchAllRows<ValuationSnapshotRow>((page, limit) => valuationApi.snapshot({ ...query, page, limit }))}
-            filenameBase={`valuation-${method}`}
+            /*
+             * The as-at date is part of the file's identity, not decoration.
+             * ListSheetActions appends the company and TODAY's date, so without
+             * the as-of in the stem, closing stock as at 31-Mar and as at
+             * 30-Jun exported on the same afternoon are the same filename: the
+             * second silently overwrites the first in the downloads folder, and
+             * two files mailed to an auditor cannot be told apart by name.
+             */
+            filenameBase={`valuation-${method}-${asOf}`}
             title="Stock valuation"
             description="Closing quantity, unit cost and value per item"
             metaLines={[

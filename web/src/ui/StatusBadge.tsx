@@ -95,6 +95,22 @@ export interface StatusBadgeProps {
   className?: string
 }
 
+/**
+ * The words this badge puts on the screen for a raw status token.
+ *
+ * Exported because an export has to reproduce the screen: a column whose cell
+ * is a `StatusBadge` writes `DEAD` / `in_stock` into the file unless it resolves
+ * its own value, and a printed register that reads DEAD where the screen read
+ * Dead is the same column saying two different things. Calling this rather than
+ * `humanize` directly means a status that later gains an explicit label in
+ * STATUS_MAP changes the sheet and the screen together.
+ */
+export function statusBadgeLabel(value: string | null | undefined): string {
+  if (value === null || value === undefined || value === '') return ''
+  const preset = STATUS_MAP[String(value).toLowerCase()]
+  return preset?.label ?? humanize(value) ?? String(value)
+}
+
 export function StatusBadge({ value, status, tone, label, size = 'sm', className }: StatusBadgeProps) {
   const raw = value ?? status
   const key = raw ? String(raw).toLowerCase() : null

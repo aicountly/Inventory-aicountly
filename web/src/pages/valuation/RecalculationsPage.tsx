@@ -12,7 +12,7 @@ import { Modal } from '../../components/Modal'
 import { PageHeader } from '../../components/PageHeader'
 import { Pagination } from '../../components/Pagination'
 import { RequirePermission } from '../../components/RequirePermission'
-import { StatusBadge } from '../../components/StatusBadge'
+import { StatusBadge, statusBadgeLabel } from '../../components/StatusBadge'
 import { useListParams } from '../../hooks/useListParams'
 import { useQuery } from '../../hooks/useQuery'
 import type { ExportableColumn } from '../../registers/registerCells'
@@ -35,7 +35,8 @@ const STATUS_TONE: Record<string, 'neutral' | 'good' | 'warning' | 'critical' | 
 const EXPORT_COLUMNS: ExportableColumn<RecalcJob>[] = [
   { key: 'job_id', csvHeader: 'Job', align: 'right', format: 'int' },
   { key: 'created_at', csvHeader: 'Queued', format: 'datetime' },
-  { key: 'status', csvHeader: 'Status' },
+  // The badge's own words, so the file reads the way the screen does.
+  { key: 'status', csvHeader: 'Status', csv: (r) => statusBadgeLabel(r.status) },
   { key: 'dry_run', csvHeader: 'Mode', csv: (r) => (r.dry_run ? 'Dry run' : 'Live') },
   { key: 'from_date', csvHeader: 'Recalculated from', format: 'date' },
   { key: 'item_name', csvHeader: 'Scope', csv: (r) => (r.item_id ? r.item_name ?? `Item #${r.item_id}` : 'All items') },

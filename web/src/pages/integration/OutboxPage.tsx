@@ -9,7 +9,7 @@ import { Modal } from '../../components/Modal'
 import { PageHeader } from '../../components/PageHeader'
 import { Pagination } from '../../components/Pagination'
 import { RequirePermission } from '../../components/RequirePermission'
-import { StatusBadge } from '../../components/StatusBadge'
+import { StatusBadge, statusBadgeLabel } from '../../components/StatusBadge'
 import { SubNav } from '../../components/SubNav'
 import { useListParams } from '../../hooks/useListParams'
 import { useQuery } from '../../hooks/useQuery'
@@ -40,7 +40,9 @@ const NAV = [
 const EXPORT_COLUMNS: ExportableColumn<OutboxEvent>[] = [
   { key: 'event_id', csvHeader: 'Event', align: 'right', format: 'int' },
   { key: 'created_at', csvHeader: 'Created', format: 'datetime' },
-  { key: 'status', csvHeader: 'Status' },
+  // The screen shows the badge's words ("Dead", "Pending"); the file must not
+  // show the raw token. `statusBadgeLabel` is the badge's own resolver.
+  { key: 'status', csvHeader: 'Status', csv: (e) => statusBadgeLabel(e.status) },
   { key: 'event_type', csvHeader: 'Event type' },
   { key: 'aggregate', csvHeader: 'About', csv: (e) => `${e.aggregate_type} #${e.aggregate_id}` },
   { key: 'target_app', csvHeader: 'To' },

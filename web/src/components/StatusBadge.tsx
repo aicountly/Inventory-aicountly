@@ -3,5 +3,5 @@
  * `components/StatusBadge` keep compiling while they are converted.
  * The merged status map and the `Tone` alias live in ui/StatusBadge.tsx.
  */
-export { StatusBadge, ActiveBadge } from '../ui/StatusBadge'
+export { StatusBadge, ActiveBadge, statusBadgeLabel } from '../ui/StatusBadge'
 export type { Tone } from '../ui/StatusBadge'

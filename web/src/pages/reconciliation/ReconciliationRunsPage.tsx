@@ -38,9 +38,16 @@ const EXPORT_COLUMNS: ExportableColumn<ReconciliationRun>[] = [
   { key: 'inventory_closing_value', csvHeader: 'Inventory closing value (valuation)', align: 'right', format: 'amount' },
   { key: 'books_stock_ledger_balance', csvHeader: 'Books stock ledger balance', align: 'right', format: 'amount' },
   { key: 'difference', csvHeader: 'Difference (Inventory − Books)', align: 'right', format: 'amount' },
-  { key: 'requested_by', csvHeader: 'Requested by', csv: (r) => r.requested_by ?? '' },
+  // The screen and the file say the same words for the same cell. A run with no
+  // actor is one nobody was recorded for — NOT a scheduled run: there is no
+  // scheduler in this deployment, which is what the explainer above the table
+  // says in as many words.
+  { key: 'requested_by', csvHeader: 'Requested by', csv: (r) => r.requested_by ?? NO_ACTOR },
 ]
 const STATUS_TONE: Record<string, 'good' | 'critical' | 'warning'> = { COMPLETED: 'good', FAILED: 'critical', BOOKS_UNAVAILABLE: 'warning' }
+
+/** What the By column says when `requested_by` is null. Screen and sheet alike. */
+const NO_ACTOR = 'Not recorded'
 
 export function differenceTone(difference: number | null): 'good' | 'warning' | 'critical' | 'neutral' {
   if (difference === null) return 'neutral'
@@ -83,10 +90,13 @@ export function ReconciliationRunsPage() {
       { key: 'created_at', header: 'Run', sortKey: 'created_at', render: (r) => formatDateTime(r.created_at) },
       { key: 'status', header: 'Status', render: (r) => <StatusBadge value={r.status} tone={STATUS_TONE[r.status] ?? 'neutral'} /> },
       { key: 'inventory_closing_qty', header: 'Inventory qty', align: 'right', render: (r) => formatQty(r.inventory_closing_qty) },
-      { key: 'inventory_closing_value', header: 'Inventory value', align: 'right', render: (r) => formatMoney(r.inventory_closing_value) },
-      { key: 'books_stock_ledger_balance', header: 'Books stock ledger', align: 'right', render: (r) => formatMoney(r.books_stock_ledger_balance) },
-      { key: 'difference', header: 'Difference', align: 'right', sortKey: 'difference', render: (r) => <StatusBadge value={formatMoney(r.difference)} tone={differenceTone(r.difference)} /> },
-      { key: 'requested_by', header: 'By', render: (r) => r.requested_by ?? <span className="muted">scheduled</span> },
+      // The same qualifiers the sheet carries. Two right-aligned money columns
+      // whose owner is implied, and a bare "Difference" whose sign convention is
+      // stated only in the exported file, is a screen two readers argue over.
+      { key: 'inventory_closing_value', header: 'Inventory value (valuation)', align: 'right', render: (r) => formatMoney(r.inventory_closing_value) },
+      { key: 'books_stock_ledger_balance', header: 'Books stock ledger balance', align: 'right', render: (r) => formatMoney(r.books_stock_ledger_balance) },
+      { key: 'difference', header: 'Difference (Inventory − Books)', align: 'right', sortKey: 'difference', render: (r) => <StatusBadge value={formatMoney(r.difference)} tone={differenceTone(r.difference)} /> },
+      { key: 'requested_by', header: 'By', render: (r) => r.requested_by ?? <span className="muted">{NO_ACTOR}</span> },
     ],
     [],
   )

@@ -5,6 +5,7 @@ import {
   rowCountMetaLine,
   slugifyExportFilename,
   truncationNote,
+  partialFilename,
 } from './exportActions'
 import type { ExportableColumn } from '../registers/registerCells'
 
@@ -87,6 +88,34 @@ describe('truncationNote', () => {
     const note = truncationNote(10_000, 0)
     expect(note).toContain('only the first 10,000 rows')
     expect(note).not.toMatch(/\bof the\b/)
+  })
+
+  it('reads as a sentence when exactly one row is missing, and names the right remedy', () => {
+    /*
+     * Reachable in normal operation: an offset pager loses one row to a
+     * concurrent insert between page fetches and exits on a short page. This
+     * text is printed into the PDF notes, the spreadsheet notes and the .warn
+     * band of the letterheaded sheet, so "1 are not." is a typo on company
+     * paper — and narrowing the filters is not what fixes a race.
+     */
+    const note = truncationNote(999, 1_000)
+    expect(note).toContain('999 of the 1,000 rows')
+    expect(note).toContain('1 is not')
+    expect(note).not.toContain('1 are not')
+    expect(note).not.toContain('Narrow the filters')
+    expect(note).toContain('export again')
+  })
+})
+
+describe('partialFilename', () => {
+  it('puts the shortfall where it travels with the file', () => {
+    expect(partialFilename('stock-movements-acme-2026-09-15', 10_000, 12_431)).toBe(
+      'stock-movements-acme-2026-09-15-partial-10000-of-12431',
+    )
+  })
+
+  it('still marks the file when the total is unknown', () => {
+    expect(partialFilename('stock-movements', 10_000, 0)).toBe('stock-movements-partial-10000')
   })
 })
 

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import type { OutboxEvent } from '../../services/integrationApi'
 
@@ -137,9 +137,25 @@ describe('OutboxPage', () => {
     // "Next try" is only meaningful while an event is still going to be tried:
     // a dead event has a stored next_attempt_at that no longer means anything,
     // and printing it would promise a retry that never comes.
-    expect(sheet.rows[0].status.text).toBe('PENDING')
     expect(sheet.rows[0].next_attempt_at.text).not.toBe('')
-    expect(sheet.rows[29].status.text).toBe('DEAD')
     expect(sheet.rows[29].next_attempt_at.text).toBe('')
+  })
+
+  it('prints the status the screen shows, not the raw token', async () => {
+    renderPage()
+    await waitFor(() => expect(screen.getByRole('button', { name: /print/i })).toBeTruthy())
+    // The screen's StatusBadge reads "Pending", never `PENDING`.
+    const table = document.querySelector('tbody') as HTMLElement
+    expect(within(table).getAllByText('Pending').length).toBeGreaterThan(0)
+    expect(within(table).queryByText('PENDING')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: /print/i }))
+    await waitFor(() => expect(printTabular).toHaveBeenCalledOnce())
+
+    // A letterheaded sheet a user works through on paper must read the way the
+    // screen they were reading did.
+    const sheet = printTabular.mock.calls[0][0]
+    expect(sheet.rows[0].status.text).toBe('Pending')
+    expect(sheet.rows[29].status.text).toBe('Dead')
   })
 })

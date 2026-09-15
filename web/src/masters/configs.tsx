@@ -1,4 +1,4 @@
-import { ActiveBadge, StatusBadge } from '../components/StatusBadge'
+import { ActiveBadge, StatusBadge, statusBadgeLabel } from '../components/StatusBadge'
 import { batchesApi, brandsApi, itemGroupsApi, locationsApi, stockCategoriesApi, uomApi, warehouseGroupsApi, warehousesApi, BATCH_STATUSES, LOCATION_TYPES, WAREHOUSE_TYPES } from '../services/masters'
 import type { Batch, Brand, ItemGroup, Location, StockCategory, Uom, Warehouse, WarehouseGroup } from '../services/masters'
 import { formatDate, formatDateTime, formatInt, formatQty, humanize } from '../utils/format'
@@ -362,7 +362,9 @@ export const batchesConfig: MasterConfig<Batch> = {
     // The unit symbol belongs beside the figure on screen; in a sheet it would
     // make the column text and stop it totalling, so the number travels alone.
     { key: 'on_hand', header: 'On hand', align: 'right', render: (r) => (r.stock ? `${formatQty(r.stock.on_hand)}${r.unit_symbol ? ` ${r.unit_symbol}` : ''}` : '—'), exportValue: (r) => r.stock?.on_hand ?? '', exportFormat: 'qty' },
-    { key: 'status', header: 'Status', sortKey: 'status', render: (r) => <StatusBadge value={r.status} /> },
+    // The badge reads "In stock" / "Quarantine"; the sheet must not read
+    // `in_stock` / `quarantine` under the same header.
+    { key: 'status', header: 'Status', sortKey: 'status', render: (r) => <StatusBadge value={r.status} />, exportValue: (r) => statusBadgeLabel(r.status) },
   ],
   fields: [
     { name: 'item', label: 'Item', type: 'item', required: true, span: 'all', disabled: (ctx) => ctx.mode === 'edit', itemFilter: (row) => Number(row.track_batch) === 1, help: 'Only batch-tracked items are listed.' },

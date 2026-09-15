@@ -80,40 +80,69 @@ describe('getExportTheme in dark mode', () => {
     expect(luminance(dark)).toBeGreaterThan(0.7)
   })
 
-  it('ignores the near-black tint ThemeProvider writes inline for a custom accent', () => {
-    mountTokens()
-    const custom = '#2563eb'
-    const darkVars = deriveAccentVars(custom, 'dark')
-    const lightVars = deriveAccentVars(custom, 'light')
-    expect(darkVars && lightVars).toBeTruthy()
+  /*
+   * Swept over accents, not asserted for one.
+   *
+   * `#2563eb` happens to be close to the best case: its dark-mode lift is small,
+   * so the exported tint lands within 2/255 per channel of the light-mode screen
+   * tint. That is NOT the bound. `theme/appearance.ts::liftForDark` floors a
+   * dark accent's luminance at 0.18, so a near-black accent is lifted a long way
+   * before it is tinted and the divergence reaches 15/255 (#000000 exports
+   * [239,239,239] against a light-mode screen tint of [224,224,224]). Pinning
+   * ≤4 against one mid-tone accent reads as a general guarantee and is not one —
+   * anyone generalising the test would have found it failing.
+   *
+   * What IS general, and is what the reader cares about, is asserted for every
+   * accent below: the exported tint is light enough to put near-black ink on,
+   * and it is derived from the accent rather than read from the near-black
+   * dark-mode token, which is ~200 out.
+   */
+  const ACCENTS: { hex: string; maxDrift: number }[] = [
+    { hex: '#2563eb', maxDrift: 4 },
+    { hex: '#000000', maxDrift: 16 },
+    { hex: '#000080', maxDrift: 16 },
+    { hex: '#143c14', maxDrift: 16 },
+    { hex: '#ffffff', maxDrift: 4 },
+  ]
 
-    document.documentElement.className = 'dark'
-    document.documentElement.dataset.theme = 'custom'
-    for (const [name, value] of Object.entries(darkVars ?? {})) {
-      document.documentElement.style.setProperty(name, value)
-    }
-    // What the screen is actually showing: the dark tint is near-black.
-    expect(luminance(getExportTheme().primary)).toBeGreaterThan(0)
-    const screenTint = getComputedStyle(document.documentElement)
-      .getPropertyValue('--color-primary-light')
-      .trim()
-      .split(/\s+/)
-      .map(Number) as RGB
-    expect(luminance(screenTint)).toBeLessThan(0.1)
+  it.each(ACCENTS)(
+    'ignores the near-black tint ThemeProvider writes inline for accent $hex',
+    ({ hex, maxDrift }) => {
+      mountTokens()
+      const darkVars = deriveAccentVars(hex, 'dark')
+      const lightVars = deriveAccentVars(hex, 'light')
+      expect(darkVars && lightVars).toBeTruthy()
 
-    // What the export takes to paper: the tint the light-mode screen shows for
-    // the same accent. Not bit-identical — dark mode lifts the accent itself
-    // for contrast, and the export snapshots the lifted hue — but within a
-    // couple of units per channel, where reading the token would be ~200 out.
-    const exported = getExportTheme().primaryLight
-    const lightScreenTint = lightAccentTint(
-      (lightVars?.['--color-primary'] ?? '').split(/\s+/).map(Number) as RGB,
-    )
-    expect(luminance(exported)).toBeGreaterThan(0.7)
-    exported.forEach((channel, i) => {
-      expect(Math.abs(channel - lightScreenTint[i])).toBeLessThanOrEqual(4)
-    })
-  })
+      document.documentElement.className = 'dark'
+      document.documentElement.dataset.theme = 'custom'
+      for (const [name, value] of Object.entries(darkVars ?? {})) {
+        document.documentElement.style.setProperty(name, value)
+      }
+
+      // What the screen is actually showing for a dark accent: a near-black tint.
+      const screenTint = getComputedStyle(document.documentElement)
+        .getPropertyValue('--color-primary-light')
+        .trim()
+        .split(/\s+/)
+        .map(Number) as RGB
+      expect(screenTint).toHaveLength(3)
+
+      const exported = getExportTheme().primaryLight
+      // The guarantee: paper stays light whatever the accent and whatever the
+      // reader's appearance setting.
+      expect(luminance(exported)).toBeGreaterThan(0.7)
+      for (const channel of exported) expect(channel).toBeGreaterThanOrEqual(224)
+
+      // ...and it is the light-mode screen tint for the same accent, to within
+      // the dark-mode lift. Reading the token instead would be ~200 out.
+      const lightScreenTint = lightAccentTint(
+        (lightVars?.['--color-primary'] ?? '').split(/\s+/).map(Number) as RGB,
+      )
+      exported.forEach((channel, i) => {
+        expect(Math.abs(channel - lightScreenTint[i])).toBeLessThanOrEqual(maxDrift)
+      })
+    },
+  )
 
   /** Books and Inventory must tint the same accent to the same colour. */
   it('derives the tint with the light-mode blend theme/appearance.ts uses', () => {

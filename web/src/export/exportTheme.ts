@@ -91,13 +91,6 @@ export function lightAccentTint(primary: RGB): RGB {
   ) as RGB
 }
 
-/**
- * The brand tint as the export derives it. Equal to the light-mode
- * `--color-primary-light` to within the rounding of the blend, and used when
- * there is no DOM to snapshot so the no-DOM and light-DOM paths agree exactly.
- */
-export const DEFAULT_PRIMARY_LIGHT: RGB = lightAccentTint(DEFAULT_PRIMARY)
-
 export const GOOGLE_FONTS_URL =
   'https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Noto+Sans:wght@400;700&display=swap'
 

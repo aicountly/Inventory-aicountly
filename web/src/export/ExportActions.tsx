@@ -26,10 +26,12 @@ import type { Orientation, SheetIdentity, SheetSummaryCard } from './sheetHtml'
  * When it cannot — the pager capped, or the screen has no pager and told us the
  * server's count through `totalRows` — the file says so in its own words: the
  * row pill reads "Rows: 10,000 of 12,431" and a partial-export note goes on the
- * sheet, into the PDF, into the spreadsheet and into the CSV's toast. A short
- * file that says nothing reads as the whole set, and that is the one outcome
- * this component may not produce. A pager that *fails* aborts the export
- * outright; there is no quiet fall back to the rows on screen.
+ * sheet, into the PDF and into the spreadsheet. A CSV has nowhere inside it for
+ * a note, so its FILENAME carries the shortfall instead
+ * (`…-partial-10000-of-12431.csv`) — a toast is gone in 4.5 seconds and the file
+ * is not. A short file that says nothing reads as the whole set, and that is
+ * the one outcome this component may not produce. A pager that *fails* aborts
+ * the export outright; there is no quiet fall back to the rows on screen.
  *
  * The menu is portalled to `document.body` and positioned against the viewport
  * rather than the toolbar, so it cannot be clipped by an ancestor's `overflow`
@@ -255,6 +257,9 @@ export function ExportActions<T>({
       const total = Math.max(result.total ?? 0, exported)
       const short = result.truncated || total > exported
       const warningNote = short ? truncationNote(exported, total) : undefined
+      // The CSV writer needs the counts, not the sentence: the file cannot hold
+      // a note, so its NAME carries the shortfall instead.
+      const partial = short ? { exported, total } : undefined
 
       const scoped = forExportedRows?.(result.rows)
 
@@ -270,6 +275,7 @@ export function ExportActions<T>({
         totalsLabel,
         footerNotes,
         warningNote,
+        partial,
         orientation,
         filenameBase: filename,
         generatedAt: generatedAt ?? formatGeneratedStamp(),

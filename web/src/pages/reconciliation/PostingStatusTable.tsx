@@ -32,10 +32,16 @@ export function PostingStatusTable({ entries, loading, error }: { entries: Posti
       { key: 'source', header: 'Books voucher', render: (e) => <span>{e.source.source_document_type ?? e.books?.source_document_type ?? '—'} · {e.books?.document_no ?? e.source.source_document_no ?? `#${e.source.source_document_id ?? ''}`}</span> },
       { key: 'books_date', header: 'Books date', render: (e) => formatDate(e.books?.document_date) },
       { key: 'books_status', header: 'Books status', render: (e) => e.books?.status ?? <span className="muted">—</span> },
-      { key: 'books_amount', header: 'Books amount', align: 'right', render: (e) => formatMoney(e.books?.amount) },
+      // Commercial, and Books owns it: the value agreed with the party on the
+      // voucher. Named on the screen exactly as the sheet names it, because two
+      // right-aligned money columns with nothing to tell them apart is how a
+      // valuation figure gets quoted as a turnover figure.
+      { key: 'books_amount', header: 'Books amount (voucher value)', align: 'right', render: (e) => formatMoney(e.books?.amount) },
       { key: 'inventory', header: 'Inventory document', render: (e) => (e.inventory ? <Link to={`/documents/${e.inventory.document_id}`}>{e.inventory.document_no ?? `#${e.inventory.document_id}`} · {e.inventory.document_type}</Link> : <span className="muted">none</span>) },
       { key: 'inventory_status', header: 'Inventory status', render: (e) => (e.inventory ? <StatusBadge value={e.inventory.status} /> : '—') },
-      { key: 'stock_effect', header: 'Stock effect', align: 'right', render: (e) => formatMoney(e.inventory?.stock_effect) },
+      // Valuation, and Inventory owns it: what the stock moved by this document
+      // cost. Not the same number, not the same owner.
+      { key: 'stock_effect', header: 'Stock effect (valuation)', align: 'right', render: (e) => formatMoney(e.inventory?.stock_effect) },
       { key: 'failure', header: 'Failure', render: (e) => e.inventory?.failure_reason ?? <span className="muted">—</span> },
     ],
     [],

@@ -5,7 +5,7 @@ import { bomApi } from '../../services/masters'
 import type { Bom } from '../../services/masters'
 import { formatDateTime, formatInt, formatQty } from '../../utils/format'
 
-const bomConfig: MasterConfig<Bom> = {
+export const bomConfig: MasterConfig<Bom> = {
   slug: 'bill-of-materials',
   permissionSlug: 'bill_of_materials',
   title: 'Bills of materials',

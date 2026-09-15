@@ -199,16 +199,38 @@ describe('ExportActions', () => {
     expect(payload.metaLines).toContain('Rows: 2 of 4,182')
   })
 
-  /** A CSV has nowhere to carry a note, so the toast carries it. */
-  it('carries the truncation into the CSV toast, and does not call it a success', async () => {
+  /**
+   * A CSV has nowhere INSIDE it to carry a note — a trailing sentence would land
+   * in the data as a row and be summed. The toast says it, but a toast is gone
+   * in 4.5 seconds and the .csv is the thing that gets emailed to an auditor
+   * next month. So the shortfall goes in the filename, which travels with it.
+   */
+  it('names a short CSV for what it is, so the file itself says it is short', async () => {
     const fetchAll = vi.fn(async () => ({ rows: [...ROWS], total: 99_999, truncated: true }))
     renderActions({ fetchAll })
     fireEvent.click(screen.getByRole('button', { name: /export/i }))
     fireEvent.click(screen.getByRole('menuitem', { name: /CSV/ }))
     await waitFor(() => expect(downloadCsv).toHaveBeenCalledOnce())
+
+    const [filename] = downloadCsv.mock.calls[0]
+    expect(filename).toBe('stock-movement-register-partial-2-of-99999.csv')
+
     await waitFor(() => expect(toasts).toHaveLength(1))
     expect(toasts[0].kind).not.toBe('success')
+    // The toast leads with the shortfall, not with the word "Exported".
+    expect(toasts[0].message.startsWith('Partial export')).toBe(true)
     expect(toasts[0].message).toContain('99,997 are not')
+  })
+
+  it('leaves a complete CSV unmarked, so the marker means something', async () => {
+    const fetchAll = vi.fn(async () => ({ rows: [...ROWS], total: ROWS.length, truncated: false }))
+    renderActions({ fetchAll })
+    fireEvent.click(screen.getByRole('button', { name: /export/i }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /CSV/ }))
+    await waitFor(() => expect(downloadCsv).toHaveBeenCalledOnce())
+    expect(downloadCsv.mock.calls[0][0]).toBe('stock-movement-register.csv')
+    await waitFor(() => expect(toasts).toHaveLength(1))
+    expect(toasts[0].kind).toBe('success')
   })
 
   /**

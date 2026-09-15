@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { StatusBadge } from '../../components/StatusBadge'
+import { StatusBadge, statusBadgeLabel } from '../../components/StatusBadge'
 import { useFormOptions } from '../../hooks/useFormOptions'
 import { MasterPage } from '../../masters/MasterPage'
 import { isPickedItem } from '../../masters/formValues'
@@ -16,7 +16,7 @@ const idNum = (v: unknown): number | null => {
   return Number.isFinite(n) && n > 0 ? n : null
 }
 
-const serialsConfig: MasterConfig<Serial> = {
+export const serialsConfig: MasterConfig<Serial> = {
   slug: 'serials',
   permissionSlug: 'serials',
   title: 'Serial numbers',
@@ -47,7 +47,8 @@ const serialsConfig: MasterConfig<Serial> = {
       ),
       exportValue: (r) => `${r.item_name ?? `#${r.item_id}`}${r.item_sku ? ` · ${r.item_sku}` : ''}`,
     },
-    { key: 'status', header: 'Status', sortKey: 'status', render: (r) => <StatusBadge value={r.status} /> },
+    // Same as the batch register: the sheet writes the badge's words, not the token.
+    { key: 'status', header: 'Status', sortKey: 'status', render: (r) => <StatusBadge value={r.status} />, exportValue: (r) => statusBadgeLabel(r.status) },
     { key: 'warehouse_name', header: 'Warehouse', sortKey: 'warehouse_name' },
     { key: 'batch_no', header: 'Batch', sortKey: 'batch_no', render: (r) => <span className="mono">{r.batch_no ?? '—'}</span> },
     { key: 'location_code', header: 'Location', render: (r) => <span className="mono">{r.location_code ?? '—'}</span> },
