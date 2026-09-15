@@ -8,6 +8,17 @@ namespace App\Services;
  */
 class BooksApiClient
 {
+    /** A Books that is not accepting connections must not hold an Inventory worker. */
+    private const CONNECT_TIMEOUT = 3;
+
+    /**
+     * Overall bound. Reduced from 30s: this runs on the outbox drain, which fires on ordinary
+     * user writes, so a slow Books used to cost the user half a minute per attempt while its
+     * own workers were blocked waiting on Inventory. Undelivered rows stay PENDING and are
+     * retried on the next contact, so waiting longer buys nothing.
+     */
+    private const TOTAL_TIMEOUT = 8;
+
     private const HOST_MAP = [
         'inventory.aicountly.com'    => 'https://books.aicountly.com',
         'inventory.gh.aicountly.com' => 'https://books.gh.aicountly.com',
@@ -67,19 +78,48 @@ class BooksApiClient
     /** @return array{ok:bool, status:int, body:?array, error:?string} */
     public function request(string $method, string $path, ?array $body = null): array
     {
+        $startedAt = microtime(true);
+
         $key = (string) (getenv('BOOKS_SERVICE_KEY') ?: '');
         if ($key === '' || str_starts_with($key, 'CHANGE_ME')) {
             return ['ok' => false, 'status' => 0, 'body' => null, 'error' => 'BOOKS_SERVICE_KEY not configured'];
         }
+        // RE-ENTRY GUARD — PHP-FPM CROSS-POOL STARVATION, NOT RECURSION.
+        //
+        // If Books issued the request we are serving, its worker is blocked on our response.
+        // Calling Books from here parks a second Books worker on a request that is itself
+        // waiting on Books; the two apps run in separate pools with small pm.max_children, so
+        // a handful of concurrent users blocks every child in both and the queue answers 504.
+        // See App\Services\CrossServiceCallContext for the loop this closes.
+        if (CrossServiceCallContext::isInboundFrom('books')) {
+            log_message(
+                'info',
+                'cross-service call suppressed: service=books op=' . ltrim($path, '/') . ' reason=inbound_from_books',
+            );
+
+            return ['ok' => false, 'status' => 0, 'body' => null, 'error' => 'books_reentrant_call_refused'];
+        }
+
         $url = $this->apiRoot() . '/' . ltrim($path, '/');
         $ch = curl_init($url);
-        $headers = ['Accept: application/json', 'Content-Type: application/json', 'X-Service-Key: ' . $key, 'X-Source-App: inventory'];
+        $headers = [
+            'Accept: application/json',
+            'Content-Type: application/json',
+            'X-Service-Key: ' . $key,
+            'X-Source-App: inventory',
+            // Name ourselves so Books will not call Inventory back while serving this.
+            CrossServiceCallContext::HEADER . ': inventory',
+        ];
         $opts = [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_CUSTOMREQUEST  => strtoupper($method),
             CURLOPT_HTTPHEADER     => $headers,
-            CURLOPT_CONNECTTIMEOUT => 8,
-            CURLOPT_TIMEOUT        => 30,
+            // Both bounds matter, and the connect bound matters most: a Books that is up but
+            // not accepting — every child blocked waiting on another pool — is held only by
+            // CURLOPT_CONNECTTIMEOUT. This runs on the outbox drain, which happens on ordinary
+            // user writes, so a degraded Books must cost the user a moment, not half a minute.
+            CURLOPT_CONNECTTIMEOUT => self::CONNECT_TIMEOUT,
+            CURLOPT_TIMEOUT        => self::TOTAL_TIMEOUT,
         ];
         if ($body !== null) {
             $opts[CURLOPT_POSTFIELDS] = json_encode($body, JSON_UNESCAPED_UNICODE);
@@ -89,6 +129,7 @@ class BooksApiClient
         $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
         $err = curl_error($ch);
         curl_close($ch);
+        CrossServiceCallContext::logCall('books', $url, $status, $startedAt, $err);
         if ($raw === false || $status === 0) {
             return ['ok' => false, 'status' => 0, 'body' => null, 'error' => $err ?: 'Books unreachable'];
         }
