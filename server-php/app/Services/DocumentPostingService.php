@@ -230,11 +230,16 @@ class DocumentPostingService
             );
         }
 
+        // The document was posted and then reversed, so it stays in the register marked REVERSED
+        // and cannot be posted a second time. The message says so: "try again" on its own points
+        // the user at a Post button that will refuse them.
+        $again = ' This document is now marked Reversed and cannot be posted again — enter it afresh once the books are back.';
+
         throw new InventoryException(
             $refused ? 'books_refused' : 'books_unavailable',
             $refused
-                ? 'The books refused the accounting entry for this document, so nothing has been posted: the stock movement has been reversed and no stock has changed. Reason given by the books: ' . mb_substr($why, 0, 300)
-                : 'The books could not be reached, so this document has not been posted: the stock movement has been reversed and no stock has changed. Stock and the books have to record the same movement in the same moment, so Inventory cannot post while the books are unavailable. Try again once they are back. (' . mb_substr($why, 0, 200) . ')',
+                ? 'The books refused the accounting entry for this document, so nothing has been posted: the stock movement has been reversed and no stock has changed. Reason given by the books: ' . mb_substr($why, 0, 300) . '.' . $again
+                : 'The books could not be reached, so this document has not been posted: the stock movement has been reversed and no stock has changed. Stock and the books have to record the same movement in the same moment, so Inventory cannot post while the books are unavailable. (' . mb_substr($why, 0, 200) . ')' . $again,
             $refused ? 409 : 503,
             $details,
         );

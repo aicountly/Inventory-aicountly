@@ -176,15 +176,26 @@ class CrossServiceReentryTest extends TestCase
         $this->assertStringContainsString("'acknowledged_at', null", $body, 'only unacknowledged rows are stamped');
     }
 
+    /**
+     * The outcome of one delivery attempt is applied in recordDelivery(), which both the
+     * dispatcher and the synchronous journal handoff ({@see OutboxService::deliverNow()}) go
+     * through — so the piggybacked acknowledgement rides back on either path and neither can
+     * apply one for a delivery Books did not acknowledge.
+     */
     public function testAcksAreAppliedOnlyForAnAcknowledgedDelivery(): void
     {
-        $body = self::methodSource(OutboxService::class, 'dispatch');
+        $body = self::methodSource(OutboxService::class, 'recordDelivery');
 
         $ackBranch = strpos($body, "\$outcome['ack']");
         $apply = strpos($body, 'applyPiggybackedRevisionAcks');
 
         $this->assertNotFalse($apply);
         $this->assertGreaterThan($ackBranch, $apply, 'acks are applied inside the delivered branch, not on a failure');
+
+        // Both delivery paths must settle through it, or one of them acknowledges by its own rules.
+        foreach (['dispatch', 'deliverNow'] as $method) {
+            $this->assertStringContainsString('recordDelivery(', self::methodSource(OutboxService::class, $method), $method . '() must settle its attempt through the shared bookkeeping');
+        }
     }
 
     // ==================================================================================
@@ -212,6 +223,7 @@ class CrossServiceReentryTest extends TestCase
     private static function methodSource(string $class, string $method): string
     {
         $ref = new ReflectionMethod($class, $method);
+        $ref->setAccessible(true);
         $lines = file($ref->getFileName());
 
         return implode('', array_slice(

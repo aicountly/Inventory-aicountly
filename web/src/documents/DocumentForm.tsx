@@ -185,7 +185,9 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
       const books = parseBooksHandoff(err)
       if (books) {
         setBooksBlock(books)
-        setApiError(id ? `Draft #${id} is saved but was not posted.` : null)
+        // The draft was saved AND posted; the post was then undone. Calling it "still a draft"
+        // would send the user back to a Post button that refuses a reversed document.
+        setApiError(id && !books.reversed ? `Draft #${id} is saved but was not posted.` : null)
         return
       }
       const neg = parseNegativeStock(err)

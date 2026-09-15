@@ -79,13 +79,21 @@ export function parseBooksHandoff(err: unknown): BooksHandoffBlock | null {
     }
   }
 
+  // The document was posted and then reversed, so it stays in the register marked Reversed and
+  // cannot be posted a second time. Saying "try again" without saying that sends somebody to a
+  // Post button that will refuse them.
+  const afterReversal = reversed
+    ? ' This document is now marked Reversed and cannot be posted again — enter it afresh once the books are back.'
+    : ''
+
   if (kind === BOOKS_REFUSED) {
     return {
       kind,
       title: 'The books would not accept this entry — nothing was posted',
       message: `The books refused the accounting entry for this document, so the stock movement was ${reversed ? 'reversed' : 'not completed'} and no stock has changed.`,
       advice:
-        'This is usually a setup problem in the books (a missing ledger or a closed period) rather than anything wrong with the document. Fix the reason below in the books, then post again.',
+        'This is usually a setup problem in the books — a missing ledger or a closed period — rather than anything wrong with the document. Fix the reason given below in the books, then enter the document again.' +
+        afterReversal,
       reversed,
       booksError,
       handoffId,
@@ -97,7 +105,8 @@ export function parseBooksHandoff(err: unknown): BooksHandoffBlock | null {
     title: 'The books are not answering — nothing was posted',
     message: `The accounting service could not be reached, so the stock movement was ${reversed ? 'reversed' : 'not completed'} and no stock has changed.`,
     advice:
-      'Stock and the books have to record the same movement in the same moment, so Inventory does not post stock while the books are unavailable. Nothing is lost — the document is still here. Try posting again in a few minutes.',
+      'Stock and the books have to record the same movement in the same moment, so Inventory does not post stock while the books are unavailable. That is the trade: no stock document can be posted until they answer.' +
+      afterReversal,
     reversed,
     booksError,
     handoffId,

@@ -85,7 +85,12 @@ class OutboxService
      * request is in flight); $stopOnFailure leaves the rest of the batch for later as soon as one
      * row is not acknowledged, which is what keeps that drain off a user's clock during an outage.
      *
-     * @return array{sent:int, failed:int, dead:int, skipped:int}
+     * The unattended sweep ($cmpId null: the every-minute cron and the operator's Dispatch
+     * button) additionally finishes any interrupted journal-handoff reversal and reports it under
+     * 'repaired'. The existing keys are untouched, so inventory:outbox-dispatch reads exactly
+     * what it always did.
+     *
+     * @return array{sent:int, failed:int, dead:int, skipped:int, repaired?:array{reversed:int, failed:int}}
      */
     public function dispatch(int $limit = 100, ?BooksApiClient $books = null, ?int $cmpId = null, bool $stopOnFailure = false): array
     {
