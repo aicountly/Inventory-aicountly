@@ -114,6 +114,7 @@ class OutboxService
                 $db->table('inv_integration_events')->where('event_id', (int) $row['event_id'])->update([
                     'status' => 'ACKED', 'attempts' => $attempts, 'sent_at' => date('Y-m-d H:i:s'), 'acked_at' => date('Y-m-d H:i:s'), 'last_error' => null,
                 ]);
+                $this->applyPiggybackedRevisionAcks((int) $row['cmp_id'], $result);
                 $out['sent']++;
                 continue;
             }
@@ -132,6 +133,104 @@ class OutboxService
         }
 
         return $out;
+    }
+
+    /**
+     * Mark the valuation revisions Books reported taking into its ledger, from the response
+     * body of the delivery we just made.
+     *
+     * WHY THE ACK ARRIVES THIS WAY — PHP-FPM CROSS-POOL STARVATION
+     * ------------------------------------------------------------
+     * Books used to acknowledge by calling Inventory back on POST
+     * /api/v1/valuation/revisions/ack while serving this very request. That parked a second
+     * Inventory worker on a request Inventory was already waiting on, and that worker's
+     * authorize() drained the outbox straight back into Books:
+     *
+     *   Inventory outbox -> books /integration/inventory/events
+     *     -> books acknowledgeRevisions() -> inventory /v1/valuation/revisions/ack
+     *       -> inventory authorize() -> outbox -> books /integration/inventory/events -> ...
+     *
+     * Books and Inventory are separate PHP-FPM pools with small pm.max_children. Nothing
+     * recurses in the application sense — each process makes one call and blocks — so no
+     * in-process check could detect it; what runs out is workers, in both pools at once,
+     * and the queue answers 504.
+     *
+     * The acknowledgement now rides back on the response we were already waiting for, and is
+     * applied here with the same UPDATE ValuationController::ackRevisions() performs. No
+     * second connection, no second worker, and the ack still lands in the same moment.
+     *
+     * Best effort by contract: a failure leaves the revision in the unacknowledged
+     * reconciliation bucket, which is exactly where the old direct call left it when it
+     * failed. It must never fail the delivery — the event itself was accepted.
+     *
+     * @param array{ok:bool, status:int, body:?array, error:?string} $result
+     */
+    protected function applyPiggybackedRevisionAcks(int $cmpId, array $result): void
+    {
+        if ($cmpId <= 0) {
+            return;
+        }
+
+        $ids = [];
+        foreach (self::eventResults($result) as $eventResult) {
+            $fromEvent = $eventResult['ack_revision_ids'] ?? null;
+            if (!is_array($fromEvent)) {
+                continue;
+            }
+            foreach ($fromEvent as $id) {
+                $id = (int) $id;
+                if ($id > 0) {
+                    $ids[] = $id;
+                }
+            }
+        }
+
+        $ids = array_values(array_unique($ids));
+        if ($ids === []) {
+            return;
+        }
+        // Same bound the endpoint enforces, so a malformed or hostile body cannot turn one
+        // acknowledgement into an unbounded UPDATE.
+        if (count($ids) > 5000) {
+            $ids = array_slice($ids, 0, 5000);
+        }
+
+        try {
+            $db = \Config\Database::connect();
+            $now = date('Y-m-d H:i:s');
+            foreach (array_chunk($ids, 500) as $chunk) {
+                $db->table('inv_valuation_revisions')
+                    ->where('cmp_id', $cmpId)
+                    ->whereIn('revision_id', $chunk)
+                    ->where('acknowledged_at', null)
+                    ->update(['acknowledged_at' => $now, 'acknowledged_by_app' => 'books']);
+            }
+        } catch (\Throwable $e) {
+            log_message('warning', 'Could not apply piggybacked revision acks for company {cmp}: {msg}', ['cmp' => $cmpId, 'msg' => $e->getMessage()]);
+        }
+    }
+
+    /**
+     * Per-event results inside a Books delivery response, whatever shape it arrived in.
+     *
+     * @param array{ok:bool, status:int, body:?array, error:?string} $result
+     * @return list<array<string,mixed>>
+     */
+    protected static function eventResults(array $result): array
+    {
+        $body = $result['body'] ?? null;
+        if (!is_array($body)) {
+            return [];
+        }
+        $data = $body['data'] ?? null;
+        if (!is_array($data)) {
+            return [];
+        }
+        if (!array_is_list($data)) {
+            return [$data];
+        }
+
+        return array_values(array_filter($data, 'is_array'));
     }
 
     /**

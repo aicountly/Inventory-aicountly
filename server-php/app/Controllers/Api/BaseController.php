@@ -57,6 +57,11 @@ class BaseController extends ResourceController
             }
             $actor = trim($this->request->getHeaderLine('X-Actor-Uuid'));
 
+            // The caller's product, proven by its service key rather than claimed in a
+            // header. Recording it here is what lets settleOutboxOnContact() below know
+            // that a Books worker is blocked waiting on this response.
+            \App\Services\CrossServiceCallContext::adoptAuthenticatedOrigin($app);
+
             return [
                 'uuid'       => $actor !== '' ? $actor : 'service:' . $app,
                 'acs_type'   => null,
@@ -194,7 +199,7 @@ class BaseController extends ResourceController
         }
 
         if ($ctx !== null && $permission !== null) {
-            $this->settleOutboxOnContact((int) $ctx['cmp_id']);
+            $this->settleOutboxOnContact((int) $ctx['cmp_id'], $session);
         }
 
         return ['session' => $session, 'ctx' => $ctx];
@@ -215,11 +220,40 @@ class BaseController extends ResourceController
      * Only a call that actually asserted a permission reaches here, so the company drained is one
      * the caller is allowed on rather than one it merely named in the query string.
      */
-    private function settleOutboxOnContact(int $cmpId): void
+    private function settleOutboxOnContact(int $cmpId, ?array $session = null): void
     {
         if ($cmpId <= 0 || !in_array(strtoupper($this->request->getMethod()), ['POST', 'PUT', 'PATCH', 'DELETE'], true)) {
             return;
         }
+
+        // RE-ENTRY GUARD — PHP-FPM CROSS-POOL STARVATION, NOT RECURSION.
+        //
+        // The outbox delivers to Books. When BOOKS is the caller, its worker is already
+        // blocked waiting on this response, so delivering from here parks a second Books
+        // worker on a request that is itself waiting on Books. Books and Inventory are
+        // separate pools with small pm.max_children, and the full loop was live:
+        //
+        //   Inventory write -> outbox -> POST books .../inventory/events
+        //     -> InventoryEventHandler -> POST inventory .../valuation/revisions/ack
+        //       -> THIS LINE -> POST books .../inventory/events -> ...
+        //
+        // Nothing in a single process can detect that: each one makes one call and waits.
+        // What runs out is workers, in both pools at once, and the queue answers 504.
+        //
+        // Nothing is lost by not draining here. The rows are durable and stay PENDING; the
+        // next contact for this company delivers them, as does the CLI sweep. The source_app
+        // consulted is resolved from the caller's service key in auth(), never from a
+        // request header, so this cannot be turned on or off by a client.
+        $callerApp = strtolower(trim((string) ($session['source_app'] ?? '')));
+        if ($callerApp === 'books' || \App\Services\CrossServiceCallContext::isInboundFrom('books')) {
+            log_message(
+                'info',
+                'cross-service call suppressed: service=books op=outbox_settle_on_contact reason=inbound_from_books cmp=' . $cmpId,
+            );
+
+            return;
+        }
+
         $this->outboxDispatcher()->settleOnContact($cmpId);
     }
 
