@@ -1,14 +1,21 @@
-import { useMemo } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { ShieldAlert } from 'lucide-react'
 import { useAccess } from '../access/AccessContext'
 import { useCompany } from '../company/CompanyContext'
 import { EmptyState } from '../ui/EmptyState'
 import { Card } from '../ui/Card'
-import { DashboardHeader } from './components/DashboardHeader'
+import { formatDate, formatQty, todayIso } from '../utils/format'
+import { DashboardPageHeader } from './components/DashboardPageHeader'
+import { PulseBriefing } from './components/PulseBriefing'
 import { KpiStrip } from './components/KpiStrip'
 import { QuickActions } from './components/QuickActions'
-import { buildKpiCards } from './model'
+import { NearExpiryWindow } from './components/NearExpiryWindow'
+import { exportDashboardPdf } from './dashboardExport'
+import { formatCount, formatCurrencyCompact } from './formatters'
+import { buildPulseFindings } from './pulse'
+import { ageingSeries, buildKpiCards, warehouseSeries } from './model'
 import { NEAR_EXPIRY_CHOICES, useDashboardData } from './useDashboardData'
+import type { DashboardSectionProps } from './pages/types'
 import { AgeingWidget, MovementMixWidget, TopItemsWidget, WarehouseValueWidget } from './widgets/StockWidgets'
 import { ExpiryWidget, RecentMovementsWidget, ReorderWidget } from './widgets/ActionWidgets'
 import { DocumentsWidget, IntegrationWidget, ReconciliationWidget } from './widgets/OpsWidgets'
@@ -31,16 +38,14 @@ import { DocumentsWidget, IntegrationWidget, ReconciliationWidget } from './widg
  *  - Chrome is marked `print:hidden`; the cards themselves print.
  *  - The `aic` class opts this subtree into the Books reset (see theme/tokens.css).
  */
-export function OverviewDashboard() {
+export function OverviewDashboard({ scope, view }: DashboardSectionProps) {
   const { companyName, fy, branch, status: companyStatus } = useCompany()
-  const { member, loading: accessLoading } = useAccess()
-  const d = useDashboardData()
-
-  const userName = useMemo(() => {
-    const name = member?.display_name?.trim()
-    if (!name) return null
-    return name.split(/\s+/)[0]
-  }, [member])
+  const { loading: accessLoading } = useAccess()
+  const [exporting, setExporting] = useState(false)
+  // The as-at date and the warehouse now come from the URL, shared with the
+  // other four dashboards, so a link to one of them reopens on the same day
+  // and the same warehouse rather than silently on today and everywhere.
+  const d = useDashboardData({ asOf: scope.asOf, warehouseId: scope.effectiveWarehouseId })
 
   const cards = useMemo(
     () =>
@@ -66,6 +71,105 @@ export function OverviewDashboard() {
     return cards.filter((c) => !blocked.has(c.key))
   }, [cards, d.can])
 
+  // The briefing is arithmetic over the figures already on this page — see
+  // pulse.ts. It is labelled as a rule-based summary, not as a forecast.
+  const findings = useMemo(
+    () =>
+      buildPulseFindings({
+        negativeStockRows: d.core.data?.stock.negative_stock_rows ?? null,
+        failedPostings: d.core.data?.documents.failed ?? null,
+        expiredBatches: d.expiry.data?.expired ?? null,
+        expiringBatches: d.expiry.data?.expiringSoon ?? null,
+        expiringDays: d.nearExpiryDays,
+        belowReorder: d.replenishment.data?.summary.triggered_total ?? null,
+        pendingApproval: d.core.data?.documents.pending_approval ?? null,
+        outboxFailed: d.core.data?.integration.outbox_failed ?? null,
+        reconciliationDifference:
+          d.core.data?.last_reconciliation?.difference === null ||
+          d.core.data?.last_reconciliation?.difference === undefined
+            ? null
+            : Number(d.core.data.last_reconciliation.difference),
+        reconciliationStatus: d.core.data?.last_reconciliation?.status ?? null,
+      }),
+    [d.core.data, d.expiry.data, d.replenishment.data, d.nearExpiryDays],
+  )
+
+  const onExport = useCallback(() => {
+    setExporting(true)
+    try {
+      const ages = ageingSeries(d.ageing.data, d.asOf)
+      const houses = warehouseSeries(d.warehouses.data, d.asOf)
+      exportDashboardPdf({
+        title: 'Inventory overview',
+        description: view.description,
+        companyName,
+        fyLabel: fy?.label ?? 'Financial year',
+        branchLabel: branch ? branch.name : 'All branches',
+        warehouseLabel:
+          scope.effectiveWarehouseId === null
+            ? 'All warehouses'
+            : (scope.warehouses.find((w) => w.warehouse_id === scope.effectiveWarehouseId)?.warehouse_name ??
+              `Warehouse ${scope.effectiveWarehouseId}`),
+        asOf: d.asOf,
+        generatedAt: null,
+        metrics: visibleCards.map((c) => [c.label, c.value, c.hint ?? ''] as const),
+        tables: [
+          {
+            title: 'Value by warehouse',
+            numericColumns: [1, 2],
+            columns: ['Warehouse', 'Value at cost', 'Share', 'Quantity'],
+            rows: houses.map((h) => [h.label, h.display, `${h.share.toFixed(0)}%`, h.sub ?? '']),
+          },
+          {
+            title: 'Stock ageing',
+            numericColumns: [1, 2],
+            columns: ['Age bucket', 'Value at cost', 'Share', 'Quantity'],
+            rows: ages.map((a) => [a.label, a.display, `${a.share.toFixed(0)}%`, a.sub ?? '']),
+          },
+          {
+            title: `Items at or below reorder point`,
+            note:
+              d.replenishment.data && d.replenishment.data.rows.length < d.replenishment.data.summary.triggered_total
+                ? `Showing ${d.replenishment.data.rows.length} of ${d.replenishment.data.summary.triggered_total} triggered rows. Open the replenishment report for the full list.`
+                : undefined,
+            numericColumns: [2, 3],
+            columns: ['Item', 'Warehouse', 'Available', 'Suggested'],
+            rows: (d.replenishment.data?.rows ?? []).map((r) => [
+              r.item_name ?? `Item ${r.item_id}`,
+              r.default_warehouse_name ?? '—',
+              formatQty(r.available),
+              formatQty(r.suggested_qty),
+            ]),
+          },
+          {
+            title: `Batches expiring within ${d.nearExpiryDays} days`,
+            numericColumns: [3, 4],
+            columns: ['Item', 'Batch', 'Expiry', 'Quantity', 'Value at cost'],
+            rows: (d.expiry.data?.rows ?? [])
+              .filter((r) => !r.is_expired)
+              .map((r) => [
+                r.item_name ?? `Item ${r.item_id}`,
+                r.batch_no ?? '—',
+                formatDate(r.expiry_date),
+                formatQty(r.on_hand),
+                formatCurrencyCompact(r.stock_value),
+              ]),
+          },
+        ],
+        notes: [
+          'Every value on this sheet is at COST under each item\'s own configured costing method. Commercial value, tax and margin belong to Books and do not appear here.',
+          `Quantities are summed in base units only. Where a figure spans several units of measure it is labelled as such rather than added into one number.`,
+          d.core.data
+            ? `${formatCount(d.core.data.stock.negative_stock_rows)} balance rows are below zero; they are reported as exceptions and are not netted into the ageing composition.`
+            : '',
+          'Stock ageing measures how long the cost layers still on hand have been held — not how long ago the item was created.',
+        ].filter(Boolean),
+      })
+    } finally {
+      setExporting(false)
+    }
+  }, [d, view, companyName, fy, branch, scope, visibleCards])
+
   // While the company scope is still resolving, render the page anyway: every
   // query is disabled until `scope` exists, so each widget shows its own
   // skeleton and the layout is already in place when the data arrives. Only
@@ -89,18 +193,39 @@ export function OverviewDashboard() {
 
   return (
     <div className="aic space-y-3 pb-6 max-w-screen-2xl mx-auto text-gray-900">
-      <DashboardHeader
-        userName={userName}
+      <DashboardPageHeader
+        title="Inventory overview"
+        description={view.description}
         companyName={companyName}
         fyLabel={fy?.label ?? 'Financial year'}
         branchLabel={branch ? branch.name : 'All branches'}
-        asOf={d.asOf}
-        lastSyncedAt={d.lastSyncedAt}
+        asOf={scope.asOf}
+        onAsOf={scope.setAsOf}
+        maxDate={todayIso()}
+        warehouses={scope.warehouses}
+        warehouseId={scope.effectiveWarehouseId}
+        onWarehouseId={scope.setWarehouseId}
+        warehouseDropped={scope.warehouseDropped}
         refreshing={d.refreshing}
         onRefresh={d.refreshAll}
-        nearExpiryDays={d.nearExpiryDays}
-        nearExpiryChoices={NEAR_EXPIRY_CHOICES}
-        onNearExpiryDays={d.setNearExpiryDays}
+        lastSyncedAt={d.lastSyncedAt}
+        onExport={onExport}
+        exporting={exporting}
+        actions={
+          <NearExpiryWindow
+            value={d.nearExpiryDays}
+            choices={NEAR_EXPIRY_CHOICES}
+            onChange={d.setNearExpiryDays}
+          />
+        }
+      />
+
+      <PulseBriefing
+        findings={findings}
+        anyDataKnown={d.core.data !== null || d.stock.data !== null}
+        lastSyncedAt={d.lastSyncedAt}
+        reviewTo="/dashboard?view=controls"
+        reviewLabel="Review controls"
       />
 
       {visibleCards.length > 0 ? <KpiStrip cards={visibleCards} /> : null}
@@ -113,7 +238,12 @@ export function OverviewDashboard() {
 
       <QuickActions asOf={d.asOf} period={d.period} />
 
-      <div className="grid gap-3 grid-cols-1 md:grid-cols-2 xl:grid-cols-4">
+      {/* Two across, not four. Each of these four cards holds a MiniTable whose
+          columns need ~420px; at four across on a 1440 screen the card is about
+          290px and every numeric column is cut off at the card edge. The table
+          scrolls, so nothing is unreachable — but a dashboard whose figures are
+          half-visible is a dashboard nobody reads. */}
+      <div className="grid gap-3 grid-cols-1 md:grid-cols-2">
         {d.can.replenishment ? <ReorderWidget query={d.replenishment} /> : null}
         {d.can.nearExpiry ? <ExpiryWidget query={d.expiry} days={d.nearExpiryDays} /> : null}
         {d.can.stockSummary ? <TopItemsWidget query={d.stock} asOf={d.asOf} period={d.period} /> : null}

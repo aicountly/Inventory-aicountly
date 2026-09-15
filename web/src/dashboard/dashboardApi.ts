@@ -109,10 +109,10 @@ export interface ReplenishmentSnapshot {
   total: number
 }
 
-export async function fetchReplenishment(signal?: AbortSignal): Promise<ReplenishmentSnapshot> {
+export async function fetchReplenishment(warehouseId: number | null = null, signal?: AbortSignal): Promise<ReplenishmentSnapshot> {
   const res = await fetchReport<ReplenishmentRow, ReplenishmentSummary>(
     'replenishment',
-    { only_triggered: 1, limit: WIDGET_ROWS, page: 1 },
+    { only_triggered: 1, warehouse_id: warehouseId ?? undefined, limit: WIDGET_ROWS, page: 1 },
     signal,
   )
   return { summary: res.summary, rows: res.data, total: res.meta.total }

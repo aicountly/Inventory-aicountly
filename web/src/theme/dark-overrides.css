@@ -161,7 +161,8 @@
    Solid accents (bg-*-500 and up) are deliberately absent: they are already
    dark-safe, and washing them would flatten every primary and destructive
    button in the app. */
-.dark .bg-emerald-50 {
+.dark .bg-emerald-50,
+.dark .bg-emerald-50\/50 {
   background-color: rgb(6 78 59 / 0.22);
 }
 .dark .bg-emerald-100 {
@@ -226,6 +227,7 @@
 }
 .dark .text-amber-600,
 .dark .text-amber-700,
+.dark .text-amber-800,
 .dark .text-amber-900 {
   color: rgb(252 211 77);
 }

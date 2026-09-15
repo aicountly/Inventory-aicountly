@@ -74,14 +74,14 @@ export function CompanySwitcher() {
   const fyLabel = fy?.label ?? (fyId ? `FY #${fyId}` : 'FY')
 
   return (
-    <div className="aic relative" ref={rootRef}>
+    <div className="aic relative min-w-0" ref={rootRef}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="dialog"
         aria-expanded={open}
         className={cx(
-          'inline-flex h-8 max-w-[22rem] items-center gap-2 rounded-lg border px-2.5 text-left transition-colors',
+          'inline-flex h-8 min-w-0 max-w-[22rem] items-center gap-2 rounded-lg border px-2.5 text-left transition-colors',
           open
             ? 'border-primary/40 bg-primary-light/50'
             : 'border-gray-200 bg-white hover:border-primary/40 hover:bg-primary-light/40',

@@ -14,6 +14,19 @@ interface QueryOptions {
   enabled?: boolean
   /** Keep the previous data on screen while the next page loads. Default true. */
   keepData?: boolean
+  /**
+   * A value whose change makes the data on screen WRONG rather than merely
+   * stale — in practice the tenant scope (company / FY / branch).
+   *
+   * `keepData` exists so a page change or a filter tweak does not blank the
+   * screen, and that is right for a narrower date or the next page. It is not
+   * right for a company switch: holding the previous company's figures under
+   * the new company's name is not a slightly old number, it is another
+   * tenant's data on screen, and no amount of "loading" styling makes that
+   * acceptable. Pass the scope here and the data is dropped the instant it
+   * changes, whatever `keepData` says.
+   */
+  resetKey?: string | number | null
 }
 
 /**
@@ -21,13 +34,24 @@ interface QueryOptions {
  * previous request, ignores its own aborts and exposes a `reload`.
  */
 export function useQuery<T>(fetcher: (signal: AbortSignal) => Promise<T>, deps: DependencyList, options: QueryOptions = {}): QueryState<T> {
-  const { enabled = true, keepData = true } = options
+  const { enabled = true, keepData = true, resetKey = null } = options
   const [data, setData] = useState<T | null>(null)
   const [loading, setLoading] = useState<boolean>(enabled)
   const [error, setError] = useState<Error | null>(null)
   const [tick, setTick] = useState(0)
   const fetcherRef = useRef(fetcher)
   fetcherRef.current = fetcher
+
+  // Dropped in render, not in an effect: an effect runs after the browser has
+  // already painted, which is one frame of the previous tenant's numbers under
+  // the new tenant's name. Comparing during render means the stale data never
+  // reaches the screen at all.
+  const lastResetKey = useRef(resetKey)
+  if (lastResetKey.current !== resetKey) {
+    lastResetKey.current = resetKey
+    if (data !== null) setData(null)
+    if (error !== null) setError(null)
+  }
 
   useEffect(() => {
     if (!enabled) {
@@ -54,7 +78,7 @@ export function useQuery<T>(fetcher: (signal: AbortSignal) => Promise<T>, deps: 
 
     return () => controller.abort()
     // eslint-disable-next-line react-hooks/exhaustive-deps -- caller-owned deps
-  }, [...deps, tick, enabled])
+  }, [...deps, tick, enabled, resetKey])
 
   const reload = useCallback(() => setTick((t) => t + 1), [])
 

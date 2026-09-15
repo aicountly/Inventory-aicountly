@@ -172,6 +172,86 @@ class DocumentTypeRegistry
         return strtolower($type);
     }
 
+    /**
+     * Warehouse-floor flow class, for counting a day's work.
+     *
+     * The Operations dashboard counts "receipts today" and "issues today" as DOCUMENTS, and a
+     * document has to fall in exactly one bucket or the two counts overlap and neither is a
+     * number anyone can act on. A transfer moves stock out of one warehouse and into another in
+     * the same posting, so counting it by movement direction would count it twice; counting it
+     * by type counts it once, as the transfer it is.
+     *
+     * The classes:
+     *   receipt      goods arrive from outside the company's stock (fixed_in types)
+     *   issue        goods leave it (fixed_out types)
+     *   transfer     stock moves between the company's own warehouses
+     *   adjustment   the balance changes without goods crossing the boundary — counts,
+     *                journals, production, assembly, job work returning, revaluation
+     *   none         no physical movement at all — reservations, packing, challans that
+     *                only open a pending quantity
+     *
+     * `none` is not "uninteresting": those documents are the ones the pending-quantity and
+     * packing registers are built on. It means only that they move no stock, so they are not
+     * a receipt or an issue on the floor.
+     */
+    public const FLOW_RECEIPT = 'receipt';
+    public const FLOW_ISSUE = 'issue';
+    public const FLOW_TRANSFER = 'transfer';
+    public const FLOW_ADJUSTMENT = 'adjustment';
+    public const FLOW_NONE = 'none';
+
+    /**
+     * Types whose line_mode alone does not settle the class.
+     *
+     * `by_line` types each carry their own per-line direction, so the type cannot say "in" or
+     * "out" — they are all balance adjustments of one kind or another. `status_only` types move
+     * no stock, except REVALUATION and LANDED_COST, which change the VALUE of stock already on
+     * hand: an adjustment in every sense that matters to a valuation reader, and one that must
+     * not be filed under "no movement" on a screen whose whole job is explaining value changes.
+     */
+    private const FLOW_OVERRIDES = [
+        'REVALUATION' => self::FLOW_ADJUSTMENT,
+        'LANDED_COST' => self::FLOW_ADJUSTMENT,
+    ];
+
+    /** Which bucket a day's worth of this document type falls in. One type, one bucket. */
+    public static function flowClass(string $type): string
+    {
+        $type = strtoupper($type);
+        if (isset(self::FLOW_OVERRIDES[$type])) {
+            return self::FLOW_OVERRIDES[$type];
+        }
+        $spec = self::TYPES[$type] ?? null;
+        if ($spec === null) {
+            return self::FLOW_NONE;
+        }
+
+        return match ($spec['line_mode']) {
+            'fixed_in'  => self::FLOW_RECEIPT,
+            'fixed_out' => self::FLOW_ISSUE,
+            'transfer'  => self::FLOW_TRANSFER,
+            'by_line'   => self::FLOW_ADJUSTMENT,
+            default     => self::FLOW_NONE,
+        };
+    }
+
+    /**
+     * Every document type in one flow class.
+     *
+     * @return list<string>
+     */
+    public static function typesInFlowClass(string $flow): array
+    {
+        $out = [];
+        foreach (array_keys(self::TYPES) as $type) {
+            if (self::flowClass($type) === $flow) {
+                $out[] = $type;
+            }
+        }
+
+        return $out;
+    }
+
     /** Legacy direction rule: given Books vch_type and dr_cr, in/out or null (identical to Books). */
     public static function legacyDirection(int $vchTypeId, int $drCr): ?string
     {
