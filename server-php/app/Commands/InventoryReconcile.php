@@ -6,6 +6,7 @@ use App\Services\ReconciliationService;
 use App\Services\StockBalanceService;
 use CodeIgniter\CLI\BaseCommand;
 use CodeIgniter\CLI\CLI;
+use App\Services\CronHeartbeat;
 
 /**
  * php spark inventory:reconcile [--company 1,2 | --all] [--as-of YYYY-MM-DD] [--bo 0]
@@ -29,7 +30,26 @@ class InventoryReconcile extends BaseCommand
         '--bo'      => 'Branch (default 0 = consolidated)',
     ];
 
+    /** The monitor code Console pairs these heartbeats with (console migration 034). */
+    public const MONITOR = 'inventory.reconcile_all';
+
+    /**
+     * Reports each run of the nightly reconciliation to Console's Cron Job Monitor.
+     *
+     * Silent and inert until CONSOLE_CRON_MONITOR_KEY is set, and it can never fail this
+     * command: the heartbeat is swallowed and the exit code below still has the last word.
+     * Null is coerced to success — a command that falls off the end without returning has
+     * not failed, and reporting it as one would make the monitor cry wolf every cycle.
+     */
     public function run(array $params)
+    {
+        return CronHeartbeat::reportRun(
+            self::MONITOR,
+            fn (): int => (int) ($this->execute($params) ?? EXIT_SUCCESS),
+        );
+    }
+
+    private function execute(array $params)
     {
         $this->normaliseEqualsOptions();
         foreach ($_SERVER['argv'] ?? [] as $arg) {

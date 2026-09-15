@@ -5,6 +5,7 @@ namespace App\Commands;
 use App\Services\RecalculationService;
 use CodeIgniter\CLI\BaseCommand;
 use CodeIgniter\CLI\CLI;
+use App\Services\CronHeartbeat;
 
 /**
  * php spark inventory:recalc-worker [--limit=N] [--cmp=ID]
@@ -25,7 +26,26 @@ class InventoryRecalcWorker extends BaseCommand
         '--cmp'   => 'Only run jobs of this company id.',
     ];
 
+    /** The monitor code Console pairs these heartbeats with (console migration 034). */
+    public const MONITOR = 'inventory.recalc_worker';
+
+    /**
+     * Reports each run of the backdated-recalculation queue to Console's Cron Job Monitor.
+     *
+     * Silent and inert until CONSOLE_CRON_MONITOR_KEY is set, and it can never fail this
+     * command: the heartbeat is swallowed and the exit code below still has the last word.
+     * Null is coerced to success — a command that falls off the end without returning has
+     * not failed, and reporting it as one would make the monitor cry wolf every cycle.
+     */
     public function run(array $params)
+    {
+        return CronHeartbeat::reportRun(
+            self::MONITOR,
+            fn (): int => (int) ($this->execute($params) ?? EXIT_SUCCESS),
+        );
+    }
+
+    private function execute(array $params)
     {
         $this->normaliseEqualsOptions();
         $limit = (int) (CLI::getOption('limit') ?? $params['limit'] ?? 20);
