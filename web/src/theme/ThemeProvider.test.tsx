@@ -26,7 +26,7 @@ function Probe() {
       <button type="button" onClick={() => setAppearance({ customPrimary: '#3874FF' })}>
         custom
       </button>
-      <button type="button" onClick={() => setAppearance({ sizeId: 'zoomnormal' })}>
+      <button type="button" onClick={() => setAppearance({ sizeId: 'zoomin' })}>
         bigger
       </button>
     </div>
@@ -52,7 +52,7 @@ describe('loadAppearance', () => {
       mode: 'system',
       colorPreset: 'default',
       fontId: 'noto',
-      sizeId: 'zoomcompact',
+      sizeId: 'zoomnormal',
     })
   })
 
@@ -165,11 +165,11 @@ describe('ThemeProvider', () => {
         <Probe />
       </ThemeProvider>,
     )
-    expect(root().style.getPropertyValue('--font-size-base')).toBe('13px')
+    expect(root().style.getPropertyValue('--font-size-base')).toBe('16px')
     act(() => {
       fireEvent.click(screen.getByText('bigger'))
     })
-    expect(root().style.getPropertyValue('--font-size-base')).toBe('16px')
+    expect(root().style.getPropertyValue('--font-size-base')).toBe('18px')
   })
 
   it('throws a useful error when the hook is used outside the provider', () => {

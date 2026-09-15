@@ -10,7 +10,7 @@ import type { KpiCardSpec } from './model'
 /**
  * Density, against Books rather than against the eye.
  *
- * Both products now rem-scale off the same 13px root, so any spacing this screen
+ * Both products now rem-scale off the same 16px root, so any spacing this screen
  * tightens by hand is a divergence, not a correction — the same markup would
  * then read differently in the two apps, which is the one thing a verbatim port
  * is for. The Books originals are

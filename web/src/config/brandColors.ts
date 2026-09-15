@@ -117,9 +117,9 @@ export function resolveFontId(stored: string | null | undefined): string {
 }
 
 export function resolveSizeId(stored: string | null | undefined): string {
-  if (!stored) return 'zoomcompact'
+  if (!stored) return 'zoomnormal'
   if (ERP_ZOOM_OPTIONS.some((s) => s.id === stored)) return stored
-  return LEGACY_SIZE_ALIASES[stored] ?? 'zoomcompact'
+  return LEGACY_SIZE_ALIASES[stored] ?? 'zoomnormal'
 }
 
 export function getThemeOption(key: string | null | undefined): ErpThemeOption {
