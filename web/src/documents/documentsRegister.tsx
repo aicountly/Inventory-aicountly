@@ -320,9 +320,11 @@ function filenameFor(documentType: string | null): string {
 /**
  * The documents register, optionally narrowed to one document type.
  *
- * `documentType` only changes the chrome — heading, breadcrumb, description,
- * export filename. The rows are narrowed by the `document_type` filter the
- * engine reads out of the URL, which is what makes the Books hand-off link
+ * `documentType` changes the chrome — heading, breadcrumb, description, export
+ * filename — and one thing more: on a type whose lines are structurally never
+ * valued it drops the Valuation column, card and total rather than printing a
+ * zero (see `typeIsValued`). The ROWS are narrowed by the `document_type` filter
+ * the engine reads out of the URL, which is what makes the Books hand-off link
  * work without a second code path.
  */
 export function documentsRegister(

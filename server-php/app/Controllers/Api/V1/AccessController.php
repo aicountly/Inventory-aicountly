@@ -58,9 +58,17 @@ class AccessController extends BaseController
         $cmpId = (int) $a['ctx']['cmp_id'];
         (new AccessProfileTemplateService())->ensureSystemProfiles($cmpId);
         $db = \Config\Database::connect();
-        $rows = $db->table('inv_access_profiles')->where('cmp_id', $cmpId)->where('deleted_at', null)->orderBy('is_system', 'DESC')->orderBy('profile_name')->get()->getResultArray();
+        // DBDebug is FALSE in every deployed environment, so ->get() answers FALSE on a query
+        // error and ->getResultArray() on false is a fatal Error — a 500 with no usable message,
+        // which is exactly how the add-member defect presented before it was traced.
+        $profileRes = $db->table('inv_access_profiles')->where('cmp_id', $cmpId)->where('deleted_at', null)->orderBy('is_system', 'DESC')->orderBy('profile_name')->get();
+        if ($profileRes === false) {
+            return $this->failStructured(500, 'query_failed', 'Could not read the access profiles for this company');
+        }
+        $rows = $profileRes->getResultArray();
         $memberCounts = [];
-        foreach ($db->table('inv_company_members')->select('profile_id, COUNT(*) AS n')->where('cmp_id', $cmpId)->whereIn('status', ['active', 'invited'])->groupBy('profile_id')->get()->getResultArray() as $mc) {
+        $countRes = $db->table('inv_company_members')->select('profile_id, COUNT(*) AS n')->where('cmp_id', $cmpId)->whereIn('status', ['active', 'invited'])->groupBy('profile_id')->get();
+        foreach ($countRes === false ? [] : $countRes->getResultArray() as $mc) {
             $memberCounts[(int) $mc['profile_id']] = (int) $mc['n'];
         }
         foreach ($rows as &$r) {
