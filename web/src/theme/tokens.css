@@ -565,15 +565,65 @@ body {
     --shadow-sticky: 0 -1px 2px rgba(15, 23, 42, 0.04);
   }
 
-  /* The accent the reader picked does travel to paper, so the accent tokens are
-     left alone above — every [data-theme] already supplies a light wash, and a
-     reset at `.dark` level would win on source order and print a red company's
-     register in green. Only the default palette still holds a dark wash in dark
-     mode, and `:not([data-theme])` keeps this rule to exactly that case. */
+  /* The accent the reader picked does travel to paper, so `--color-primary`
+     stays wherever the palette put it. Its wash and its ink cannot: in dark
+     mode every palette blends `--color-primary-light` toward the dark surface
+     and pales `--color-secondary` against it, so a selected register row
+     prints near-black under the near-black text the reset above just restored.
+     Each dark palette is handed its own light wash and ink back. One rule per
+     palette, rather than a single `.dark` reset, because only
+     `.dark[data-theme='…']` outranks the `.dark[data-theme='…']` block it is
+     undoing — a `.dark` reset would lose to it, and a bare `[data-theme='…']`
+     one would repaint the light reader too. */
   .dark:not([data-theme]),
   .dark[data-theme='default'] {
     --color-primary-light: 233 252 233;
     --color-secondary: 21 128 61;
+  }
+
+  .dark[data-theme='red'] {
+    --color-primary-light: 254 226 226;
+    --color-secondary: 127 29 29;
+  }
+
+  .dark[data-theme='orange'] {
+    --color-primary-light: 255 237 213;
+    --color-secondary: 154 52 18;
+  }
+
+  .dark[data-theme='sky'],
+  .dark[data-theme='sky_blue'] {
+    --color-primary-light: 224 242 254;
+    --color-secondary: 30 64 98;
+  }
+
+  .dark[data-theme='purpl'],
+  .dark[data-theme='purple'] {
+    --color-primary-light: 243 232 255;
+    --color-secondary: 88 28 135;
+  }
+
+  .dark[data-theme='yelow'],
+  .dark[data-theme='yellow'] {
+    --color-primary-light: 254 249 195;
+    --color-secondary: 113 63 18;
+  }
+
+  .dark[data-theme='part'],
+  .dark[data-theme='lime'] {
+    --color-primary-light: 236 252 203;
+    --color-secondary: 63 98 18;
+  }
+
+  .dark[data-theme='grn'],
+  .dark[data-theme='teal'] {
+    --color-primary-light: 204 251 241;
+    --color-secondary: 19 78 74;
+  }
+
+  .dark[data-theme='blue'] {
+    --color-primary-light: 219 234 254;
+    --color-secondary: 37 99 235;
   }
 
   /* Ink the parts that carry meaning — a status badge, a totals row, a KPI

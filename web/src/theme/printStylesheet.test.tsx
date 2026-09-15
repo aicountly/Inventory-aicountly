@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { render } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import postcss from 'postcss'
@@ -41,6 +41,114 @@ const PRINT_RULES: Rule[] = (() => {
   })
   return out
 })()
+
+/**
+ * The stylesheet flattened into something a cascade can be resolved against:
+ * every top-level rule plus every rule inside `@media print`, each tagged with
+ * its byte offset so source order is the file's own. Rules nested in `@layer`
+ * are left out — they carry utilities, never a token on the root element.
+ */
+interface CascadeRule {
+  selectors: string[]
+  decls: Array<[string, string]>
+  print: boolean
+  order: number
+}
+
+const CASCADE: CascadeRule[] = (() => {
+  const out: CascadeRule[] = []
+  const take = (container: postcss.Container, print: boolean) => {
+    container.each((node) => {
+      if (node.type !== 'rule') return
+      const decls: Array<[string, string]> = []
+      node.each((child) => {
+        if (child.type === 'decl') decls.push([child.prop, child.value])
+      })
+      out.push({ selectors: node.selectors, decls, print, order: node.source?.start?.offset ?? 0 })
+    })
+  }
+  take(SHEET, false)
+  SHEET.walkAtRules('media', (at) => {
+    if (at.params.replace(/\s+/g, ' ').trim() === 'print') take(at, true)
+  })
+  return out
+})()
+
+/**
+ * Specificity of the flat selectors this stylesheet uses — classes, attributes
+ * and pseudo-classes, no ids and no elements, which is the whole vocabulary of
+ * the token blocks. `:not()` contributes its argument, as the spec says.
+ */
+function specificity(selector: string): number {
+  const flat = selector.replace(/:not\(([^)]*)\)/g, '$1')
+  const classes = flat.match(/\.[A-Za-z_-][\w-]*/g)?.length ?? 0
+  const attributes = flat.match(/\[[^\]]*\]/g)?.length ?? 0
+  const pseudos = flat.match(/:[A-Za-z-]+/g)?.length ?? 0
+  return classes + attributes + pseudos
+}
+
+/** The value `el` ends up with for `prop` in the given medium. */
+function winning(el: Element, prop: string, medium: 'screen' | 'print'): string | undefined {
+  let best: { spec: number; order: number } | undefined
+  let value: string | undefined
+  for (const rule of CASCADE) {
+    if (rule.print && medium !== 'print') continue
+    for (const selector of rule.selectors) {
+      let matched = false
+      try {
+        matched = el.matches(selector)
+      } catch {
+        continue
+      }
+      if (!matched) continue
+      const spec = specificity(selector)
+      if (best && (spec < best.spec || (spec === best.spec && rule.order < best.order))) continue
+      for (const [declProp, declValue] of rule.decls) {
+        if (declProp === prop) {
+          value = declValue
+          best = { spec, order: rule.order }
+        }
+      }
+    }
+  }
+  return value
+}
+
+/** `<html>` as the pre-paint script leaves it for this reader. */
+function rootWith(accent: string | null, dark: boolean): Element {
+  const root = document.documentElement
+  root.className = dark ? 'dark' : ''
+  if (accent === null) root.removeAttribute('data-theme')
+  else root.setAttribute('data-theme', accent)
+  return root
+}
+
+/** Every accent the picker can set, read off the dark blocks themselves. */
+const ACCENTS: string[] = (() => {
+  const out = new Set<string>(['default'])
+  for (const rule of CASCADE) {
+    if (rule.print) continue
+    for (const selector of rule.selectors) {
+      const match = /^\.dark\[data-theme='([^']+)'\]$/.exec(selector)
+      if (match) out.add(match[1])
+    }
+  }
+  return [...out]
+})()
+
+/** Every token dark mode overrides, and therefore every token paper must undo. */
+const DARK_PROPS: string[] = (() => {
+  const out = new Set<string>()
+  for (const rule of CASCADE) {
+    if (rule.print) continue
+    if (!rule.selectors.some((sel) => sel === '.dark' || sel.startsWith('.dark['))) continue
+    for (const [prop] of rule.decls) out.add(prop)
+  }
+  return [...out]
+})()
+
+/** The three the accent picker owns: the reader's colour travels to paper. */
+const READER_OWNED = ['--color-primary', '--color-primary-hover', '--color-primary-active']
 
 /** Declarations of the first top-level rule with exactly this selector. */
 function declsOf(selector: string): Record<string, string> {
@@ -98,6 +206,11 @@ function renderRegisterTable() {
 }
 
 describe('the print stylesheet', () => {
+  // `rootWith` drives the real <html>, which the rendering tests below share.
+  afterEach(() => {
+    rootWith(null, false)
+  })
+
   /** One bad selector invalidates the whole list, so the rule with it silently stops applying. */
   it('has no selector the browser will throw the rule away over', () => {
     const selectors = PRINT_RULES.flatMap((rule) => rule.selectors)
@@ -112,26 +225,41 @@ describe('the print stylesheet', () => {
     const dark = declsOf('.dark')
     expect(Object.keys(dark).length).toBeGreaterThan(5)
 
-    // Every rule in the print block that a dark root on the default accent
-    // picks up, merged in source order.
-    const darkRootSelectors = [':root', '.dark', '.dark:not([data-theme])', ".dark[data-theme='default']"]
-    const reset: Record<string, string> = {}
-    for (const rule of PRINT_RULES) {
-      if (!rule.selectors.some((sel) => darkRootSelectors.includes(sel))) continue
-      rule.walkDecls((d) => {
-        reset[d.prop] = d.value
-      })
-    }
-
+    // The reader who never opened the accent picker: no data-theme at all.
     for (const [prop, darkValue] of Object.entries(dark)) {
-      if (prop === 'color-scheme') {
-        expect(reset[prop], 'the print reset must switch the UA back to light').toBe('light')
-        continue
-      }
-      // The three the accent picker owns and paper does not care about: the
-      // base green is the same in both themes and hover has no meaning in ink.
-      if (['--color-primary', '--color-primary-hover', '--color-primary-active'].includes(prop)) continue
-      expect(reset[prop], `${prop} is still the dark value (${darkValue}) on paper`).toBe(light[prop])
+      if (READER_OWNED.includes(prop)) continue
+      const onPaper = winning(rootWith(null, true), prop, 'print')
+      const expected = prop === 'color-scheme' ? 'light' : light[prop]
+      expect(onPaper, `${prop} is still the dark value (${darkValue}) on paper`).toBe(expected)
+    }
+  })
+
+  /**
+   * Nine palettes, thirteen spellings, and a dark block for every one of them
+   * that blends the accent wash into the dark surface. Asserting the merged
+   * print block cannot see a palette that was left out, so each is resolved
+   * against the real cascade and held to what the light reader already sees.
+   */
+  it.each(ACCENTS)('prints the %s accent as light paper wants it, not as the dark screen has it', (accent) => {
+    expect(ACCENTS.length, 'no dark accent blocks found — re-point this test').toBeGreaterThan(8)
+    expect(DARK_PROPS.length).toBeGreaterThan(5)
+
+    for (const prop of DARK_PROPS) {
+      if (READER_OWNED.includes(prop)) continue
+      const onPaper = winning(rootWith(accent, true), prop, 'print')
+      const onLightScreen = winning(rootWith(accent, false), prop, 'screen')
+      expect(
+        onPaper,
+        `${prop} on the ${accent} accent prints its dark value — a selected row goes near-black on paper`,
+      ).toBe(onLightScreen)
+    }
+  })
+
+  it.each(ACCENTS)('leaves the %s accent exactly as it is for a reader already on light', (accent) => {
+    for (const prop of DARK_PROPS) {
+      const onPaper = winning(rootWith(accent, false), prop, 'print')
+      const onScreen = winning(rootWith(accent, false), prop, 'screen')
+      expect(onPaper, `${prop} is repainted on paper for a light reader on ${accent}`).toBe(onScreen)
     }
   })
 
