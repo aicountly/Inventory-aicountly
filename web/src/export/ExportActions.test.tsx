@@ -1,6 +1,8 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ExportableColumn } from '../registers/registerCells'
+import { setNotifier } from '../ui/notify'
+import type { NotifyKind } from '../ui/notify'
 
 interface CapturedPayload {
   rows: unknown[]
@@ -59,11 +61,21 @@ function renderActions(props: Partial<Parameters<typeof ExportActions<Row>>[0]> 
   )
 }
 
+const toasts: { kind: NotifyKind; message: string }[] = []
+
 beforeEach(() => {
   exportTabularExcel.mockClear()
   exportTabularPdf.mockClear()
   printTabular.mockClear()
   downloadCsv.mockClear()
+  toasts.length = 0
+  setNotifier((kind, message) => {
+    toasts.push({ kind, message })
+  })
+})
+
+afterEach(() => {
+  setNotifier(null)
 })
 
 describe('ExportActions', () => {
@@ -137,14 +149,95 @@ describe('ExportActions', () => {
     })
   })
 
-  it('warns in the file when the pager capped the result', async () => {
+  it('says what it dropped when the pager capped the result', async () => {
     const fetchAll = vi.fn(async () => ({ rows: [...ROWS], total: 99_999, truncated: true }))
     renderActions({ fetchAll })
     fireEvent.click(screen.getByRole('button', { name: /export/i }))
     fireEvent.click(screen.getByRole('menuitem', { name: /Excel/ }))
     await waitFor(() => expect(exportTabularExcel).toHaveBeenCalledOnce())
     const payload = exportTabularExcel.mock.calls[0][0]
-    expect(payload.warningNote).toContain('narrow the filters')
+    expect(payload.warningNote).toContain('2 of the 99,999 rows')
+    expect(payload.warningNote).toContain('99,997 are not')
+    expect(payload.metaLines).toContain('Rows: 2 of 99,999')
+  })
+
+  /**
+   * A pager can come up short without saying so — it stopped on a page guard,
+   * or a caller assembled the result by hand. The count the server reported for
+   * the same filters is the check that catches it.
+   */
+  it('says so when the rows fall short of the server’s own count, uncapped', async () => {
+    const fetchAll = vi.fn(async () => ({ rows: [...ROWS], total: 3_000, truncated: false }))
+    renderActions({ fetchAll })
+    fireEvent.click(screen.getByRole('button', { name: /export/i }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /Excel/ }))
+    await waitFor(() => expect(exportTabularExcel).toHaveBeenCalledOnce())
+    const payload = exportTabularExcel.mock.calls[0][0]
+    expect(payload.warningNote).toContain('2 of the 3,000 rows')
+    expect(payload.metaLines).toContain('Rows: 2 of 3,000')
+  })
+
+  it('says nothing about truncation when the file holds the whole set', async () => {
+    const fetchAll = vi.fn(async () => ({ rows: [...ROWS], total: 2, truncated: false }))
+    renderActions({ fetchAll })
+    fireEvent.click(screen.getByRole('button', { name: /export/i }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /Excel/ }))
+    await waitFor(() => expect(exportTabularExcel).toHaveBeenCalledOnce())
+    const payload = exportTabularExcel.mock.calls[0][0]
+    expect(payload.warningNote).toBeUndefined()
+    expect(payload.metaLines).toContain('Rows: 2')
+  })
+
+  /** A screen with no pager still knows how many rows matched. */
+  it('warns when a screen without a pager exports the page it holds', async () => {
+    renderActions({ totalRows: 4_182 })
+    fireEvent.click(screen.getByRole('button', { name: /export/i }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /Excel/ }))
+    await waitFor(() => expect(exportTabularExcel).toHaveBeenCalledOnce())
+    const payload = exportTabularExcel.mock.calls[0][0]
+    expect(payload.warningNote).toContain('2 of the 4,182 rows')
+    expect(payload.metaLines).toContain('Rows: 2 of 4,182')
+  })
+
+  /** A CSV has nowhere to carry a note, so the toast carries it. */
+  it('carries the truncation into the CSV toast, and does not call it a success', async () => {
+    const fetchAll = vi.fn(async () => ({ rows: [...ROWS], total: 99_999, truncated: true }))
+    renderActions({ fetchAll })
+    fireEvent.click(screen.getByRole('button', { name: /export/i }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /CSV/ }))
+    await waitFor(() => expect(downloadCsv).toHaveBeenCalledOnce())
+    await waitFor(() => expect(toasts).toHaveLength(1))
+    expect(toasts[0].kind).not.toBe('success')
+    expect(toasts[0].message).toContain('99,997 are not')
+  })
+
+  /**
+   * The failure this must never produce: a pager errors, the component quietly
+   * falls back to the rows on screen, and the reader files a one-page file as
+   * the register.
+   */
+  it('aborts the export and reports the error when the pager fails', async () => {
+    const fetchAll = vi.fn(async () => {
+      throw new Error('Network request failed')
+    })
+    renderActions({ fetchAll })
+    fireEvent.click(screen.getByRole('button', { name: /export/i }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /Excel/ }))
+    await waitFor(() => expect(toasts).toHaveLength(1))
+    expect(toasts[0]).toEqual({ kind: 'error', message: 'Network request failed' })
+    expect(exportTabularExcel).not.toHaveBeenCalled()
+    expect(downloadCsv).not.toHaveBeenCalled()
+  })
+
+  it('refuses to export a result set it could not read', async () => {
+    const fetchAll = vi.fn(async () => ({ total: 12, truncated: false }) as never)
+    renderActions({ fetchAll })
+    fireEvent.click(screen.getByRole('button', { name: /export/i }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /PDF/ }))
+    await waitFor(() => expect(toasts).toHaveLength(1))
+    expect(toasts[0].kind).toBe('error')
+    expect(toasts[0].message).toContain('nothing was exported')
+    expect(exportTabularPdf).not.toHaveBeenCalled()
   })
 
   it('hides the formats a screen says it cannot support', () => {

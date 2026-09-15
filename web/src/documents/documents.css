@@ -374,6 +374,49 @@
   color: var(--muted);
 }
 
+.menu-group + .menu-group {
+  margin-top: 0.25rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.25rem;
+}
+
+.menu-group-label {
+  padding: 0.25rem 0.625rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/*
+ * The panel is never empty. A profile holding no create permission sees this
+ * note naming why, not an absent button — see NewDocumentMenu.
+ */
+.menu-note {
+  display: block;
+  padding: 0.5rem 0.625rem;
+}
+
+.menu-note strong {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.menu-note span {
+  display: block;
+  margin-top: 0.125rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.menu-item-footer {
+  margin-top: 0.25rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.5rem;
+}
+
 /* ---- Warnings list -------------------------------------------------------- */
 
 .warning-list {

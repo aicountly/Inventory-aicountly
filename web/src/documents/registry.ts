@@ -126,6 +126,29 @@ export const UNAVAILABLE_TYPES = new Set<string>([])
 /** Types with their own screens elsewhere (reservations), unavailable, or created only by other products. */
 export const HIDDEN_FROM_NEW_MENU = new Set(['RESERVATION', 'RESERVATION_RELEASE', ...UNAVAILABLE_TYPES])
 
+/**
+ * Document types Inventory holds but never authors — the stock half of a Books
+ * commercial voucher, plus the two reservation types other products raise.
+ *
+ * Mirror of the `'native' => false` rows of `Config\DocumentTypeRegistry::TYPES`
+ * plus RESERVATION / RESERVATION_RELEASE. They are not in
+ * `NATIVE_DOCUMENT_TYPES` because nothing here creates one, but they ARE in the
+ * documents register — a register whose whole point is seeing both products'
+ * documents side by side. `GET /v1/document-types` returns them, so this list is
+ * only the fallback for a request that is still in flight or that failed; a Type
+ * filter that silently drops "Sales Issue" while that request is pending is a
+ * filter the reader cannot use on exactly the screen they came to it for.
+ */
+export const SOURCED_DOCUMENT_TYPES: { code: string; label: string }[] = [
+  { code: 'SALES_ISSUE', label: 'Sales Issue' },
+  { code: 'PURCHASE_RECEIPT', label: 'Purchase Receipt' },
+  { code: 'SALES_RETURN', label: 'Sales Return (Credit Note)' },
+  { code: 'PURCHASE_RETURN', label: 'Purchase Return (Debit Note)' },
+  { code: 'JOURNAL_ADJUSTMENT', label: 'Journal with Item' },
+  { code: 'RESERVATION', label: 'Inventory Reservation' },
+  { code: 'RESERVATION_RELEASE', label: 'Reservation Release' },
+]
+
 const BY_CODE = new Map(NATIVE_DOCUMENT_TYPES.map((s) => [s.code, s]))
 
 export function specForCode(code: string | null | undefined): DocumentTypeSpec | null {

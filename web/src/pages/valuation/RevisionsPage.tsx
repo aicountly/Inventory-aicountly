@@ -4,28 +4,62 @@ import { useCan } from '../../access/AccessContext'
 import { useCompany } from '../../company/CompanyContext'
 import { DataTable } from '../../components/DataTable'
 import type { Column } from '../../components/DataTable'
-import { ExportCsvButton } from '../../components/ExportCsvButton'
 import { ItemFilter } from '../../components/ItemFilter'
+import { ListSheetActions } from '../../components/ListSheetActions'
 import { PageHeader } from '../../components/PageHeader'
 import { Pagination } from '../../components/Pagination'
 import { RequirePermission } from '../../components/RequirePermission'
 import { StatusBadge } from '../../components/StatusBadge'
 import { useListParams } from '../../hooks/useListParams'
 import { useQuery } from '../../hooks/useQuery'
+import type { ExportableColumn } from '../../registers/registerCells'
 import { P } from '../../services/access'
 import { ApiError } from '../../services/api'
 import { fetchAllRows } from '../../services/listAll'
 import { valuationApi } from '../../services/valuationApi'
 import type { ValuationRevision } from '../../services/valuationApi'
 import { useToast } from '../../ui/ToastContext'
-import { csvFilename } from '../../utils/csv'
 import { formatDate, formatDateTime, formatMoney, formatQty } from '../../utils/format'
 import '../views.css'
 
 const FILTER_KEYS = ['acknowledged', 'job_id', 'document_id', 'item_id', 'source_app', 'from', 'to'] as const
 
+/** Applied in Books / Published to Books / Pending — the same words the badge uses. */
+function booksState(r: ValuationRevision): string {
+  if (r.acknowledged) return 'Applied in Books'
+  return r.published_at ? 'Published to Books' : 'Pending'
+}
+
+/**
+ * The sheet's columns.
+ *
+ * Every rate and amount here is a VALUATION figure — what the stock cost, which
+ * is what drives COGS and closing stock. None of it is the commercial rate
+ * agreed with a party; that number belongs to Books and is not in this table.
+ * The column names say so in full, because a printed sheet headed "Old rate"
+ * is a sheet somebody will read as a price.
+ */
+const EXPORT_COLUMNS: ExportableColumn<ValuationRevision>[] = [
+  { key: 'revision_id', csvHeader: 'Revision', align: 'right', format: 'int' },
+  { key: 'created_at', csvHeader: 'Created', format: 'datetime' },
+  { key: 'books_state', csvHeader: 'Books', csv: booksState },
+  { key: 'document_no', csvHeader: 'Document', csv: (r) => r.document_no ?? (r.document_id ? `#${r.document_id}` : '') },
+  { key: 'document_date', csvHeader: 'Document date', format: 'date' },
+  { key: 'source', csvHeader: 'Source', csv: (r) => (r.source_app ? `${r.source_app} · ${r.source_document_no ?? r.source_document_id ?? ''}`.trim() : '') },
+  { key: 'item_name', csvHeader: 'Item', csv: (r) => r.item_name ?? (r.item_id ? `Item #${r.item_id}` : '') },
+  { key: 'base_qty', csvHeader: 'Qty', align: 'right', format: 'qty' },
+  { key: 'old_valuation_rate', csvHeader: 'Old valuation rate', align: 'right', format: 'amount' },
+  { key: 'new_valuation_rate', csvHeader: 'New valuation rate', align: 'right', format: 'amount' },
+  { key: 'old_valuation_amount', csvHeader: 'Old valuation amount', align: 'right', format: 'amount' },
+  { key: 'new_valuation_amount', csvHeader: 'New valuation amount', align: 'right', format: 'amount' },
+  { key: 'delta_amount', csvHeader: 'Valuation delta (new − old)', align: 'right', format: 'amount' },
+  { key: 'job_id', csvHeader: 'Recalculation job', align: 'right', format: 'int' },
+  { key: 'acknowledged_at', csvHeader: 'Acknowledged', format: 'datetime' },
+  { key: 'acknowledged_by_app', csvHeader: 'Acknowledged by' },
+]
+
 export function RevisionsPage() {
-  const { scope, companyName } = useCompany()
+  const { scope } = useCompany()
   const toast = useToast()
   const canAck = useCan([P.valuationRecalculate, P.reconciliationResolve])
   const params = useListParams({ sort: 'created_at', order: 'desc', limit: 100, filterKeys: FILTER_KEYS })
@@ -65,17 +99,16 @@ export function RevisionsPage() {
       { key: 'source', header: 'Source', render: (r) => (r.source_app ? `${r.source_app} · ${r.source_document_no ?? r.source_document_id ?? ''}` : <span className="muted">—</span>) },
       { key: 'item_name', header: 'Item', render: (r) => (r.item_id ? <Link to={`/valuation/cost-layers?item_id=${r.item_id}`}>{r.item_name ?? `Item #${r.item_id}`}</Link> : '—') },
       { key: 'base_qty', header: 'Qty', align: 'right', render: (r) => formatQty(r.base_qty) },
-      { key: 'old_valuation_rate', header: 'Old rate', align: 'right', render: (r) => formatMoney(r.old_valuation_rate) },
-      { key: 'new_valuation_rate', header: 'New rate', align: 'right', render: (r) => formatMoney(r.new_valuation_rate) },
-      { key: 'old_valuation_amount', header: 'Old amount', align: 'right', render: (r) => formatMoney(r.old_valuation_amount) },
-      { key: 'new_valuation_amount', header: 'New amount', align: 'right', render: (r) => formatMoney(r.new_valuation_amount) },
-      { key: 'delta_amount', header: 'Delta', align: 'right', sortKey: 'delta_amount', render: (r) => <strong className={(r.delta_amount ?? 0) < 0 ? 'text-critical' : undefined}>{formatMoney(r.delta_amount)}</strong> },
+      { key: 'old_valuation_rate', header: 'Old valuation rate', align: 'right', render: (r) => formatMoney(r.old_valuation_rate) },
+      { key: 'new_valuation_rate', header: 'New valuation rate', align: 'right', render: (r) => formatMoney(r.new_valuation_rate) },
+      { key: 'old_valuation_amount', header: 'Old valuation amount', align: 'right', render: (r) => formatMoney(r.old_valuation_amount) },
+      { key: 'new_valuation_amount', header: 'New valuation amount', align: 'right', render: (r) => formatMoney(r.new_valuation_amount) },
+      { key: 'delta_amount', header: 'Valuation delta', align: 'right', sortKey: 'delta_amount', render: (r) => <strong className={(r.delta_amount ?? 0) < 0 ? 'text-critical' : undefined}>{formatMoney(r.delta_amount)}</strong> },
       { key: 'job_id', header: 'Job', render: (r) => (r.job_id ? <Link to={`/valuation/recalculations?all_fy=1`}>#{r.job_id}</Link> : '—') },
       { key: 'acknowledged_at', header: 'Acknowledged', render: (r) => (r.acknowledged_at ? `${formatDateTime(r.acknowledged_at)} · ${r.acknowledged_by_app ?? ''}` : '—') },
     ],
     [canAck, selected],
   )
-  const csvColumns = useMemo(() => columns.filter((c) => !['pick', 'document', 'source', 'job_id'].includes(c.key)).map((c) => ({ header: String(c.header), value: (r: ValuationRevision) => (r[c.key as keyof ValuationRevision] as string | number | null) ?? '' })), [columns])
 
   return (
     <>
@@ -85,7 +118,25 @@ export function RevisionsPage() {
         actions={
           <>
             {canAck ? <button type="button" className="btn btn-primary" disabled={selected.size === 0 || busy} onClick={ack}>{busy ? 'Acknowledging…' : `Acknowledge selected (${selected.size})`}</button> : null}
-            <ExportCsvButton filename={csvFilename('valuation-revisions', companyName)} columns={csvColumns} rows={rows} fetchAll={() => fetchAllRows<ValuationRevision>((page, limit) => valuationApi.revisions({ ...query, page, limit }))} disabled={rows.length === 0} />
+            <ListSheetActions<ValuationRevision>
+              columns={EXPORT_COLUMNS}
+              rows={rows}
+              fetchAll={() => fetchAllRows<ValuationRevision>((page, limit) => valuationApi.revisions({ ...query, page, limit }))}
+              filenameBase="valuation-revisions"
+              title="Valuation revisions"
+              description="Line-level cost changes a recalculation produced, and whether Books has applied them"
+              metaLines={[
+                `Books: ${acknowledged === '1' ? 'acknowledged only' : acknowledged === 'all' ? 'acknowledged and awaiting' : 'awaiting Books'}`,
+                state.filters.item_id ? `Item id: ${state.filters.item_id}` : '',
+                state.filters.job_id ? `Recalculation job: #${state.filters.job_id}` : '',
+                state.filters.document_id ? `Document id: ${state.filters.document_id}` : '',
+                state.filters.from || state.filters.to ? `Created between: ${state.filters.from || '…'} and ${state.filters.to || '…'}` : '',
+              ].filter(Boolean)}
+              footerNotes={['Every rate and amount here is a valuation figure — what the stock cost. Commercial rates and amounts live in Books.']}
+              onRefresh={list.reload}
+              refreshing={list.loading}
+              disabled={!list.data || list.data.meta.total === 0}
+            />
           </>
         }
       />

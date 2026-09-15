@@ -8,6 +8,7 @@ import {
   Boxes,
   ClipboardList,
   Cog,
+  FilePlus2,
   FileText,
   FlaskConical,
   Gauge,
@@ -391,6 +392,29 @@ export const SIDEBAR_NAV: readonly SidebarNavItem[] = [
     permissions: [P.documentsRead],
     megaMenu: [
       {
+        label: 'Enter a document',
+        icon: FilePlus2,
+        items: [
+          {
+            /*
+             * The one nav entry that leads to data entry.
+             *
+             * Until this existed, every creatable document type in Inventory
+             * sat behind a single "New document" dropdown on the documents
+             * register and appeared in no menu, no hub and no command-palette
+             * result — which read, to a user arriving from Books' always-visible
+             * Transactions mega-menu, as twenty-one vouchers that were never
+             * built. The hub lists all of them, including the ones the profile
+             * cannot raise, with the reason attached.
+             */
+            label: 'New document',
+            path: '/documents/new',
+            description: 'Every type you can raise — receipts, issues, transfers, adjustments, production, job work.',
+            icon: FilePlus2,
+          },
+        ],
+      },
+      {
         label: 'Documents',
         icon: FileText,
         items: [
@@ -649,9 +673,11 @@ export const SIDEBAR_SHORTCUTS: readonly NavLeaf[] = [
     permissions: [P.masters('items', 'write')],
   },
   {
+    // Was '/documents' — the register. A shortcut called "New document" that
+    // lands on a list of existing ones is the shape of this bug report.
     label: 'New document',
-    path: '/documents',
-    icon: FileText,
+    path: '/documents/new',
+    icon: FilePlus2,
     permissions: [P.documentsRead],
   },
 ]

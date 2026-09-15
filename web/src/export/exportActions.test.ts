@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { buildTabularPayload, exportErrorMessage, slugifyExportFilename } from './exportActions'
+import {
+  buildTabularPayload,
+  exportErrorMessage,
+  rowCountMetaLine,
+  slugifyExportFilename,
+  truncationNote,
+} from './exportActions'
 import type { ExportableColumn } from '../registers/registerCells'
 
 interface Row {
@@ -57,6 +63,40 @@ describe('exportErrorMessage', () => {
 
   it('falls back when there is no message at all', () => {
     expect(exportErrorMessage(null, 'PDF export failed.')).toBe('PDF export failed.')
+  })
+
+  /** `String({})` is "[object Object]", which tells the reader nothing. */
+  it('falls back rather than showing a stringified object', () => {
+    expect(exportErrorMessage({ status: 500 }, 'PDF export failed.')).toBe('PDF export failed.')
+  })
+})
+
+/**
+ * A short file that says nothing reads as the whole set: the reader sums a
+ * column, files the figure and never learns that 2,431 rows were missing.
+ */
+describe('truncationNote', () => {
+  it('states both counts and the difference between them', () => {
+    const note = truncationNote(10_000, 12_431)
+    expect(note).toContain('10,000 of the 12,431 rows')
+    expect(note).toContain('2,431 are not')
+    expect(note).toContain('Narrow the filters')
+  })
+
+  it('never guesses a count it does not have', () => {
+    const note = truncationNote(10_000, 0)
+    expect(note).toContain('only the first 10,000 rows')
+    expect(note).not.toMatch(/\bof the\b/)
+  })
+})
+
+describe('rowCountMetaLine', () => {
+  it('reads as a fraction when the export is short', () => {
+    expect(rowCountMetaLine(10_000, 12_431)).toBe('Rows: 10,000 of 12,431')
+  })
+
+  it('reads as a plain count when the export holds everything', () => {
+    expect(rowCountMetaLine(412, 412)).toBe('Rows: 412')
   })
 })
 

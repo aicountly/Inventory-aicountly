@@ -10,6 +10,7 @@ import {
   toExportTotals,
 } from './exportColumns'
 import type { ExportableColumn } from '../registers/registerCells'
+import { formatMoney } from '../utils/format'
 
 interface Row {
   item_name: string
@@ -113,6 +114,39 @@ describe('toExportCell', () => {
       csv: (row) => (row.stock_value ?? 0) * 2,
     }
     expect(toExportCell(ROW, col).value).toBe(2401)
+  })
+
+  /**
+   * The spreadsheet and the printed page are two views of one cell, so the
+   * number written into the first has to be the number the second is showing.
+   * A looser second coercion here (strip the commas, call `Number`) accepted
+   * values the column's own formatter rejects, and the register then printed a
+   * blank cell over a spreadsheet holding 1,200.50 — the reader reconciling the
+   * two has no way to tell which is the figure.
+   */
+  it('never writes a figure into a cell the page prints blank', () => {
+    const cell = toExportCell({ ...ROW, stock_value: '1,200.50' as unknown as number }, COLUMNS[3])
+    expect(cell.text).toBe('')
+    expect(cell.value).toBe('')
+  })
+
+  it('keeps the spreadsheet number and the printed text in agreement', () => {
+    const tricky: unknown[] = [null, undefined, '', '   ', '1,200.50', '₹ 1,200.50', 'n/a', true, 0, -18.5, '42', 1200.5]
+    for (const raw of tricky) {
+      const cell = toExportCell({ ...ROW, stock_value: raw } as unknown as Row, COLUMNS[3])
+      if (typeof cell.value === 'number') {
+        expect(formatMoney(cell.value, ''), `raw ${String(raw)}`).toBe(cell.text)
+      } else {
+        expect(cell.value, `raw ${String(raw)}`).toBe(cell.text)
+      }
+    }
+  })
+
+  it('applies the same rule to a quantity and to a count', () => {
+    const qty = toExportCell({ ...ROW, out_qty: '1,204' as unknown as number }, COLUMNS[2])
+    expect(qty).toEqual({ value: '', text: '' })
+    const intCol: ExportableColumn<Row> = { key: 'days_to_expiry', header: 'Days', format: 'int' }
+    expect(toExportCell(ROW, intCol)).toEqual({ value: 40, text: '40' })
   })
 })
 

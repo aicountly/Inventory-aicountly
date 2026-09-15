@@ -1,5 +1,12 @@
 /** Printing and export — one pipeline for registers and for documents. */
-export { getExportTheme, rgbCss, rgbHex, parseRgbTriple, formatPdfCurrencyLabel } from './exportTheme'
+export {
+  getExportTheme,
+  lightAccentTint,
+  rgbCss,
+  rgbHex,
+  parseRgbTriple,
+  formatPdfCurrencyLabel,
+} from './exportTheme'
 export type { ExportTheme, RGB } from './exportTheme'
 export {
   toExportColumns,
@@ -42,6 +49,8 @@ export {
   runTabularExport,
   exportErrorMessage,
   slugifyExportFilename,
+  truncationNote,
+  rowCountMetaLine,
 } from './exportActions'
 export type { ExportFormat, TabularExportRequest } from './exportActions'
 export { ExportActions } from './ExportActions'

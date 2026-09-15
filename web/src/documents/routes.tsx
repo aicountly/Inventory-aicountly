@@ -4,6 +4,7 @@ import { PackingListsPage } from '../pages/PackingListsPage'
 import { LegacyRedirect } from '../registers/LegacyRedirect'
 import { ReservationsPage } from '../pages/ReservationsPage'
 import { DocumentDetailPage } from './DocumentDetailPage'
+import { DocumentEntryHubPage } from './DocumentEntryHubPage'
 import { DocumentFormPage } from './DocumentFormPage'
 import { DocumentPrintPage } from './DocumentPrintPage'
 import { DocumentsListPage } from './DocumentsListPage'
@@ -14,6 +15,10 @@ import { DocumentsListPage } from './DocumentsListPage'
  */
 export const documentRoutes: RouteObject[] = [
   { path: 'documents', element: <DocumentsListPage /> },
+  // Static segment, so it out-ranks `documents/:id` in react-router's matcher.
+  // This is the screen the nav's "New document" points at: every native type,
+  // grouped, with a reason beside any the profile cannot raise.
+  { path: 'documents/new', element: <DocumentEntryHubPage /> },
   { path: 'documents/new/:slug', element: <DocumentFormPage /> },
   { path: 'documents/:id', element: <DocumentDetailPage /> },
   { path: 'documents/:id/edit', element: <DocumentFormPage /> },
@@ -32,6 +37,7 @@ export function renderDocumentRoutes() {
 /** Navigation entries for the shell. */
 export const documentNavItems = [
   { to: '/documents', label: 'Documents', permission: 'documents.read' },
+  { to: '/documents/new', label: 'New document', permission: 'documents.read' },
   { to: '/packing-lists', label: 'Packing lists', permission: ['documents.packing.read', 'documents.read'] },
   { to: '/reservations', label: 'Reservations', permission: ['documents.reservation.read', 'documents.read'] },
   { to: '/registers/pending-quantities', label: 'Pending quantities', permission: 'documents.read' },

@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAccess } from '../access/AccessContext'
 import { useCompany } from '../company/CompanyContext'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { DataTable } from '../components/DataTable'
-import type { Column } from '../components/DataTable'
+import { ListSheetActions } from '../components/ListSheetActions'
 import { Modal } from '../components/Modal'
 import { Notice } from '../components/Notice'
 import { PageHeader } from '../components/PageHeader'
@@ -17,12 +17,14 @@ import { useQuery } from '../hooks/useQuery'
 import { P } from '../services/access'
 import { errorMessage } from '../services/api'
 import type { ListMeta, ListQuery } from '../services/api'
+import { fetchAllRows } from '../services/listAll'
 import { useToast } from '../ui/ToastContext'
 import { MasterForm } from './MasterForm'
+import { masterExportColumns } from './exportColumns'
 import { defaultPayload, defaultValues } from './formValues'
 import { allTreeIds, buildTree, flattenTree } from './tree'
 import type { VisibleNode } from './tree'
-import type { FormValues, MasterConfig, SelectOption } from './types'
+import type { FormValues, MasterColumn, MasterConfig, SelectOption } from './types'
 
 interface MasterPageProps<T> {
   config: MasterConfig<T>
@@ -177,12 +179,12 @@ export function MasterPage<T>({ config, extraActions, children, breadcrumbs }: M
   }
 
   // ---- columns -------------------------------------------------------------
-  const columns = useMemo<Column<T>[]>(() => {
+  const columns = useMemo<MasterColumn<T>[]>(() => {
     if (view !== 'tree') return config.columns
     const [first, ...rest] = config.columns
     if (!first) return config.columns
     const nodeById = new Map<number, VisibleNode<T>>(visible.map((n) => [n.id, n]))
-    const treeFirst: Column<T> = {
+    const treeFirst: MasterColumn<T> = {
       ...first,
       sortKey: undefined,
       render: (row, index) => {
@@ -212,6 +214,47 @@ export function MasterPage<T>({ config, extraActions, children, breadcrumbs }: M
   const tableRows = view === 'tree' ? visible.map((n) => n.row) : rows
   const idOf = (row: T) => String((row as Record<string, unknown>)[config.idKey])
 
+  // ---- export / print ------------------------------------------------------
+  /*
+   * The same four things a register offers — CSV, Excel, PDF and a letterheaded
+   * print sheet — over the same column list the table renders.
+   *
+   * `fetchAll` walks the API rather than the rows on screen: a master exported
+   * from page 1 of 9 whose footer counted 431 warehouses would be a document
+   * that contradicts itself. The filters travel with it, so the file holds the
+   * result the reader was looking at and its header says which filters made it.
+   */
+  const searchInputRef = useRef<HTMLInputElement | null>(null)
+  const exportColumns = useMemo(() => masterExportColumns(config.columns), [config.columns])
+  const exportQuery = useMemo<ListQuery>(
+    () =>
+      view === 'tree'
+        ? { ...(config.listQuery ?? {}), status: list.state.filters.status, sort: config.defaultSort, order: 'asc' }
+        : listQuery,
+    [view, config.listQuery, config.defaultSort, list.state.filters.status, listQuery],
+  )
+  const fetchAll = useCallback(
+    () => fetchAllRows<T>((page, limit) => config.api.list({ ...exportQuery, page, limit })),
+    [config.api, exportQuery],
+  )
+  const exportMeta = useMemo(() => {
+    const lines: string[] = []
+    if (list.state.q) lines.push(`Search: ${list.state.q}`)
+    const status = hasActiveFilter ? list.state.filters.status : ''
+    if (status) lines.push(`Status: ${status === 'active' ? 'Active only' : 'Inactive only'}`)
+    for (const f of config.filters ?? []) {
+      const value = list.state.filters[f.name]
+      if (!value) continue
+      const choices = typeof f.options === 'function' ? f.options(options) : f.options
+      lines.push(`${f.label}: ${choices.find((o) => String(o.value) === value)?.label ?? value}`)
+    }
+    // The tree is a view of the screen. The sheet carries the same rows in the
+    // order the API serves them, and saying so costs less than a reader
+    // wondering where the indentation went.
+    if (view === 'tree') lines.push('Order: alphabetical — the tree is a screen view')
+    return lines
+  }, [list.state.q, list.state.filters, hasActiveFilter, config.filters, options, view])
+
   if (!accessLoading && !canRead) {
     return (
       <div className="page">
@@ -231,6 +274,18 @@ export function MasterPage<T>({ config, extraActions, children, breadcrumbs }: M
         subtitle={query.data ? `${query.data.meta.total} ${query.data.meta.total === 1 ? config.singular.toLowerCase() : config.title.toLowerCase()}` : undefined}
         actions={
           <>
+            <ListSheetActions<T>
+              columns={exportColumns}
+              rows={tableRows}
+              fetchAll={fetchAll}
+              filenameBase={config.slug}
+              title={config.title}
+              metaLines={exportMeta}
+              onRefresh={query.reload}
+              refreshing={query.loading}
+              disabled={!query.data || query.data.meta.total === 0}
+              searchInputRef={searchInputRef}
+            />
             {extraActions?.({ reload: query.reload, canWrite })}
             {canWrite ? (
               <button type="button" className="btn btn-primary" onClick={openCreate}>
@@ -244,7 +299,7 @@ export function MasterPage<T>({ config, extraActions, children, breadcrumbs }: M
       {needsOptions && formOptions.error ? <Notice kind="warning">{formOptions.error}</Notice> : null}
 
       <div className="toolbar">
-        <SearchInput value={list.state.q} onChange={list.setQ} placeholder={config.searchPlaceholder ?? `Search ${config.title.toLowerCase()}…`} />
+        <SearchInput ref={searchInputRef} value={list.state.q} onChange={list.setQ} placeholder={config.searchPlaceholder ?? `Search ${config.title.toLowerCase()}…`} />
         {hasActiveFilter ? (
           <select className="select" value={list.state.filters.status ?? ''} onChange={(e) => list.setFilter('status', e.target.value)} aria-label="Active filter">
             <option value="">Active and inactive</option>

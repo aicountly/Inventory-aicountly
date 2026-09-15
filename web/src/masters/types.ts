@@ -1,6 +1,8 @@
 import type { Column } from '../components/DataTable'
 import type { PickedItem } from '../components/ItemPicker'
+import type { CellFormat } from '../registers/registerCells'
 import type { QueryParams, SortOrder } from '../services/api'
+import type { CsvValue } from '../utils/csv'
 import type { ItemFormOptions, ItemSearchRow } from '../services/items'
 import type { CrudApi } from '../services/masters'
 
@@ -58,6 +60,26 @@ export interface FieldDef<T> {
   validate?: (value: unknown, ctx: FieldContext<T>) => string | null
 }
 
+/**
+ * A master's table column, plus what the CSV / Excel / PDF / print sheet should
+ * write for it.
+ *
+ * One list, not two. A master renders a badge for `is_active`, `#12` for a
+ * warehouse id and `Branch #3` for `bo_id`; the raw field under those cells is
+ * `1`, `12` and `3`, and an export that wrote those would be a document the
+ * reader cannot check against the screen. The resolver lives on the column it
+ * belongs to so a new column cannot be added to the table and forgotten in the
+ * sheet — which is exactly how an export drifts out of step with a screen.
+ */
+export interface MasterColumn<T> extends Column<T> {
+  /** What the sheet writes when the rendered cell is not the datum. */
+  exportValue?: (row: T) => CsvValue
+  /** Explicit print formatting when the column key does not imply one. */
+  exportFormat?: CellFormat
+  /** UI-only affordance (a checkbox, a row action): keep it off the sheet. */
+  noExport?: boolean
+}
+
 export interface FilterDef {
   name: string
   label: string
@@ -79,7 +101,7 @@ export interface MasterConfig<T> {
   idKey: keyof T & string
   nameOf: (row: T) => string
   api: CrudApi<T>
-  columns: Column<T>[]
+  columns: MasterColumn<T>[]
   defaultSort: string
   defaultOrder?: SortOrder
   filters?: FilterDef[]

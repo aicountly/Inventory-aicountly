@@ -3,13 +3,12 @@ import type { ReactNode, RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { Download, FileSpreadsheet, FileText, Printer, RefreshCw, Table2 } from 'lucide-react'
 import { Button } from '../ui/Button'
-import { errorMessage } from '../services/api'
 import type { FetchAllResult } from '../services/listAll'
-import { formatGeneratedStamp, formatInt } from '../utils/format'
+import { formatGeneratedStamp } from '../utils/format'
 import type { ExportableColumn } from '../registers/registerCells'
 import { notify } from '../ui/notify'
 import type { ExportFormat, TabularExportRequest } from './exportActions'
-import { runTabularExport } from './exportActions'
+import { exportErrorMessage, rowCountMetaLine, runTabularExport, truncationNote } from './exportActions'
 import type { Orientation, SheetIdentity, SheetSummaryCard } from './sheetHtml'
 
 /**
@@ -23,6 +22,14 @@ import type { Orientation, SheetIdentity, SheetSummaryCard } from './sheetHtml'
  * Every action walks the **whole filtered result** through `fetchAll`, not the
  * page on screen. A register exported from page 1 of 17 whose footer says
  * "Total (4,182 movements)" would be a document that contradicts itself.
+ *
+ * When it cannot — the pager capped, or the screen has no pager and told us the
+ * server's count through `totalRows` — the file says so in its own words: the
+ * row pill reads "Rows: 10,000 of 12,431" and a partial-export note goes on the
+ * sheet, into the PDF, into the spreadsheet and into the CSV's toast. A short
+ * file that says nothing reads as the whole set, and that is the one outcome
+ * this component may not produce. A pager that *fails* aborts the export
+ * outright; there is no quiet fall back to the rows on screen.
  *
  * The menu is portalled to `document.body` and positioned against the viewport
  * rather than the toolbar, so it cannot be clipped by an ancestor's `overflow`
@@ -43,6 +50,16 @@ export interface ExportActionsProps<T> {
   rows: readonly T[]
   /** Walks every page so the file holds the whole result. */
   fetchAll?: () => Promise<FetchAllResult<T>>
+  /**
+   * The server's row count for the current filters.
+   *
+   * Only needed by a screen that exports `rows` with no `fetchAll`: without it
+   * such a screen cannot know that it wrote one page of seventeen, and the file
+   * goes out reading as the whole set. Supply it and the sheet says
+   * "Rows: 100 of 4,182" and carries the partial-export note. A screen with a
+   * real `fetchAll` leaves it out — the pager reports the count itself.
+   */
+  totalRows?: number
   /** Filename stem, without the extension. */
   filename: string
   identity: SheetIdentity
@@ -118,6 +135,7 @@ export function ExportActions<T>({
   columns,
   rows,
   fetchAll,
+  totalRows,
   filename,
   identity,
   title,
@@ -219,13 +237,24 @@ export function ExportActions<T>({
     setOpen(false)
     setBusy(format)
     try {
+      // A pager that rejects must abort the export. Falling back to the rows on
+      // screen here would hand the reader a one-page file that looks like the
+      // whole register and says nothing about the request that failed.
       const result: FetchAllResult<T> = fetchAll
         ? await fetchAll()
-        : { rows: [...rows], total: rows.length, truncated: false }
+        : { rows: [...rows], total: totalRows ?? rows.length, truncated: false }
 
-      const warningNote = result.truncated
-        ? `Only the first ${formatInt(result.rows.length)} rows are included — narrow the filters for the rest.`
-        : undefined
+      if (!result || !Array.isArray(result.rows)) {
+        throw new Error('The full result set could not be read, so nothing was exported.')
+      }
+
+      const exported = result.rows.length
+      // Two ways to come up short, and both have to speak: the pager saying it
+      // capped, and a row count below the server's own total for these filters
+      // (a pager that stopped early, a screen exporting the page it holds).
+      const total = Math.max(result.total ?? 0, exported)
+      const short = result.truncated || total > exported
+      const warningNote = short ? truncationNote(exported, total) : undefined
 
       const scoped = forExportedRows?.(result.rows)
 
@@ -235,7 +264,7 @@ export function ExportActions<T>({
         identity,
         title,
         description,
-        metaLines: [...(metaLines ?? []), `Rows: ${formatInt(result.rows.length)}`],
+        metaLines: [...(metaLines ?? []), rowCountMetaLine(exported, total)],
         summaryCards: scoped?.summaryCards ?? summaryCards,
         totalsText: scoped ? scoped.totalsText : totalsText,
         totalsLabel,
@@ -247,7 +276,7 @@ export function ExportActions<T>({
       }
       await runTabularExport(format, request)
     } catch (err) {
-      notify.error(errorMessage(err, 'Export failed.'))
+      notify.error(exportErrorMessage(err, 'Export failed.'))
     } finally {
       setBusy(null)
     }

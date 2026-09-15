@@ -7,6 +7,7 @@ import type { Column } from '../../components/DataTable'
 import { FormField } from '../../components/FormField'
 import { ItemFilter } from '../../components/ItemFilter'
 import { JsonBlock } from '../../components/JsonBlock'
+import { ListSheetActions } from '../../components/ListSheetActions'
 import { Modal } from '../../components/Modal'
 import { PageHeader } from '../../components/PageHeader'
 import { Pagination } from '../../components/Pagination'
@@ -14,16 +15,37 @@ import { RequirePermission } from '../../components/RequirePermission'
 import { StatusBadge } from '../../components/StatusBadge'
 import { useListParams } from '../../hooks/useListParams'
 import { useQuery } from '../../hooks/useQuery'
+import type { ExportableColumn } from '../../registers/registerCells'
 import { P } from '../../services/access'
 import { ApiError } from '../../services/api'
+import { fetchAllRows } from '../../services/listAll'
 import { RECALC_STATUS_FILTERS, valuationApi } from '../../services/valuationApi'
 import type { RecalcJob } from '../../services/valuationApi'
 import { useToast } from '../../ui/ToastContext'
-import { formatDate, formatDateTime, formatInt, formatMoney, todayIso } from '../../utils/format'
+import { formatDate, formatDateTime, formatInt, formatMoney, humanize, todayIso } from '../../utils/format'
 import '../views.css'
 
 const FILTER_KEYS = ['status', 'item_id', 'trigger_kind', 'from', 'to', 'all_fy'] as const
 const STATUS_TONE: Record<string, 'neutral' | 'good' | 'warning' | 'critical' | 'info'> = { QUEUED: 'info', RUNNING: 'warning', COMPLETED: 'good', FAILED: 'critical', CANCELLED: 'neutral' }
+
+/**
+ * The sheet's columns. `cogs_delta` is the valuation movement a job published
+ * to Books — the cost side, not anything a customer was charged.
+ */
+const EXPORT_COLUMNS: ExportableColumn<RecalcJob>[] = [
+  { key: 'job_id', csvHeader: 'Job', align: 'right', format: 'int' },
+  { key: 'created_at', csvHeader: 'Queued', format: 'datetime' },
+  { key: 'status', csvHeader: 'Status' },
+  { key: 'dry_run', csvHeader: 'Mode', csv: (r) => (r.dry_run ? 'Dry run' : 'Live') },
+  { key: 'from_date', csvHeader: 'Recalculated from', format: 'date' },
+  { key: 'item_name', csvHeader: 'Scope', csv: (r) => (r.item_id ? r.item_name ?? `Item #${r.item_id}` : 'All items') },
+  { key: 'trigger_kind', csvHeader: 'Trigger', csv: (r) => `${humanize(r.trigger_kind)}${r.trigger_document_id ? ` · ${r.trigger_document_no ?? `#${r.trigger_document_id}`}` : ''}` },
+  { key: 'affected_line_count', csvHeader: 'Lines affected', align: 'right', format: 'int' },
+  { key: 'revised_line_count', csvHeader: 'Lines revised', align: 'right', format: 'int' },
+  { key: 'cogs_delta', csvHeader: 'COGS delta (valuation)', align: 'right', format: 'amount' },
+  { key: 'finished_at', csvHeader: 'Finished', format: 'datetime' },
+  { key: 'failure_reason', csvHeader: 'Failure', csv: (r) => r.failure_reason ?? '' },
+]
 
 export function RecalculationsPage() {
   const { scope } = useCompany()
@@ -86,7 +108,29 @@ export function RecalculationsPage() {
       <PageHeader
         title="Valuation recalculations"
         subtitle="Back-dated receipts and edits re-run the costing from a date forward. Each job records the lines whose valuation changed and publishes the COGS revisions Books applies."
-        actions={canRun ? <button type="button" className="btn btn-primary" onClick={() => setOpen(true)}>New recalculation</button> : null}
+        actions={
+          <>
+            <ListSheetActions<RecalcJob>
+              columns={EXPORT_COLUMNS}
+              rows={list.data?.data ?? []}
+              fetchAll={() => fetchAllRows<RecalcJob>((page, limit) => valuationApi.recalcJobs({ ...query, page, limit }))}
+              filenameBase="valuation-recalculations"
+              title="Valuation recalculations"
+              description="Back-dated re-costing jobs and the COGS revisions they published"
+              metaLines={[
+                state.filters.status ? `Status: ${humanize(state.filters.status)}` : '',
+                state.filters.item_id ? `Item id: ${state.filters.item_id}` : '',
+                state.filters.trigger_kind ? `Trigger: ${humanize(state.filters.trigger_kind)}` : '',
+                state.filters.from || state.filters.to ? `Queued between: ${state.filters.from || '…'} and ${state.filters.to || '…'}` : '',
+                state.filters.all_fy === '1' ? 'Years: all financial years' : '',
+              ].filter(Boolean)}
+              onRefresh={list.reload}
+              refreshing={list.loading}
+              disabled={!list.data || list.data.meta.total === 0}
+            />
+            {canRun ? <button type="button" className="btn btn-primary" onClick={() => setOpen(true)}>New recalculation</button> : null}
+          </>
+        }
       />
       <RequirePermission permission={P.report('valuation')} what="recalculations">
         <div className="toolbar">

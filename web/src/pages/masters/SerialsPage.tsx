@@ -45,13 +45,14 @@ const serialsConfig: MasterConfig<Serial> = {
           {r.item_sku ? <span className="muted"> · {r.item_sku}</span> : null}
         </>
       ),
+      exportValue: (r) => `${r.item_name ?? `#${r.item_id}`}${r.item_sku ? ` · ${r.item_sku}` : ''}`,
     },
     { key: 'status', header: 'Status', sortKey: 'status', render: (r) => <StatusBadge value={r.status} /> },
     { key: 'warehouse_name', header: 'Warehouse', sortKey: 'warehouse_name' },
     { key: 'batch_no', header: 'Batch', sortKey: 'batch_no', render: (r) => <span className="mono">{r.batch_no ?? '—'}</span> },
     { key: 'location_code', header: 'Location', render: (r) => <span className="mono">{r.location_code ?? '—'}</span> },
     { key: 'unit_cost', header: 'Unit cost', align: 'right', render: (r) => formatMoney(r.unit_cost) },
-    { key: 'warranty_until', header: 'Warranty until', sortKey: 'warranty_until', render: (r) => <span className="nowrap">{formatDate(r.warranty_until)}</span> },
+    { key: 'warranty_until', header: 'Warranty until', sortKey: 'warranty_until', render: (r) => <span className="nowrap">{formatDate(r.warranty_until)}</span>, exportFormat: 'date' },
     { key: 'updated_at', header: 'Updated', sortKey: 'updated_at', render: (r) => <span className="nowrap muted">{formatDateTime(r.updated_at)}</span> },
   ],
   fields: [

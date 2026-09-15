@@ -41,7 +41,7 @@ export const itemGroupsConfig: MasterConfig<ItemGroup> = {
   columns: [
     { key: 'grp_name', header: 'Group', sortKey: 'grp_name', render: (r) => <strong>{r.grp_name}</strong> },
     { key: 'grp_alias', header: 'Alias', sortKey: 'grp_alias' },
-    { key: 'is_primary', header: 'Level', render: (r) => (Number(r.is_primary) === 1 ? 'Primary' : 'Sub-group') },
+    { key: 'is_primary', header: 'Level', render: (r) => (Number(r.is_primary) === 1 ? 'Primary' : 'Sub-group'), exportValue: (r) => (Number(r.is_primary) === 1 ? 'Primary' : 'Sub-group') },
     { key: 'item_count', header: 'Items', align: 'right', render: (r) => formatInt(r.item_count ?? 0) },
     activeColumn<ItemGroup>(),
     updatedAt<ItemGroup>(),
@@ -220,11 +220,12 @@ export const warehousesConfig: MasterConfig<Warehouse> = {
           {Number(r.is_default) === 1 ? <span className="badge" style={{ marginLeft: '0.5rem' }}>Default</span> : null}
         </>
       ),
+      exportValue: (r) => `${r.warehouse_name}${Number(r.is_default) === 1 ? ' · Default' : ''}`,
     },
     { key: 'warehouse_code', header: 'Code', sortKey: 'warehouse_code', render: (r) => <span className="mono">{r.warehouse_code ?? '—'}</span> },
-    { key: 'warehouse_type', header: 'Type', sortKey: 'warehouse_type', render: (r) => humanize(r.warehouse_type) },
-    { key: 'bo_id', header: 'Branch', sortKey: 'bo_id', render: (r) => (Number(r.bo_id) > 0 ? `Branch #${r.bo_id}` : 'All branches') },
-    { key: 'allow_negative', header: 'Negative stock', render: (r) => (r.allow_negative === null || r.allow_negative === undefined ? 'Company policy' : Number(r.allow_negative) === 1 ? 'Allowed' : 'Blocked') },
+    { key: 'warehouse_type', header: 'Type', sortKey: 'warehouse_type', render: (r) => humanize(r.warehouse_type), exportValue: (r) => humanize(r.warehouse_type) },
+    { key: 'bo_id', header: 'Branch', sortKey: 'bo_id', render: (r) => (Number(r.bo_id) > 0 ? `Branch #${r.bo_id}` : 'All branches'), exportValue: (r) => (Number(r.bo_id) > 0 ? `Branch #${r.bo_id}` : 'All branches') },
+    { key: 'allow_negative', header: 'Negative stock', render: (r) => (r.allow_negative === null || r.allow_negative === undefined ? 'Company policy' : Number(r.allow_negative) === 1 ? 'Allowed' : 'Blocked'), exportValue: (r) => (r.allow_negative === null || r.allow_negative === undefined ? 'Company policy' : Number(r.allow_negative) === 1 ? 'Allowed' : 'Blocked') },
     activeColumn<Warehouse>(),
     updatedAt<Warehouse>(),
   ],
@@ -292,9 +293,9 @@ export const locationsConfig: MasterConfig<Location> = {
   columns: [
     { key: 'location_code', header: 'Code', sortKey: 'location_code', render: (r) => <strong className="mono">{r.location_code}</strong> },
     { key: 'location_name', header: 'Name', sortKey: 'location_name' },
-    { key: 'location_type', header: 'Type', sortKey: 'location_type', render: (r) => humanize(r.location_type) },
-    { key: 'warehouse_id', header: 'Warehouse', sortKey: 'warehouse_id', render: (r) => `#${r.warehouse_id}` },
-    { key: 'parent_location_id', header: 'Parent', render: (r) => (r.parent_location_id ? `#${r.parent_location_id}` : '—') },
+    { key: 'location_type', header: 'Type', sortKey: 'location_type', render: (r) => humanize(r.location_type), exportValue: (r) => humanize(r.location_type) },
+    { key: 'warehouse_id', header: 'Warehouse', sortKey: 'warehouse_id', render: (r) => `#${r.warehouse_id}`, exportValue: (r) => `#${r.warehouse_id}` },
+    { key: 'parent_location_id', header: 'Parent', render: (r) => (r.parent_location_id ? `#${r.parent_location_id}` : '—'), exportValue: (r) => (r.parent_location_id ? `#${r.parent_location_id}` : '') },
     activeColumn<Location>(),
     updatedAt<Location>(),
   ],
@@ -354,11 +355,13 @@ export const batchesConfig: MasterConfig<Batch> = {
         {r.item_name ?? `#${r.item_id}`}
         {r.item_sku ? <span className="muted"> · {r.item_sku}</span> : null}
       </>
-    ) },
+    ), exportValue: (r) => `${r.item_name ?? `#${r.item_id}`}${r.item_sku ? ` · ${r.item_sku}` : ''}` },
     { key: 'lot_no', header: 'Lot' },
     { key: 'mfg_date', header: 'Manufactured', sortKey: 'mfg_date', render: (r) => <span className="nowrap">{formatDate(r.mfg_date)}</span> },
     { key: 'expiry_date', header: 'Expires', sortKey: 'expiry_date', render: (r) => <span className="nowrap">{formatDate(r.expiry_date)}</span> },
-    { key: 'on_hand', header: 'On hand', align: 'right', render: (r) => (r.stock ? `${formatQty(r.stock.on_hand)}${r.unit_symbol ? ` ${r.unit_symbol}` : ''}` : '—') },
+    // The unit symbol belongs beside the figure on screen; in a sheet it would
+    // make the column text and stop it totalling, so the number travels alone.
+    { key: 'on_hand', header: 'On hand', align: 'right', render: (r) => (r.stock ? `${formatQty(r.stock.on_hand)}${r.unit_symbol ? ` ${r.unit_symbol}` : ''}` : '—'), exportValue: (r) => r.stock?.on_hand ?? '', exportFormat: 'qty' },
     { key: 'status', header: 'Status', sortKey: 'status', render: (r) => <StatusBadge value={r.status} /> },
   ],
   fields: [
