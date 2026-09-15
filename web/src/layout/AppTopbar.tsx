@@ -92,7 +92,19 @@ export function AppTopbar({ onToggleMobileNav }: AppTopbarProps) {
   const { isDark, setMode, setSettingsOpen } = useTheme()
 
   return (
-    <header className="aic app-topbar sticky top-0 z-20 flex h-12 min-w-0 shrink-0 items-center gap-2 overflow-hidden border-b border-gray-200 bg-white px-2 md:px-3 print:hidden">
+    <header className="aic app-topbar sticky top-0 z-20 flex h-12 min-w-0 shrink-0 items-center gap-2 border-b border-gray-200 bg-white px-2 md:px-3 print:hidden">
+      {/* No `overflow-hidden` here, on purpose, and never add it back: this bar
+          hosts three floating popovers (the company/context switcher, the app
+          launcher, the user menu), each an absolutely-positioned child that
+          extends below the header's own 48px box. `overflow: hidden` on an
+          ancestor clips an absolutely-positioned descendant to its box exactly
+          as it clips normal content — `position` does not escape it — so it
+          silently cut every one of those popovers off a few pixels into their
+          own height, which read on screen as "the dropdown is hidden behind
+          the page below it". The horizontal-scroll bug this was added for is
+          fixed below by `min-w-0` + `shrink` on the row's children instead,
+          which is the actual fix: it stops the row from ever exceeding the
+          viewport's width, so nothing needs to be clipped at all. */}
       <button
         type="button"
         onClick={onToggleMobileNav}
