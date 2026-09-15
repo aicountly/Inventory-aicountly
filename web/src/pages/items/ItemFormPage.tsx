@@ -11,14 +11,28 @@ import { invalidateFormOptions, useFormOptions } from '../../hooks/useFormOption
 import { useQuery } from '../../hooks/useQuery'
 import { P } from '../../services/access'
 import { errorMessage, isApiError } from '../../services/api'
-import { itemsApi, ITEM_TYPES, UOM_ROLES } from '../../services/items'
-import type { Item, ItemOpeningsResponse } from '../../services/items'
+import { itemsApi, ITC_ELIGIBILITY, ITEM_TYPES, UOM_ROLES } from '../../services/items'
+import type { ItcEligibility, Item, ItemOpeningsResponse } from '../../services/items'
 import { useToast } from '../../ui/ToastContext'
 import { formatQty, humanize } from '../../utils/format'
 import { emptyItemForm, itemPayload, itemToForm, newOpening, newUnitLine, openingValue, openingsPayload, validateItemForm } from './itemForm'
 import type { ItemFormState, OpeningDraft, UnitLineDraft } from './itemForm'
 
 const LIST = '/items'
+
+/**
+ * What the item-level ITC attribute means, said in the words of the goods rather than of the tax.
+ *
+ * Inventory stores a FACT ABOUT THE ITEM — this thing is a motor vehicle, this thing is a food and
+ * beverage. It makes no tax determination from it, computes no tax consequence and holds no
+ * precedence rule. Books reads the attribute and resolves it against the tax category, the purchase
+ * ledger and the voucher line; that is where the credit is decided and where the return is filed.
+ */
+const ITC_HELP: Record<ItcEligibility, string> = {
+  inherit: 'This item says nothing. Books decides from the tax category and the purchase ledger, exactly as it does today.',
+  block: 'Mark the item as one whose input tax is ordinarily NOT recoverable — a motor vehicle, a food and beverage. Books reads this and decides; Inventory computes no tax.',
+  claim: 'Mark the item as one whose input tax is ordinarily recoverable, whatever its category suggests. Books reads this and decides; Inventory computes no tax.',
+}
 
 interface Loaded {
   item: Item
@@ -361,6 +375,25 @@ export function ItemFormPage() {
             </label>
           </div>
           {numberField('shelf_life_days', 'Shelf life (days)', 'Fills a batch expiry from its manufacturing date.', 1)}
+        </div>
+      </section>
+
+      <section className="form-section">
+        <h2 className="form-section-title">Tax attribute</h2>
+        <p className="form-section-subtitle">
+          A fact about the goods that travels with the item. Inventory records it and reports it to Smart Books; it makes no tax determination here, computes nothing from it, and
+          has no rule about which setting wins. Books reads it alongside the tax category, the purchase ledger and the voucher line, and decides the credit there.
+        </p>
+        <div className="form-grid">
+          <FormField label="Input tax credit" help={ITC_HELP[form.itc_eligibility]}>
+            <select className="select" value={form.itc_eligibility} disabled={readOnly} onChange={(e) => set('itc_eligibility', e.target.value as ItcEligibility)}>
+              {(options?.itc_eligibility_options ?? ITC_ELIGIBILITY).map((v) => (
+                <option key={v} value={v}>
+                  {v === 'inherit' ? 'Inherit — let Books decide' : v === 'claim' ? 'Claim — ordinarily recoverable' : 'Block — ordinarily not recoverable'}
+                </option>
+              ))}
+            </select>
+          </FormField>
         </div>
       </section>
 

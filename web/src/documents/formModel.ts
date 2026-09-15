@@ -258,6 +258,14 @@ export function isBlankLine(line: LineDraft): boolean {
   return line.item_id === null && line.qty.trim() === '' && line.book_qty.trim() === '' && line.physical_qty.trim() === ''
 }
 
+/** Shape of one metadata.charges[] entry, as the landed cost panel stores it. */
+interface LandedCostChargeLike {
+  cost_type?: string
+  amount?: unknown
+  allocation_basis?: string
+  lines?: { line_id?: number; amount?: unknown }[]
+}
+
 /** Validation the server would reject with 422 anyway — done first so the message is next to the field. */
 export function validateDraft(header: HeaderDraft, lines: LineDraft[], spec: DocumentTypeSpec): string[] {
   const errors: string[] = []
@@ -271,6 +279,36 @@ export function validateDraft(header: HeaderDraft, lines: LineDraft[], spec: Doc
   }
   if (spec.formKind === 'inward_challan' && header.stock_effect === 'settle_deferred' && !header.metadata.linked_source_document_id) {
     errors.push('Pick the deferred purchase this inward challan settles.')
+  }
+  // A landed cost allocation carries no item lines at all — a freight bill names no item and no
+  // quantity. What it must carry is the receipt it loads and the charges to spread over it, and
+  // the server refuses a draft without both.
+  if (spec.formKind === 'landed_cost') {
+    if (!header.metadata.target_document_id) errors.push('Pick the receipt these landing costs belong to.')
+    const charges = Array.isArray(header.metadata.charges) ? (header.metadata.charges as LandedCostChargeLike[]) : []
+    if (charges.length === 0) errors.push('Add at least one charge to allocate.')
+    charges.forEach((charge, i) => {
+      const n = i + 1
+      const amount = toNumber(charge?.amount)
+      if (amount === null || amount <= 0) {
+        errors.push(`Charge ${n}: enter an amount greater than zero.`)
+        return
+      }
+      if (charge?.allocation_basis !== 'manual' && charge?.allocation_basis !== 'direct') return
+      const shares = Array.isArray(charge.lines) ? charge.lines : []
+      if (shares.length === 0) {
+        errors.push(`Charge ${n}: enter the share each line carries.`)
+        return
+      }
+      if (charge.allocation_basis === 'direct' && shares.length !== 1) {
+        errors.push(`Charge ${n}: a charge that belongs to one line by nature cannot name ${shares.length}.`)
+      }
+      const sum = round4(shares.reduce((total, s) => total + (toNumber(s?.amount) ?? 0), 0))
+      if (Math.abs(sum - amount) > 0.01) {
+        errors.push(`Charge ${n}: the per-line shares add up to ${sum.toFixed(2)} but the charge is ${amount.toFixed(2)}.`)
+      }
+    })
+    return errors
   }
   const active = lines.filter((l) => !isBlankLine(l))
   if (active.length === 0) {

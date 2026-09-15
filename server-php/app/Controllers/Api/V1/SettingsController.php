@@ -15,8 +15,13 @@ class SettingsController extends BaseController
         if (isset($a['response'])) {
             return $a['response'];
         }
+        $cmpId = (int) $a['ctx']['cmp_id'];
+        $svc = new InventorySettingsService();
 
-        return $this->respond(['data' => (new InventorySettingsService())->get((int) $a['ctx']['cmp_id'])]);
+        // The landed-cost policy is stored as one column (the excluded set) and read as a set, so
+        // the settings screen is handed the resolved shape rather than left to parse the column and
+        // reinvent which types exist and which of them are not switchable.
+        return $this->respond(['data' => $svc->get($cmpId) + ['landed_cost_policy' => $svc->landedCostPolicy($cmpId)]]);
     }
 
     public function update($id = null)
@@ -28,10 +33,44 @@ class SettingsController extends BaseController
         $cmpId = (int) $a['ctx']['cmp_id'];
         $svc = new InventorySettingsService();
         $before = $svc->get($cmpId);
-        $after = $svc->update($cmpId, $this->request->getJSON(true) ?? [], $a['session']['uuid']);
+        try {
+            // A rejected value (non_creditable_tax, which is not a switch, or a word outside the
+            // vocabulary) is a 422 naming it, not a 500. Nothing is written when it throws: the
+            // whole patch is normalised before the single UPDATE runs.
+            $after = $svc->update($cmpId, $this->request->getJSON(true) ?? [], $a['session']['uuid']);
+        } catch (\Throwable $e) {
+            return $this->failFromException($e);
+        }
         (new AuditService())->log($cmpId, 'settings', $cmpId, 'settings.update', $a['session']['uuid'], [], $before, $after);
 
-        return $this->respond(['data' => $after]);
+        return $this->respond(['data' => $after + ['landed_cost_policy' => $svc->landedCostPolicy($cmpId)]]);
+    }
+
+    /**
+     * GET /v1/settings/landed-cost-policy — which landed cost types this company capitalises.
+     *
+     * Books reads this so its purchase screen offers only the switched-on types; the Inventory
+     * landed-cost panel reads the same thing. It is deliberately behind `inventory.enter` and not
+     * `settings.read`: the caller that needs it is the one entering a document, which is exactly
+     * the permission `GET /v1/document-types` is behind for the same reason.
+     *
+     * Returns `{capitalisable_cost_types, excluded_cost_types, switchable_cost_types,
+     * always_capitalised_cost_types, all_cost_types}` — all lists of cost-type codes from
+     * `freight | duty | insurance | handling | other | non_creditable_tax`.
+     *
+     * The list is what a caller should OFFER. It is not what enforces the policy: Inventory refuses
+     * an excluded type on the way in (DocumentService::assertCostTypeCapitalisable), because a
+     * screen can be cached, stale or skipped by a direct API call and a charge that was accepted
+     * and then left out of stock value is a closing stock nobody was told was short.
+     */
+    public function landedCostPolicy()
+    {
+        $a = $this->authorize('inventory.enter', true, false);
+        if (isset($a['response'])) {
+            return $a['response'];
+        }
+
+        return $this->respond(['data' => (new InventorySettingsService())->landedCostPolicy((int) $a['ctx']['cmp_id'])]);
     }
 
     public function documentTypes()

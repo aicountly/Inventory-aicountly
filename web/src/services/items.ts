@@ -71,6 +71,15 @@ export interface ItemListRow {
   stock?: StockSummary
 }
 
+/**
+ * The item-level ITC attribute: an attribute of the GOODS (a motor vehicle, a food and beverage).
+ * Inventory stores and reports it and does nothing else with it — no tax determination, no
+ * consequence, no precedence rule. Books resolves it against the tax category, the purchase ledger
+ * and the voucher line. `inherit` means the item says nothing and Books decides.
+ */
+export type ItcEligibility = 'inherit' | 'claim' | 'block'
+export const ITC_ELIGIBILITY: ItcEligibility[] = ['inherit', 'claim', 'block']
+
 export interface Item extends ItemListRow {
   purchase_unit_id: number | null
   sales_unit_id: number | null
@@ -78,6 +87,7 @@ export interface Item extends ItemListRow {
   books_sales_acc_id: number | null
   books_purchase_acc_id: number | null
   books_tax_cat_id: number | null
+  itc_eligibility: ItcEligibility | string
   shelf_life_days: number | null
   negative_stock_policy: string | null
   min_stock_qty: number | string | null
@@ -154,6 +164,7 @@ export interface ItemFormOptions {
   valuation_methods: string[]
   default_valuation_method: string
   negative_stock_policies: string[]
+  itc_eligibility_options: ItcEligibility[]
 }
 
 export async function fetchItemFormOptions(signal?: AbortSignal): Promise<ItemFormOptions> {
@@ -168,6 +179,7 @@ export async function fetchItemFormOptions(signal?: AbortSignal): Promise<ItemFo
     valuation_methods: d.valuation_methods ?? ['FIFO', 'LIFO', 'WAC'],
     default_valuation_method: d.default_valuation_method ?? 'FIFO',
     negative_stock_policies: d.negative_stock_policies ?? ['allow', 'warn', 'block'],
+    itc_eligibility_options: d.itc_eligibility_options ?? ITC_ELIGIBILITY,
   }
 }
 

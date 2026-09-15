@@ -30,6 +30,19 @@ class DocumentService
     /** Live posted statuses, the ones a challan value can still be recorded against. */
     public const VALUE_AMENDABLE_STATUSES = ['POSTED', 'PARTIALLY_FULFILLED', 'COMPLETED'];
 
+    /**
+     * Landed cost vocabulary, shared by the per-line field Books posts with a receipt and by the
+     * charges a LANDED_COST document carries.
+     *
+     * 'weight' is deliberately absent as a basis: there is no item weight master to allocate by, so
+     * offering it would be a control that silently falls back to something else. 'direct' is the
+     * charge that belongs to exactly one line by nature — a non-creditable tax is the case that
+     * needs it, because the tax that cannot be claimed is the tax on that one line.
+     */
+    public const LANDED_COST_TYPES = ['freight', 'duty', 'insurance', 'handling', 'other', 'non_creditable_tax'];
+
+    public const LANDED_COST_BASES = ['value', 'qty', 'manual', 'direct'];
+
     public function __construct(
         protected ?UnitConversionService $units = null,
         protected ?AuditService $audit = null,
@@ -402,6 +415,293 @@ class DocumentService
         return $out;
     }
 
+    // ------------------------------------------------------------------ landed cost
+
+    /**
+     * The landed cost carried on ONE payload line: the rupee amount Books allocated to it, plus the
+     * breakdown that says which charges it is made of.
+     *
+     * Books owns the charges (a freight bill is a payable) and allocates them; Inventory consumes
+     * the per-line amount as part of the cost of the goods. Nothing here reads or writes
+     * source_transaction_rate / source_transaction_amount: the landed cost is a COST, so it may
+     * never change the invoice value, the taxable value or any GST figure.
+     *
+     * Reads the amount from `landed_cost_amount` and the breakdown from `landed_cost_breakdown` or
+     * from `metadata.landed_cost_breakdown`, because a stored line comes back with the breakdown
+     * inside its metadata and normalizeLines() runs over stored lines again on every update().
+     *
+     * @param array<string, mixed> $line
+     * @return array{amount: float, breakdown: list<array{cost_type: string, amount: float, allocation_basis: string}>}
+     */
+    public static function landedCostFromLine(array $line, int $lineNo): array
+    {
+        $raw = $line['landed_cost_amount'] ?? null;
+        $rawBreakdown = $line['landed_cost_breakdown'] ?? null;
+        if ($rawBreakdown === null && isset($line['metadata']) && is_array($line['metadata'])) {
+            $rawBreakdown = $line['metadata']['landed_cost_breakdown'] ?? null;
+        }
+        if (($raw === null || $raw === '') && !is_array($rawBreakdown)) {
+            return ['amount' => 0.0, 'breakdown' => []];
+        }
+        if ($raw !== null && $raw !== '' && !is_numeric($raw)) {
+            throw InventoryException::validation('Line ' . $lineNo . ': landed_cost_amount must be a number', ['landed_cost_amount' => $raw]);
+        }
+        $amount = round((float) ($raw ?? 0), 4);
+        if ($amount < 0) {
+            throw InventoryException::validation('Line ' . $lineNo . ': landed_cost_amount cannot be negative (' . $amount . ')', ['landed_cost_amount' => $amount]);
+        }
+        $breakdown = [];
+        $sum = 0.0;
+        if ($rawBreakdown !== null) {
+            if (!is_array($rawBreakdown)) {
+                throw InventoryException::validation('Line ' . $lineNo . ': landed_cost_breakdown must be a list of charges');
+            }
+            foreach ($rawBreakdown as $entry) {
+                if (!is_array($entry)) {
+                    throw InventoryException::validation('Line ' . $lineNo . ': each landed_cost_breakdown entry must be an object with cost_type, amount and allocation_basis');
+                }
+                $part = self::landedCostPart($entry, 'Line ' . $lineNo);
+                $breakdown[] = $part;
+                $sum = round($sum + $part['amount'], 4);
+            }
+        }
+        // 0.01 is one paisa: the tolerance Books' own allocator rounds to. Anything wider hides a
+        // charge that was only partly sent, and a landed cost that is quietly short is a closing
+        // stock that does not tie.
+        if ($breakdown !== [] && abs($sum - $amount) > 0.01) {
+            throw InventoryException::validation(
+                'Line ' . $lineNo . ': landed_cost_breakdown sums to ' . number_format($sum, 4, '.', '') . ' but landed_cost_amount is ' . number_format($amount, 4, '.', ''),
+                ['breakdown_total' => $sum, 'landed_cost_amount' => $amount],
+            );
+        }
+
+        return ['amount' => $amount, 'breakdown' => $breakdown];
+    }
+
+    /**
+     * One charge, validated against the two enums. Used for a breakdown entry on a receipt line and
+     * for a charge on a LANDED_COST document, so the vocabulary cannot drift between them.
+     *
+     * @param array<string, mixed> $entry
+     * @return array{cost_type: string, amount: float, allocation_basis: string}
+     */
+    private static function landedCostPart(array $entry, string $where): array
+    {
+        $costType = strtolower(trim((string) ($entry['cost_type'] ?? '')));
+        if (!in_array($costType, self::LANDED_COST_TYPES, true)) {
+            throw InventoryException::validation(
+                $where . ': cost_type "' . $costType . '" is not one of ' . implode(', ', self::LANDED_COST_TYPES),
+                ['cost_type' => $costType, 'allowed' => self::LANDED_COST_TYPES],
+            );
+        }
+        $basis = strtolower(trim((string) ($entry['allocation_basis'] ?? '')));
+        if ($basis === '') {
+            $basis = 'value';
+        }
+        if (!in_array($basis, self::LANDED_COST_BASES, true)) {
+            throw InventoryException::validation(
+                $where . ': allocation_basis "' . $basis . '" is not one of ' . implode(', ', self::LANDED_COST_BASES) . ' (weight is not offered: there is no item weight master to allocate by)',
+                ['allocation_basis' => $basis, 'allowed' => self::LANDED_COST_BASES],
+            );
+        }
+        $amount = round((float) ($entry['amount'] ?? 0), 4);
+        if ($amount < 0) {
+            throw InventoryException::validation($where . ': a ' . $costType . ' charge cannot be negative (' . $amount . ')', ['cost_type' => $costType, 'amount' => $amount]);
+        }
+
+        return ['cost_type' => $costType, 'amount' => $amount, 'allocation_basis' => $basis];
+    }
+
+    /**
+     * The company's capitalisation policy, asked of ONE charge.
+     *
+     * Deciding which charges are part of the cost of inventory — freight, insurance, customs, a
+     * tax that cannot be claimed — is an accounting policy of the company that holds the stock. It
+     * is not a per-voucher decision and it is not Books' to make: Books captures the charge and
+     * allocates it, Inventory decides whether that kind of charge belongs in stock value at all.
+     *
+     * Books is told which types are switched on (GET /v1/settings/landed-cost-policy) so its
+     * purchase screen offers only those, but that offer is a courtesy and not the control. A screen
+     * can be stale, cached, or skipped entirely by a direct API call, so the refusal has to live
+     * here, on the way in, where every caller passes.
+     *
+     * It is a REFUSAL and never a drop. Accepting the line and quietly leaving the amount out would
+     * be a closing stock short by exactly that amount with nobody told — the same failure the whole
+     * split of ownership exists to prevent, and one already found by probe on another path in this
+     * project. The caller is told the type and the policy and can either change the policy or take
+     * the charge off the voucher and expense it, which is what excluding a type MEANS.
+     *
+     * @param list<string> $capitalisable InventorySettingsService::capitalisableLandedCostTypes()
+     */
+    public static function assertCostTypeCapitalisable(string $costType, array $capitalisable, string $where): void
+    {
+        if (in_array($costType, $capitalisable, true)) {
+            return;
+        }
+
+        throw InventoryException::validation(
+            $where . ': this company does not capitalise ' . $costType . ' into the cost of stock, so the amount cannot be accepted here — accepting it and leaving it out '
+            . 'would make closing stock short by exactly that amount with nobody told. Expense the charge in Books, or switch ' . $costType
+            . ' back on in Inventory settings (Landed cost capitalised into stock).',
+            ['cost_type' => $costType, 'capitalisable_cost_types' => array_values($capitalisable), 'setting' => 'landed_cost_excluded_types'],
+        );
+    }
+
+    /**
+     * The company's capitalisation policy, asked of ONE receipt line's landed cost.
+     *
+     * A line that carries an amount and NO breakdown is checked against 'other', because that is
+     * exactly what posting records it as (DocumentPostingService::receiptBorneShares books an
+     * un-attributed amount as one 'other' charge belonging directly to the line). A company that
+     * has switched 'other' off has said it does not capitalise charges it cannot name, and letting
+     * an unnamed amount through under that very name would make the setting a lie. The refusal
+     * says so and asks for the breakdown.
+     *
+     * @param list<array{cost_type: string, amount: float, allocation_basis: string}> $breakdown
+     * @param list<string> $capitalisable
+     */
+    public static function assertLandedCostPolicy(float $amount, array $breakdown, array $capitalisable, string $where): void
+    {
+        if ($amount <= 0 && $breakdown === []) {
+            return;
+        }
+        foreach ($breakdown as $part) {
+            self::assertCostTypeCapitalisable((string) $part['cost_type'], $capitalisable, $where);
+        }
+        if ($breakdown === [] && !in_array('other', $capitalisable, true)) {
+            throw InventoryException::validation(
+                $where . ': a landed cost with no breakdown is capitalised as an "other" charge, and this company does not capitalise other into the cost of stock. '
+                . 'Send landed_cost_breakdown naming the charges, or take the amount off the line.',
+                ['cost_type' => 'other', 'landed_cost_amount' => $amount, 'capitalisable_cost_types' => array_values($capitalisable), 'setting' => 'landed_cost_excluded_types'],
+            );
+        }
+    }
+
+    /**
+     * Where a landed cost may be carried at all. Checked per EMITTED row, not per payload line, so
+     * the out leg a transfer generates from one entered line is caught too.
+     *
+     * It is never silently dropped. A dropped cost is a closing stock that is short by exactly that
+     * amount with nobody told — the failure this whole split of ownership exists to prevent — so a
+     * landed cost in the wrong place is a 422 that says which place and why.
+     *
+     * The last of the three questions is the document's, not the type's, and it has to be asked
+     * separately from the first: a defer_inward purchase and a from_physical_challan sales return
+     * both declare valuation => true and both emit an inward row, so the first two questions pass —
+     * but neither moves any stock when it posts, so posting skips its whole valuation block and the
+     * amount vanishes. The goods enter later on the settling challan, which costs them from the
+     * purchase's RATE (deferredPurchaseUnitCost reads no landed cost) and opens the layer without
+     * the charge. That is the silent drop this guard exists to make impossible, so the stock_effect
+     * is part of the question and DocumentPostingService::capitalisesLandedCost() is the one place
+     * that answers it for both ends.
+     *
+     * @param array<string, mixed>|null $spec
+     */
+    public static function assertLandedCostAllowed(string $type, ?array $spec, string $stockEffect, string $direction, float $amount, int $lineNo): void
+    {
+        if ($amount <= 0) {
+            return;
+        }
+        $label = (string) ($spec['label'] ?? $type);
+        if (empty($spec['valuation'])) {
+            throw InventoryException::validation(
+                'Line ' . $lineNo . ': a landed cost is part of what the stock cost, and ' . $label . ' does not carry valuation, so the amount would be dropped and closing stock would be short by it. Send the charge as a LANDED_COST document against the receipt that values the goods.',
+                ['document_type' => $type, 'landed_cost_amount' => $amount],
+            );
+        }
+        if ($direction !== 'in') {
+            throw InventoryException::validation(
+                'Line ' . $lineNo . ': a landed cost is the cost of getting goods IN, so it cannot be carried on an outward line of ' . $label . '.',
+                ['document_type' => $type, 'direction' => $direction, 'landed_cost_amount' => $amount],
+            );
+        }
+        if (!DocumentPostingService::capitalisesLandedCost($type, $spec, $stockEffect)) {
+            throw InventoryException::validation(
+                'Line ' . $lineNo . ': this ' . $label . ' is ' . ($stockEffect !== '' ? $stockEffect : 'not moving its stock now')
+                . ', so it moves no stock when it posts and never values this line — the landed cost would be dropped and closing stock would be short by it. '
+                . 'The goods are valued by the document that actually receives them, so send the charge as a LANDED_COST document against that one once it is posted.',
+                ['document_type' => $type, 'stock_effect' => $stockEffect, 'direction' => $direction, 'landed_cost_amount' => $amount],
+            );
+        }
+    }
+
+    /** The receipt a LANDED_COST document loads (metadata.target_document_id). */
+    public static function landedCostTarget(array $metadata): int
+    {
+        $target = (int) ($metadata['target_document_id'] ?? 0);
+        if ($target <= 0) {
+            throw InventoryException::validation('A landed cost allocation must name the receipt it loads (metadata.target_document_id)');
+        }
+
+        return $target;
+    }
+
+    /**
+     * The charges a LANDED_COST document carries (metadata.charges), validated and normalised.
+     *
+     * A charge has no item and no quantity, so it cannot be a document line — normalizeLines()
+     * requires an item_id on every one. It rides in metadata, which is where every other
+     * line-less instruction on this type of document lives (challan settlements, job-work
+     * settlements, the BOM of a production).
+     *
+     * @param array<string, mixed> $metadata
+     * @return list<array{cost_type: string, amount: float, allocation_basis: string, description: ?string, books_acc_ref: ?int, lines: array<int, float>}>
+     */
+    public static function landedCostCharges(array $metadata): array
+    {
+        $raw = $metadata['charges'] ?? null;
+        if (!is_array($raw) || $raw === []) {
+            throw InventoryException::validation('A landed cost allocation must carry at least one charge (metadata.charges[])');
+        }
+        $out = [];
+        foreach (array_values($raw) as $i => $entry) {
+            $where = 'Charge ' . ($i + 1);
+            if (!is_array($entry)) {
+                throw InventoryException::validation($where . ': each charge must be an object with cost_type, amount and allocation_basis');
+            }
+            $part = self::landedCostPart($entry, $where);
+            if ($part['amount'] <= 0) {
+                throw InventoryException::validation($where . ': a ' . $part['cost_type'] . ' charge of zero allocates nothing; remove it or give it an amount');
+            }
+            $lines = [];
+            $rawLines = $entry['lines'] ?? null;
+            if (is_array($rawLines)) {
+                foreach ($rawLines as $l) {
+                    if (!is_array($l)) {
+                        continue;
+                    }
+                    $lineId = (int) ($l['line_id'] ?? 0);
+                    if ($lineId <= 0) {
+                        throw InventoryException::validation($where . ': a per-line share must name the target line (line_id)');
+                    }
+                    $lines[$lineId] = round((float) ($l['amount'] ?? 0), 4) + ($lines[$lineId] ?? 0);
+                }
+            }
+            if (in_array($part['allocation_basis'], ['manual', 'direct'], true) && $lines === []) {
+                throw InventoryException::validation($where . ': a ' . $part['allocation_basis'] . ' charge must say which line carries it and how much (lines[{line_id, amount}])');
+            }
+            if ($part['allocation_basis'] === 'direct' && count($lines) !== 1) {
+                throw InventoryException::validation($where . ': a direct charge belongs to exactly one line by nature, but ' . count($lines) . ' were named');
+            }
+            if ($lines !== []) {
+                $sum = round(array_sum($lines), 4);
+                if (abs($sum - $part['amount']) > 0.01) {
+                    throw InventoryException::validation(
+                        $where . ': the per-line shares sum to ' . number_format($sum, 4, '.', '') . ' but the charge is ' . number_format($part['amount'], 4, '.', ''),
+                        ['lines_total' => $sum, 'amount' => $part['amount']],
+                    );
+                }
+            }
+            $out[] = $part + [
+                'description'   => isset($entry['description']) ? substr((string) $entry['description'], 0, 255) : null,
+                'books_acc_ref' => isset($entry['books_acc_ref']) && $entry['books_acc_ref'] ? (int) $entry['books_acc_ref'] : null,
+                'lines'         => $lines,
+            ];
+        }
+
+        return $out;
+    }
+
     /** @return array<string, mixed> */
     private function headerFromPayload(int $cmpId, int $fyId, int $boId, string $type, array $p, string $sourceApp): array
     {
@@ -454,6 +754,22 @@ class DocumentService
         if (in_array($type, ['SALES_ISSUE', 'PURCHASE_RECEIPT', 'SALES_RETURN', 'PURCHASE_RETURN'], true) && $h['stock_effect'] === null) {
             $h['stock_effect'] = 'on_invoice';
         }
+        if ($type === 'LANDED_COST') {
+            // A draft that names no receipt and carries no charge is a document that cannot ever
+            // post, saved as though it could. Posting checks both again from the stored metadata,
+            // because the target's status can change between the draft being saved and posted.
+            $meta = isset($p['metadata']) && is_array($p['metadata']) ? $p['metadata'] : [];
+            self::landedCostTarget($meta);
+            $charges = self::landedCostCharges($meta);
+            // The capitalisation policy, asked of a charge that arrives on its own document. Asked
+            // again at posting from the stored metadata (DocumentPostingService::applyLandedCost),
+            // for the same reason the target's status is re-read there: a draft can outlive the
+            // policy it was saved under, and posting is where the rupees actually reach stock.
+            $capitalisable = $this->settings->capitalisableLandedCostTypes($cmpId);
+            foreach ($charges as $i => $charge) {
+                self::assertCostTypeCapitalisable((string) $charge['cost_type'], $capitalisable, 'Charge ' . ($i + 1));
+            }
+        }
 
         return $h;
     }
@@ -470,6 +786,10 @@ class DocumentService
             $raw = [];
         }
         $this->units->warmCompany($cmpId);
+        // Resolved at most once per payload, and only if some line actually carries a landed cost:
+        // the great majority of documents carry none, and this runs on every create and every
+        // update of every type.
+        $capitalisable = null;
         $db = \Config\Database::connect();
         $out = [];
         $sort = 0;
@@ -534,6 +854,28 @@ class DocumentService
                 'serials'                   => isset($line['serials']) && is_array($line['serials']) ? $line['serials'] : [],
             ];
 
+            // Landed cost: the rupee amount Books allocated to this line, plus the breakdown of
+            // which charges make it up. The breakdown has no column of its own and rides in the
+            // line's metadata, because posting reads its lines back out of the database and would
+            // otherwise lose the detail between create and post.
+            $landed = self::landedCostFromLine($line, (int) $idx + 1);
+            // Intake point one for the company's capitalisation policy: the breakdown that arrives
+            // on the receipt itself. Asked here, per line, before anything is stored — and asked of
+            // the STORED line too, because update() runs normalizeLines() over the rows it read
+            // back, so a draft saved before a type was switched off is refused when it is next
+            // touched rather than posted under a policy that no longer allows it.
+            if ($landed['amount'] > 0 || $landed['breakdown'] !== []) {
+                $capitalisable ??= $this->settings->capitalisableLandedCostTypes($cmpId);
+                self::assertLandedCostPolicy($landed['amount'], $landed['breakdown'], $capitalisable, 'Line ' . ((int) $idx + 1));
+            }
+            $base['landed_cost_amount'] = $landed['amount'];
+            if ($landed['breakdown'] !== []) {
+                $lineMeta = isset($line['metadata']) && is_array($line['metadata']) ? $line['metadata'] : [];
+                $lineMeta['landed_cost_breakdown'] = $landed['breakdown'];
+                $base['metadata_json'] = json_encode($lineMeta, JSON_UNESCAPED_UNICODE);
+            }
+
+            $emittedFrom = count($out);
             switch ($spec['line_mode']) {
                 case 'fixed_in':
                     $base['direction'] = 'in';
@@ -573,6 +915,12 @@ class DocumentService
                     $base['direction'] = in_array($type, ['DELIVERY_CHALLAN', 'JOB_WORK_OUT', 'PACKING', 'RESERVATION'], true) ? 'out' : (in_array($type, ['INWARD_CHALLAN', 'RESERVATION_RELEASE'], true) ? 'in' : 'none');
                     $out[] = $base + ['sort_order' => $sort++];
                     break;
+            }
+
+            // Per EMITTED row, so the out leg a transfer generates from one entered line is caught
+            // as well as the line the user typed.
+            for ($r = $emittedFrom, $n = count($out); $r < $n; $r++) {
+                self::assertLandedCostAllowed($type, $spec, (string) ($header['stock_effect'] ?? ''), (string) ($out[$r]['direction'] ?? ''), (float) ($out[$r]['landed_cost_amount'] ?? 0), (int) $idx + 1);
             }
         }
 

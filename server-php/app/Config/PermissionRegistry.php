@@ -47,6 +47,7 @@ class PermissionRegistry
         'batch_adjustment'      => 'Batch Adjustment',
         'serial_adjustment'     => 'Serial Adjustment',
         'revaluation'           => 'Stock Revaluation',
+        'landed_cost'           => 'Landed Cost Allocation',
         'reservation'           => 'Inventory Reservation',
         'reservation_release'   => 'Reservation Release',
         'delivery_challan'      => 'Delivery Challan / Goods Dispatch',

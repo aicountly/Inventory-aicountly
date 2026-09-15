@@ -35,7 +35,7 @@ class DocumentTypeRegistry
         'BATCH_ADJUSTMENT'    => ['label' => 'Batch Adjustment',         'line_mode' => 'by_line',    'valuation' => false, 'cogs' => false, 'effects' => [],                       'legacy_vch_type' => null, 'native' => true],
         'SERIAL_ADJUSTMENT'   => ['label' => 'Serial Adjustment',        'line_mode' => 'by_line',    'valuation' => false, 'cogs' => false, 'effects' => [],                       'legacy_vch_type' => null, 'native' => true],
         'REVALUATION'         => ['label' => 'Stock Revaluation',        'line_mode' => 'status_only','valuation' => true,  'cogs' => false, 'effects' => ['STOCK_REVALUATION'],    'legacy_vch_type' => null, 'native' => true],
-        'LANDED_COST'         => ['label' => 'Landed Cost Allocation',   'line_mode' => 'status_only','valuation' => true,  'cogs' => false, 'effects' => [],                       'legacy_vch_type' => null, 'native' => true],
+        'LANDED_COST'         => ['label' => 'Landed Cost Allocation',   'line_mode' => 'status_only','valuation' => true,  'cogs' => false, 'effects' => ['STOCK_REVALUATION'],    'legacy_vch_type' => null, 'native' => true],
         'RESERVATION'         => ['label' => 'Inventory Reservation',    'line_mode' => 'status_only','valuation' => false, 'cogs' => false, 'effects' => [],                       'legacy_vch_type' => null, 'native' => true],
         'RESERVATION_RELEASE' => ['label' => 'Reservation Release',      'line_mode' => 'status_only','valuation' => false, 'cogs' => false, 'effects' => [],                       'legacy_vch_type' => null, 'native' => true],
         'DELIVERY_CHALLAN'    => ['label' => 'Delivery Challan / Dispatch','line_mode' => 'pending_only','valuation' => false,'cogs' => false, 'effects' => [],                     'legacy_vch_type' => 23,   'native' => true],
@@ -96,16 +96,28 @@ class DocumentTypeRegistry
      * keeps its label — but which nobody may create or post, because what the type describes was
      * never built.
      *
-     * LANDED_COST is the whole list. Posting one runs no allocator: it opens no inv_landed_costs
-     * row, raises no cost layer, moves no average, sets no landed_cost_amount and emits no effect,
-     * so the operator who entered a freight bill to capitalise it is told POSTED while closing
-     * stock and COGS are exactly what they were. An unbuilt type that answers "done" is worse than
-     * one that refuses, so it refuses until an allocator exists — and until the document carries
-     * what an allocator needs, which the present type does not: no target receipt, no cost type,
-     * no allocation basis, and an amount collected in the commercial source_transaction_* pair
-     * Books owns, which may never become a cost by falling through to valuation.
+     * The list is EMPTY, and the machinery stays: it is the guard for the next type that is
+     * declared before it is built. Nothing may be entered against a type that does nothing when it
+     * posts, because POSTED then becomes the record that work was done which never ran.
+     *
+     * LANDED_COST was the one entry and is now built. What it does: a receipt line may carry a
+     * landed_cost_amount that Books allocated, which is loaded onto the cost of those goods so the
+     * FIFO/LIFO layer and the weighted average both hold it; and a LANDED_COST document names a
+     * posted receipt plus charges, allocates them over its inward lines (by value, by quantity, or
+     * by amounts typed per line), raises the affected cost layers, re-averages, writes
+     * inv_landed_costs / inv_landed_cost_lines and emits STOCK_REVALUATION for Books to journal.
+     *
+     * What it deliberately does NOT do in v1, stated here because an unstated COGS difference is
+     * the failure this whole split of ownership exists to prevent: stock already ISSUED out of the
+     * target receipt is not retro-costed. Only what is still on hand absorbs the charge; the
+     * remainder comes back as a `landed_cost_not_absorbed` warning naming the amount, for the
+     * caller to expense — and it is NOT written onto the receipt line either, so the same rupees
+     * can never be expensed by the caller and carried in stock here. A landed cost that reaches
+     * back into a period that may already be filed needs its own effective date, and that is a
+     * design, not a patch: until it exists, a receipt inside a locked period is refused rather
+     * than loaded from a date outside the lock.
      */
-    public const UNIMPLEMENTED = ['LANDED_COST'];
+    public const UNIMPLEMENTED = [];
 
     /**
      * Books voucher types whose direction was driven by the line's dr_cr rather than the type

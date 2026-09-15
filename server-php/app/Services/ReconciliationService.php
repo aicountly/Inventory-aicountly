@@ -15,7 +15,7 @@ use Config\DocumentTypeRegistry;
  *   pending_posting                     Books-sourced documents Inventory has not posted yet (DRAFT / PENDING_APPROVAL / APPROVED)
  *   failed_posting                      documents whose posting FAILED
  *   unacknowledged_valuation_revisions  COGS revisions published to Books but not acknowledged
- *   revaluation                         REVALUATION documents (STOCK_REVALUATION effect) vs the revaluations Books holds
+ *   revaluation                         REVALUATION and LANDED_COST documents (STOCK_REVALUATION effect) vs the revaluations Books holds
  *   manual_journal                      manual journals Books posted straight to the stock ledger
  *   cancelled_reversed                  documents REVERSED in Inventory vs vouchers Books cancelled / reversed
  *   missing_source                      Books postings with no Inventory document at all
@@ -544,9 +544,15 @@ class ReconciliationService
      */
     private function revaluationBucket(int $cmpId, int $fyId, int $boId, string $asOf, array $booksReported): array
     {
+        // LANDED_COST belongs here beside REVALUATION: it raises the value of stock on hand without
+        // moving any quantity, emits the same STOCK_REVALUATION effect for Books to journal, and is
+        // read back the same way. Left out, the uplift it caused lands in `unexplained`, which is
+        // the bucket that means nobody knows — the one thing a reconciliation must never say about
+        // a figure it could name. No historical number moves: the type had no allocator until now,
+        // so no document of it has ever emitted an effect.
         $b = \Config\Database::connect()->table('inv_documents d')
-            ->select('d.document_id, d.document_uuid, d.document_no, d.document_date, d.status, d.accounting_effects_json')
-            ->where('d.cmp_id', $cmpId)->where('d.fy_id', $fyId)->where('d.document_type', 'REVALUATION')
+            ->select('d.document_id, d.document_uuid, d.document_type, d.document_no, d.document_date, d.status, d.accounting_effects_json')
+            ->where('d.cmp_id', $cmpId)->where('d.fy_id', $fyId)->whereIn('d.document_type', ['REVALUATION', 'LANDED_COST'])
             ->whereIn('d.status', ['POSTED', 'COMPLETED', 'PARTIALLY_FULFILLED'])
             ->where('d.document_date <=', $asOf)
             ->orderBy('d.document_date', 'ASC')->orderBy('d.document_id', 'ASC');
@@ -565,7 +571,7 @@ class ReconciliationService
             }
             $amount = round($amount, 4);
             $sum += $amount;
-            $rows[] = ['document_id' => (int) $r['document_id'], 'document_uuid' => $r['document_uuid'], 'document_no' => $r['document_no'], 'document_date' => substr((string) $r['document_date'], 0, 10), 'status' => $r['status'], 'amount' => $amount];
+            $rows[] = ['document_id' => (int) $r['document_id'], 'document_uuid' => $r['document_uuid'], 'document_type' => $r['document_type'], 'document_no' => $r['document_no'], 'document_date' => substr((string) $r['document_date'], 0, 10), 'status' => $r['status'], 'amount' => $amount];
         }
         $reported = self::sumEntries($booksReported);
 

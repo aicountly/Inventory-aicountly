@@ -21,8 +21,48 @@ use App\Services\ValuationReplayService;
  */
 class ItemsController extends BaseController
 {
-    private const COLUMNS = ['item_name', 'item_alias', 'print_name', 'item_type', 'item_sku', 'item_upc', 'hsn_sac', 'mrp', 'unit_id', 'purchase_unit_id', 'sales_unit_id', 'stock_cat_id', 'item_grp_id', 'brand_id', 'parent_item_id', 'valuation_method', 'books_sales_acc_id', 'books_purchase_acc_id', 'books_tax_cat_id', 'track_batch', 'track_serial', 'track_expiry', 'shelf_life_days', 'negative_stock_policy', 'min_stock_qty', 'max_stock_qty', 'reorder_point_qty', 'reorder_qty', 'safety_stock_qty', 'lead_time_days', 'default_warehouse_id', 'standard_cost'];
-    private const LIST_COLUMNS = 'i.item_id, i.item_uuid, i.item_name, i.item_alias, i.print_name, i.item_type, i.item_sku, i.item_upc, i.hsn_sac, i.mrp, i.unit_id, i.stock_cat_id, i.item_grp_id, i.brand_id, i.valuation_method, i.books_sales_acc_id, i.books_purchase_acc_id, i.books_tax_cat_id, i.track_batch, i.track_serial, i.track_expiry, i.is_active, i.updated_at, i.created_at, u.unit_symbol, u.unit_name, g.grp_name, c.cat_name, b.brand_name';
+    private const COLUMNS = ['item_name', 'item_alias', 'print_name', 'item_type', 'item_sku', 'item_upc', 'hsn_sac', 'mrp', 'unit_id', 'purchase_unit_id', 'sales_unit_id', 'stock_cat_id', 'item_grp_id', 'brand_id', 'parent_item_id', 'valuation_method', 'books_sales_acc_id', 'books_purchase_acc_id', 'books_tax_cat_id', 'itc_eligibility', 'track_batch', 'track_serial', 'track_expiry', 'shelf_life_days', 'negative_stock_policy', 'min_stock_qty', 'max_stock_qty', 'reorder_point_qty', 'reorder_qty', 'safety_stock_qty', 'lead_time_days', 'default_warehouse_id', 'standard_cost'];
+    private const LIST_COLUMNS = 'i.item_id, i.item_uuid, i.item_name, i.item_alias, i.print_name, i.item_type, i.item_sku, i.item_upc, i.hsn_sac, i.mrp, i.unit_id, i.stock_cat_id, i.item_grp_id, i.brand_id, i.valuation_method, i.books_sales_acc_id, i.books_purchase_acc_id, i.books_tax_cat_id, i.itc_eligibility, i.track_batch, i.track_serial, i.track_expiry, i.is_active, i.updated_at, i.created_at, u.unit_symbol, u.unit_name, g.grp_name, c.cat_name, b.brand_name';
+
+    /** GET /v1/items/search — the typeahead payload. */
+    private const SEARCH_COLUMNS = 'i.item_id, i.item_name, i.item_alias, i.print_name, i.item_sku, i.item_upc, i.hsn_sac, i.mrp, i.unit_id, u.unit_symbol, i.books_tax_cat_id, i.books_sales_acc_id, i.books_purchase_acc_id, i.itc_eligibility, i.track_batch, i.track_serial, i.valuation_method, i.default_warehouse_id';
+
+    /**
+     * GET /v1/items/{id}, and the row create/update answer with — the whole item.
+     *
+     * Named rather than spelled out at each of the three call sites so a narrowing of it is a
+     * one-line change a test can hold. Books proxies this read, and
+     * ItcEligibilityResolver::stanceFromItemRow() reads itc_eligibility with array_key_exists, so
+     * an absent key is not an error there: it resolves to "the item says nothing", the tax
+     * category's default wins, and an item explicitly marked `block` — a motor vehicle — goes on
+     * having its input tax credit claimed. That is a GST return figure.
+     */
+    public const SHOW_COLUMNS = 'i.*, u.unit_symbol, u.unit_name, g.grp_name, c.cat_name, b.brand_name';
+
+    /** POST /v1/items/bulk-lookup — what Books' InventoryMasterReader labels voucher lines from. */
+    private const LOOKUP_COLUMNS = 'i.item_id, i.item_uuid, i.item_name, i.item_alias, i.print_name, i.item_sku, i.item_upc, i.hsn_sac, i.unit_id, u.unit_symbol, u.uqc_gst, i.books_tax_cat_id, i.books_sales_acc_id, i.books_purchase_acc_id, i.itc_eligibility, i.valuation_method, i.track_batch, i.track_serial, i.default_warehouse_id, i.is_active, i.deleted_at';
+
+    /**
+     * The item-level input-tax-credit attribute: `inherit | claim | block`, default `inherit`.
+     *
+     * WHAT THIS IS. A fact about the GOODS — this thing is a motor vehicle, this thing is a food
+     * and beverage — which is why it sits on the item master beside HSN and the tracking flags and
+     * not on a voucher line. The product owner's words: an item can "sweep or block ITC whenever
+     * used", so the answer travels with the item rather than being retyped on every purchase.
+     *
+     * WHAT THIS IS NOT. Inventory makes no tax determination from it. It computes no tax
+     * consequence, holds no precedence rule against the tax category / the purchase ledger / the
+     * voucher line, and has no "default claimable" fallback anywhere. It stores the value and
+     * reports it on the item API. Books reads it, resolves it against the tax category (where the
+     * same attribute exists at category level), the purchase ledger and the voucher line, and books
+     * the result — one implementation of that precedence, in the product that files the return.
+     * Two implementations would be two answers to the same question.
+     *
+     * `inherit` is not an absence: it is the item saying it has no opinion, so whatever Books
+     * resolves from the category and the ledger stands. Every existing item is on it, which is why
+     * adding the attribute changes nothing that was already posted.
+     */
+    public const ITC_ELIGIBILITY = ['inherit', 'claim', 'block'];
 
     public function formOptions()
     {
@@ -53,6 +93,8 @@ class ItemsController extends BaseController
             'valuation_methods' => InventorySettingsService::METHODS,
             'default_valuation_method' => (new InventorySettingsService())->defaultValuationMethod($cmpId),
             'negative_stock_policies' => InventorySettingsService::NEGATIVE_POLICIES,
+            // An attribute of the goods that Books resolves; Inventory only offers the three words.
+            'itc_eligibility_options' => self::ITC_ELIGIBILITY,
         ]]);
     }
 
@@ -121,7 +163,7 @@ class ItemsController extends BaseController
         if ($q !== '') {
             $this->applySearch($b, $q, (string) ($this->request->getGet('q_mode') ?? 'prefix'));
         }
-        $rows = $b->select('i.item_id, i.item_name, i.item_alias, i.print_name, i.item_sku, i.item_upc, i.hsn_sac, i.mrp, i.unit_id, u.unit_symbol, i.books_tax_cat_id, i.books_sales_acc_id, i.books_purchase_acc_id, i.track_batch, i.track_serial, i.valuation_method, i.default_warehouse_id')
+        $rows = $b->select(self::SEARCH_COLUMNS)
             ->orderBy('i.item_name')->limit($limit)->get()->getResultArray();
         if ((int) ($this->request->getGet('with_stock') ?? 0) === 1 && $rows !== []) {
             $this->attachStock($cmpId, $rows, (int) $this->request->getGet('warehouse_id') ?: null);
@@ -167,7 +209,7 @@ class ItemsController extends BaseController
         $out = [];
         $db = \Config\Database::connect();
         foreach (array_chunk($ids, 500) as $chunk) {
-            $rows = $db->table('inv_items i')->select('i.item_id, i.item_uuid, i.item_name, i.item_alias, i.print_name, i.item_sku, i.item_upc, i.hsn_sac, i.unit_id, u.unit_symbol, u.uqc_gst, i.books_tax_cat_id, i.books_sales_acc_id, i.books_purchase_acc_id, i.valuation_method, i.track_batch, i.track_serial, i.default_warehouse_id, i.is_active, i.deleted_at')
+            $rows = $db->table('inv_items i')->select(self::LOOKUP_COLUMNS)
                 ->join('inv_uom u', 'u.unit_id = i.unit_id', 'left')->where('i.cmp_id', $cmpId)->whereIn('i.item_id', $chunk)->get()->getResultArray();
             foreach ($rows as $r) {
                 $out[] = $r;
@@ -188,7 +230,7 @@ class ItemsController extends BaseController
             return $a['response'];
         }
         $cmpId = (int) $a['ctx']['cmp_id'];
-        $row = $this->baseQuery($cmpId)->where('i.item_id', (int) $id)->select('i.*, u.unit_symbol, u.unit_name, g.grp_name, c.cat_name, b.brand_name')->get()->getRowArray();
+        $row = $this->baseQuery($cmpId)->where('i.item_id', (int) $id)->select(self::SHOW_COLUMNS)->get()->getRowArray();
         if (!$row) {
             return $this->failStructured(404, 'not_found', 'Item not found');
         }
@@ -219,7 +261,7 @@ class ItemsController extends BaseController
             $db->transComplete();
             (new AuditService())->log($cmpId, 'item', $itemId, 'item.create', $a['session']['uuid'], [], null, $row);
 
-            return $this->respondCreated(['data' => $this->present($cmpId, $this->baseQuery($cmpId)->where('i.item_id', $itemId)->select('i.*, u.unit_symbol, u.unit_name, g.grp_name, c.cat_name, b.brand_name')->get()->getRowArray(), (int) $a['ctx']['fy_id'])]);
+            return $this->respondCreated(['data' => $this->present($cmpId, $this->baseQuery($cmpId)->where('i.item_id', $itemId)->select(self::SHOW_COLUMNS)->get()->getRowArray(), (int) $a['ctx']['fy_id'])]);
         } catch (\Throwable $e) {
             $db->transRollback();
 
@@ -272,7 +314,7 @@ class ItemsController extends BaseController
                 (new \App\Services\RecalculationService())->enqueue($cmpId, (int) $a['ctx']['fy_id'], (int) $id, '0001-01-01', 'method_change', null, $a['session']['uuid']);
             }
 
-            return $this->respond(['data' => $this->present($cmpId, $this->baseQuery($cmpId)->where('i.item_id', (int) $id)->select('i.*, u.unit_symbol, u.unit_name, g.grp_name, c.cat_name, b.brand_name')->get()->getRowArray(), (int) $a['ctx']['fy_id'])]);
+            return $this->respond(['data' => $this->present($cmpId, $this->baseQuery($cmpId)->where('i.item_id', (int) $id)->select(self::SHOW_COLUMNS)->get()->getRowArray(), (int) $a['ctx']['fy_id'])]);
         } catch (\Throwable $e) {
             $db->transRollback();
 
@@ -631,6 +673,41 @@ class ItemsController extends BaseController
     }
 
     /** @return array<string, mixed> */
+    /**
+     * `inherit | claim | block`, with an empty value meaning `inherit`.
+     *
+     * A value outside the three is REFUSED, not coerced. Everything else on this row that is out of
+     * range is quietly corrected (an unknown negative_stock_policy becomes "company default", an
+     * unknown item_type becomes "stock") because the wrong answer there is a label or a default. An
+     * unknown word here would become "inherit", which is a real third state, and a caller who typed
+     * "blocked" would be told nothing while Books went on claiming the credit. The value drives a
+     * tax claim in another product; silence is the one answer it must not get.
+     */
+    public static function normalizeItcEligibility(mixed $value): string
+    {
+        if ($value === null || $value === '' || $value === false) {
+            return 'inherit';
+        }
+        // A non-scalar is not silence either. Coercing an array or an object to '' and returning
+        // 'inherit' was the one door left open in the rule stated above: `{"itc_eligibility":
+        // ["block"]}` — the shape a JSON mapping bug produces — was accepted, stored as 'inherit'
+        // and shown on the item screen as "Inherit — let Books decide", while the scalar near-miss
+        // 'blocked' was correctly refused. The operator believes the item blocks the credit; Books
+        // resolves inherit and goes on claiming it.
+        $v = is_scalar($value) ? strtolower(trim((string) $value)) : null;
+        if ($v === '') {
+            return 'inherit';
+        }
+        if ($v === null || !in_array($v, self::ITC_ELIGIBILITY, true)) {
+            throw InventoryException::validation(
+                'itc_eligibility must be one of ' . implode(', ', self::ITC_ELIGIBILITY) . ' (inherit = the item says nothing and Books decides from the tax category and the ledger)',
+                ['field' => 'itc_eligibility', 'allowed' => self::ITC_ELIGIBILITY, 'received' => is_scalar($value) ? (string) $value : gettype($value)],
+            );
+        }
+
+        return $v;
+    }
+
     private function buildRow(int $cmpId, array $body, ?array $existing): array
     {
         $row = [];
@@ -663,6 +740,7 @@ class ItemsController extends BaseController
         if (isset($row['negative_stock_policy']) && !in_array($row['negative_stock_policy'], InventorySettingsService::NEGATIVE_POLICIES, true)) {
             $row['negative_stock_policy'] = null;
         }
+        $row['itc_eligibility'] = self::normalizeItcEligibility($row['itc_eligibility'] ?? null);
         if (!empty($row['hsn_sac']) && !preg_match('/^[0-9A-Z]{4,8}$/', (string) $row['hsn_sac'])) {
             throw InventoryException::validation('HSN/SAC must be 4 to 8 alphanumeric characters', ['field' => 'hsn_sac']);
         }

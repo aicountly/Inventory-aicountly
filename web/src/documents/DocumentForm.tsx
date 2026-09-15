@@ -17,6 +17,7 @@ import type { HeaderDraft, LineDraft, LineOrigin } from './formModel'
 import { offendingDraftKeys, parseNegativeStock } from './negativeStock'
 import type { NegativeStockDetail } from './negativeStock'
 import { DeferredPurchasePanel } from './panels/DeferredPurchasePanel'
+import { LandedCostPanel } from './panels/LandedCostPanel'
 import { PhysicalCountPanel } from './panels/PhysicalCountPanel'
 import { ProductionPanel } from './panels/ProductionPanel'
 import { SettlementsPanel } from './panels/SettlementsPanel'
@@ -53,7 +54,7 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
   const { warehouses, defaultWarehouseId, loading: refLoading, error: refError } = useReferenceData()
   const { can } = useAccess()
   const [header, setHeader] = useState<HeaderDraft>(() => initial?.header ?? newHeader(spec, todayIso()))
-  const [lines, setLines] = useState<LineDraft[]>(() => initial?.lines ?? (spec.formKind === 'physical_count' || spec.formKind === 'production' ? [] : [newLine(spec)]))
+  const [lines, setLines] = useState<LineDraft[]>(() => initial?.lines ?? (['physical_count', 'production', 'landed_cost'].includes(spec.formKind) ? [] : [newLine(spec)]))
   const [savedId, setSavedId] = useState<number | null>(documentId ?? null)
   const [errors, setErrors] = useState<string[]>([])
   const [apiError, setApiError] = useState<string | null>(null)
@@ -309,14 +310,29 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
         />
       ) : null}
       {spec.formKind === 'physical_count' ? <PhysicalCountPanel spec={spec} warehouses={warehouses} defaultWarehouseId={defaultWarehouseId} disabled={disabled} onLoad={(generated) => replaceOrigin(['count', 'manual'], generated, false)} /> : null}
+      {spec.formKind === 'landed_cost' ? (
+        <LandedCostPanel
+          initial={header.metadata}
+          disabled={disabled}
+          onChange={(targetId, charges, detectedParty) =>
+            patchHeader({
+              metadata: { ...header.metadata, target_document_id: targetId ?? undefined, charges },
+              ...(header.party_ref === '' && detectedParty ? { party_ref: String(detectedParty) } : {}),
+            })
+          }
+        />
+      ) : null}
 
-      <section className="form-section">
-        <h2 className="form-section-title">Lines</h2>
-        {spec.formKind === 'revaluation' ? <p className="form-section-subtitle">Quantity is informational; the new unit cost re-prices every layer still holding the item in that warehouse.</p> : null}
-        {spec.formKind === 'landed_cost' ? <p className="form-section-subtitle">Enter the received item, the quantity it covers and the landing cost to allocate as the amount.</p> : null}
-        {refLoading && warehouses.length === 0 ? <span className="hint">Loading warehouses…</span> : null}
-        <LineEditor spec={spec} header={header} lines={lines} onChange={setLines} warehouses={warehouses} availability={availability} checking={checking} offendingKeys={offending} disabled={disabled} />
-      </section>
+      {/* A landed cost allocation has no item lines: a freight bill names no item and no quantity.
+          What it carries is the receipt it loads and the charges, which the panel above collects. */}
+      {spec.formKind === 'landed_cost' ? null : (
+        <section className="form-section">
+          <h2 className="form-section-title">Lines</h2>
+          {spec.formKind === 'revaluation' ? <p className="form-section-subtitle">Quantity is informational; the new unit cost re-prices every layer still holding the item in that warehouse.</p> : null}
+          {refLoading && warehouses.length === 0 ? <span className="hint">Loading warehouses…</span> : null}
+          <LineEditor spec={spec} header={header} lines={lines} onChange={setLines} warehouses={warehouses} availability={availability} checking={checking} offendingKeys={offending} disabled={disabled} />
+        </section>
+      )}
 
       {errors.length > 0 ? (
         <Notice kind="error" title="Please fix before saving">

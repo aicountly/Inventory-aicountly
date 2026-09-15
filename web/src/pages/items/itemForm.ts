@@ -1,4 +1,5 @@
-import type { Item, ItemOpening, ItemUnitLine } from '../../services/items'
+import { ITC_ELIGIBILITY } from '../../services/items'
+import type { ItcEligibility, Item, ItemOpening, ItemUnitLine } from '../../services/items'
 import { toNumber } from '../../utils/format'
 
 /** Pure draft ↔ payload helpers for the item form. */
@@ -37,6 +38,8 @@ export interface ItemFormState {
   valuation_method: string
   standard_cost: string
   negative_stock_policy: string
+  /** inherit | claim | block — an attribute of the goods; Books resolves what it means. */
+  itc_eligibility: ItcEligibility
   track_batch: boolean
   track_serial: boolean
   track_expiry: boolean
@@ -81,6 +84,7 @@ export function emptyItemForm(defaultValuationMethod = 'FIFO'): ItemFormState {
     valuation_method: defaultValuationMethod,
     standard_cost: '',
     negative_stock_policy: '',
+    itc_eligibility: 'inherit',
     track_batch: false,
     track_serial: false,
     track_expiry: false,
@@ -138,6 +142,9 @@ export function itemToForm(item: Item, openingRows: ItemOpening[], effectiveFyId
     valuation_method: s(item.valuation_method).toUpperCase() || 'FIFO',
     standard_cost: s(item.standard_cost),
     negative_stock_policy: s(item.negative_stock_policy),
+    // An unrecognised stored value reads as "the item says nothing" rather than picking a side for
+    // it; the server refuses writing one, so this only guards a row that predates the vocabulary.
+    itc_eligibility: ITC_ELIGIBILITY.includes(s(item.itc_eligibility) as ItcEligibility) ? (s(item.itc_eligibility) as ItcEligibility) : 'inherit',
     track_batch: on(item.track_batch),
     track_serial: on(item.track_serial),
     track_expiry: on(item.track_expiry),
@@ -227,6 +234,7 @@ export function itemPayload(f: ItemFormState): Record<string, unknown> {
     valuation_method: f.valuation_method || null,
     standard_cost: optNum(f.standard_cost),
     negative_stock_policy: optStr(f.negative_stock_policy),
+    itc_eligibility: f.itc_eligibility,
     track_batch: f.track_batch ? 1 : 0,
     track_serial: f.track_serial ? 1 : 0,
     track_expiry: f.track_expiry ? 1 : 0,

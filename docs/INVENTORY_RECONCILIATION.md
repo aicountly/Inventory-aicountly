@@ -15,7 +15,7 @@ Runs in Inventory (`POST /v1/reconciliation/run {as_of}`, screen *Reconciliation
 | `failed_posting` | documents `FAILED` |
 | `cancelled_reversed` | documents reversed in Inventory while the Books voucher is still posted, or vice versa |
 | `unacknowledged_valuation_revisions` | COGS revisions Books has not applied yet |
-| `revaluation` | Inventory revaluation documents vs Books revaluation journals |
+| `revaluation` | Inventory `REVALUATION` **and `LANDED_COST`** documents (both emit `STOCK_REVALUATION`) vs Books revaluation journals |
 | `manual_journal` | manual journals on Stock-in-Hand in Books |
 | `valuation_method_variance` | closing valuation (cost-layer replay, FIFO/LIFO/WAC, negative stock priced at last cost) − (opening + Σ movement values); a costing effect, not a missing posting |
 | `transfer_valuation_gap` | stock transfers whose receiving side is not valued at the issuing cost — only history migrated from Books, which valued the receiving side at 0 |
@@ -23,6 +23,8 @@ Runs in Inventory (`POST /v1/reconciliation/run {as_of}`, screen *Reconciliation
 | `rounding` / `unexplained` | residual below 1.00 / above |
 
 `difference = Σ buckets + rounding + unexplained`. A run is clean when `unexplained = 0`. A reversed document whose Books voucher is also cancelled contributes nothing (both sides dropped it).
+
+**Landed cost raises Inventory's side.** A charge Books allocates onto a receipt line (`landed_cost_amount`) is capitalised into `valuation_amount`, and a `LANDED_COST` document raises the lines it loads, so Inventory's closing stock value goes up by the charge while Books' Stock-in-Hand balance does not — unless Books debits stock-in-hand with the same charge rather than expensing it. Nothing historical moves (every line posted before this carries `landed_cost_amount = 0`), but the first receipt carrying freight does. A `LANDED_COST` document's uplift is explained by the `revaluation` bucket via its `STOCK_REVALUATION` effect, and the two figures are the same number by construction: the document raises each target line by exactly what the cost state absorbed, which is what it emits — so a partly-issued receipt cannot leave an uplift on the lines that no effect and no cost layer backs. (`lineValuationEffectSql()` sums `l.valuation_amount` per document, so a line raised by more than was absorbed would land in `unexplained` with nothing able to name it.) A receipt-borne charge emits no effect of its own, because it is already inside the receipt's `valuation_amount` and Books booked the freight bill on its own side — so whether it reconciles depends entirely on which account Books charged it to. Agree that with the Books half before either side ships.
 
 Rehearsal result (company 9001, FY 7102, after live postings, a cancel and an edit): difference 1 402 151.09 = opening_difference 1 406 898.29 (the rehearsal never posted an opening-stock journal in Books) + valuation_method_variance −2 930.70 + transfer_valuation_gap −1 816.50 (two migrated transfers Books valued at 0 on the receiving side), unexplained 0.00.
 
