@@ -4,6 +4,7 @@ import { useCompany } from '../../company/CompanyContext'
 import { DataTable } from '../../components/DataTable'
 import type { Column } from '../../components/DataTable'
 import { ItemFilter } from '../../components/ItemFilter'
+import { ListSheetActions } from '../../components/ListSheetActions'
 import { Notice } from '../../components/Notice'
 import { PageHeader } from '../../components/PageHeader'
 import { Pagination } from '../../components/Pagination'
@@ -14,14 +15,34 @@ import { WarehouseSelect } from '../../documents/WarehouseSelect'
 import { useReferenceData } from '../../documents/useReferenceData'
 import { useListParams } from '../../hooks/useListParams'
 import { useQuery } from '../../hooks/useQuery'
+import type { ExportableColumn } from '../../registers/registerCells'
 import { P } from '../../services/access'
+import { fetchAllRows } from '../../services/listAll'
 import { valuationApi } from '../../services/valuationApi'
 import type { CostLayerRow } from '../../services/valuationApi'
-import { formatDate, formatMoney, formatQty } from '../../utils/format'
+import { formatDate, formatMoney, formatQty, humanize } from '../../utils/format'
 import '../views.css'
 
 const FILTER_KEYS = ['item_id', 'warehouse_id', 'open_only', 'layer_kind', 'all_fy'] as const
 const KIND_TONE: Record<string, 'neutral' | 'good' | 'warning' | 'critical' | 'info'> = { opening: 'neutral', receipt: 'good', backorder: 'critical', revaluation: 'info' }
+
+/**
+ * The sheet's columns. The per-issue consumption list is a screen affordance —
+ * a table inside a cell has nowhere to go on paper — so the sheet carries the
+ * count and the footer says where the detail lives.
+ */
+const EXPORT_COLUMNS: ExportableColumn<CostLayerRow>[] = [
+  { key: 'received_at', csvHeader: 'Received', format: 'date' },
+  { key: 'layer_kind', csvHeader: 'Kind', csv: (r) => humanize(r.layer_kind) },
+  { key: 'source_document_no', csvHeader: 'Source document', csv: (r) => r.source_document_no ?? (r.source_document_id ? `#${r.source_document_id}` : '') },
+  { key: 'warehouse_name', csvHeader: 'Warehouse', csv: (r) => r.warehouse_name ?? '' },
+  { key: 'qty_received', csvHeader: 'Received qty', align: 'right', format: 'qty' },
+  { key: 'qty_consumed', csvHeader: 'Consumed qty', align: 'right', format: 'qty' },
+  { key: 'qty_remaining', csvHeader: 'Remaining qty', align: 'right', format: 'qty' },
+  { key: 'unit_cost', csvHeader: 'Unit cost (valuation)', align: 'right', format: 'amount' },
+  { key: 'remaining_value', csvHeader: 'Remaining value (valuation)', align: 'right', format: 'amount' },
+  { key: 'consumption_count', csvHeader: 'Issues', align: 'right', format: 'int', csv: (r) => r.consumptions?.length ?? 0 },
+]
 
 export function CostLayersPage() {
   const { scope } = useCompany()
@@ -75,6 +96,34 @@ export function CostLayersPage() {
       <PageHeader
         title={item ? `Cost layers — ${item.item_name}` : 'Cost layers'}
         subtitle={item ? `${item.item_sku ? `${item.item_sku} · ` : ''}valued ${item.valuation_method ?? 'as per company default'}. Each receipt opens a layer; issues consume layers in FIFO / LIFO order, weighted average pools them.` : 'Pick an item to see the receipt layers its valuation is built from and which issues consumed them.'}
+        actions={
+          itemId === '' ? null : (
+            <ListSheetActions<CostLayerRow>
+              columns={EXPORT_COLUMNS}
+              rows={rows}
+              fetchAll={() => fetchAllRows<CostLayerRow>((page, limit) => valuationApi.costLayers({ ...query, page, limit }))}
+              filenameBase={`cost-layers-${item?.item_sku || item?.item_name || itemId}`}
+              title={item ? `Cost layers — ${item.item_name}` : 'Cost layers'}
+              description="Receipt layers the item's valuation is built from"
+              metaLines={[
+                item?.valuation_method ? `Valued: ${item.valuation_method}` : '',
+                openOnly ? 'Layers: open only' : 'Layers: open and exhausted',
+                state.filters.warehouse_id ? `Warehouse id: ${state.filters.warehouse_id}` : '',
+                state.filters.layer_kind ? `Kind: ${humanize(state.filters.layer_kind)}` : '',
+                state.filters.all_fy === '1' ? 'Years: all financial years' : '',
+              ].filter(Boolean)}
+              summaryCards={s ? [
+                { label: 'Open qty', value: formatQty(s.open_qty) },
+                { label: 'Open value', value: formatMoney(s.open_value) },
+                { label: 'Backorder qty', value: formatQty(s.backorder_qty), tone: s.backorder_qty > 0 ? 'credit' : undefined },
+              ] : undefined}
+              footerNotes={['Which issues consumed each layer is on the screen, under "Consumed by".']}
+              onRefresh={layers.reload}
+              refreshing={layers.loading}
+              disabled={!layers.data || layers.data.meta.total === 0}
+            />
+          )
+        }
       />
       <RequirePermission permission={P.report('valuation')} what="cost layers">
         <div className="toolbar">

@@ -5,7 +5,7 @@ import { bomApi } from '../../services/masters'
 import type { Bom } from '../../services/masters'
 import { formatDateTime, formatInt, formatQty } from '../../utils/format'
 
-const bomConfig: MasterConfig<Bom> = {
+export const bomConfig: MasterConfig<Bom> = {
   slug: 'bill-of-materials',
   permissionSlug: 'bill_of_materials',
   title: 'Bills of materials',
@@ -31,8 +31,11 @@ const bomConfig: MasterConfig<Bom> = {
           {r.finished_item_sku ? <span className="muted"> · {r.finished_item_sku}</span> : null}
         </>
       ),
+      exportValue: (r) => `${r.finished_item_name ?? `#${r.finished_item_id}`}${r.finished_item_sku ? ` · ${r.finished_item_sku}` : ''}`,
     },
-    { key: 'yield_qty', header: 'Yield', align: 'right', sortKey: 'yield_qty', render: (r) => `${formatQty(r.yield_qty)}${r.yield_unit_symbol ? ` ${r.yield_unit_symbol}` : ''}` },
+    // Same reason as the batch "On hand" column: the symbol is screen furniture,
+    // the sheet needs a number it can add up.
+    { key: 'yield_qty', header: 'Yield', align: 'right', sortKey: 'yield_qty', render: (r) => `${formatQty(r.yield_qty)}${r.yield_unit_symbol ? ` ${r.yield_unit_symbol}` : ''}`, exportValue: (r) => r.yield_qty ?? '', exportFormat: 'qty' },
     { key: 'line_count', header: 'Lines', align: 'right', render: (r) => formatInt(r.line_count) },
     { key: 'is_active', header: 'Status', render: (r) => <ActiveBadge active={r.is_active} /> },
     { key: 'updated_at', header: 'Updated', sortKey: 'updated_at', render: (r) => <span className="nowrap muted">{formatDateTime(r.updated_at)}</span> },

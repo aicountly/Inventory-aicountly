@@ -86,10 +86,18 @@ class OutboxService
         $q = $b->orderBy('event_id', 'ASC')->limit($limit)->get();
         $out = ['sent' => 0, 'failed' => 0, 'dead' => 0, 'skipped' => 0];
         // DBDebug is off in every deployed environment, so a failed read answers false rather than
-        // throwing, and this now runs on a request path: reading it bare would turn a transient
-        // database error into a fatal on somebody's document posting.
+        // throwing. Reading it bare would be a fatal on somebody's document posting — but
+        // returning all-zeros is worse in the other direction: it is byte-identical to "nothing
+        // was due", so a database that is unreachable at 02:00 was reported to the cron monitor as
+        // a healthy quiet run and the console row stayed green while not one accounting event was
+        // being delivered. It is raised as a controlled exception instead: settleOnContact()
+        // catches it and logs (the user's write is never affected), the API endpoint answers an
+        // error, and the CLI sweep reports the run as FAILED to Console — which is the truth.
         if ($q === false) {
-            return $out;
+            throw new \RuntimeException(
+                'Could not read inv_integration_events: the outbox query failed, so nothing was '
+                . 'dispatched. This is a database fault, not an empty queue.'
+            );
         }
         foreach ($q->getResultArray() as $row) {
             if (($row['target_app'] ?? 'books') !== 'books') {

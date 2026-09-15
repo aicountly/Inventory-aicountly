@@ -61,7 +61,7 @@ export function RegistersHubPage() {
         breadcrumbs={[{ label: 'Registers' }]}
         title="Registers"
         icon={Library}
-        description={`Dated, totalled and printable listings for ${scopeLabel}. Every register remembers its filters in the address bar, exports to CSV and drills through to the document behind the line.`}
+        description={`Dated, totalled and printable listings for ${scopeLabel}. Every register remembers its filters in the address bar, exports the whole result to CSV, Excel or PDF, prints on the company letterhead, and drills through to the document behind the line.`}
       />
       <HubSections
         sections={sections}

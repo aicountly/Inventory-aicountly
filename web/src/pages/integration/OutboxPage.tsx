@@ -4,20 +4,24 @@ import { useCompany } from '../../company/CompanyContext'
 import { DataTable } from '../../components/DataTable'
 import type { Column } from '../../components/DataTable'
 import { JsonBlock } from '../../components/JsonBlock'
+import { ListSheetActions } from '../../components/ListSheetActions'
 import { Modal } from '../../components/Modal'
 import { PageHeader } from '../../components/PageHeader'
 import { Pagination } from '../../components/Pagination'
 import { RequirePermission } from '../../components/RequirePermission'
-import { StatusBadge } from '../../components/StatusBadge'
+import { StatusBadge, statusBadgeLabel } from '../../components/StatusBadge'
 import { SubNav } from '../../components/SubNav'
 import { useListParams } from '../../hooks/useListParams'
 import { useQuery } from '../../hooks/useQuery'
+import type { ExportableColumn } from '../../registers/registerCells'
 import { P } from '../../services/access'
 import { ApiError } from '../../services/api'
 import { OUTBOX_STATUSES, integrationApi } from '../../services/integrationApi'
 import type { OutboxEvent } from '../../services/integrationApi'
+import { fetchAllRows } from '../../services/listAll'
 import { useToast } from '../../ui/ToastContext'
 import { formatDateTime, formatInt } from '../../utils/format'
+import { ReconciliationExplainer } from '../reconciliation/ReconciliationExplainer'
 import '../views.css'
 
 const FILTER_KEYS = ['status', 'event_type', 'aggregate_type', 'aggregate_id', 'target_app', 'from', 'to'] as const
@@ -28,6 +32,27 @@ const NAV = [
   { to: '/integration/outbox', label: 'Outbox events', permission: P.integrationRead },
 ] as const
 
+/**
+ * The sheet's columns — the delivery record, including the error text. An
+ * outbox export exists so somebody can work through the failures away from the
+ * screen, and a list of dead events without the reason they died is no use.
+ */
+const EXPORT_COLUMNS: ExportableColumn<OutboxEvent>[] = [
+  { key: 'event_id', csvHeader: 'Event', align: 'right', format: 'int' },
+  { key: 'created_at', csvHeader: 'Created', format: 'datetime' },
+  // The screen shows the badge's words ("Dead", "Pending"); the file must not
+  // show the raw token. `statusBadgeLabel` is the badge's own resolver.
+  { key: 'status', csvHeader: 'Status', csv: (e) => statusBadgeLabel(e.status) },
+  { key: 'event_type', csvHeader: 'Event type' },
+  { key: 'aggregate', csvHeader: 'About', csv: (e) => `${e.aggregate_type} #${e.aggregate_id}` },
+  { key: 'target_app', csvHeader: 'To' },
+  { key: 'attempts', csvHeader: 'Attempts', align: 'right', format: 'int' },
+  { key: 'next_attempt_at', csvHeader: 'Next try', format: 'datetime', csv: (e) => (e.status === 'PENDING' || e.status === 'FAILED' ? e.next_attempt_at ?? '' : '') },
+  { key: 'sent_at', csvHeader: 'Sent', format: 'datetime' },
+  { key: 'acked_at', csvHeader: 'Acknowledged', format: 'datetime' },
+  { key: 'last_error', csvHeader: 'Last error', csv: (e) => e.last_error ?? '' },
+]
+
 export function OutboxPage() {
   const { scope } = useCompany()
   const toast = useToast()
@@ -37,6 +62,10 @@ export function OutboxPage() {
   const list = useQuery((signal) => integrationApi.outbox(query, signal), [JSON.stringify(query), scope?.cmp_id], { enabled: scope !== null })
   const [busy, setBusy] = useState<number | 'dispatch' | null>(null)
   const [detail, setDetail] = useState<OutboxEvent | null>(null)
+  const fetchAll = useMemo(
+    () => () => fetchAllRows<OutboxEvent>((page, limit) => integrationApi.outbox({ ...query, page, limit })),
+    [query],
+  )
 
   const replay = async (ev: OutboxEvent) => {
     setBusy(ev.event_id)
@@ -86,9 +115,32 @@ export function OutboxPage() {
       <PageHeader
         title="Outbox events"
         subtitle="Everything Inventory tells Books — postings, reversals, valuation revisions, master changes — with delivery attempts. DEAD events exhausted their retries and need a replay once the cause is fixed."
-        actions={canReplay ? <button type="button" className="btn" disabled={busy === 'dispatch'} onClick={dispatch}>{busy === 'dispatch' ? 'Dispatching…' : 'Dispatch due events now'}</button> : null}
+        actions={
+          <>
+            <ListSheetActions<OutboxEvent>
+              columns={EXPORT_COLUMNS}
+              rows={list.data?.data ?? []}
+              fetchAll={fetchAll}
+              filenameBase="outbox-events"
+              title="Outbox events"
+              description="Everything Inventory has told Books, with its delivery attempts"
+              metaLines={[
+                state.filters.status ? `Status: ${state.filters.status}` : '',
+                state.filters.event_type ? `Event type: ${state.filters.event_type}` : '',
+                state.filters.aggregate_type ? `About: ${state.filters.aggregate_type}${state.filters.aggregate_id ? ` #${state.filters.aggregate_id}` : ''}` : '',
+                state.filters.from || state.filters.to ? `Created between: ${state.filters.from || '…'} and ${state.filters.to || '…'}` : '',
+              ].filter(Boolean)}
+              footerNotes={['Nothing is dispatched on a schedule in this deployment: pending events move on the next dispatch or the next posting.']}
+              onRefresh={list.reload}
+              refreshing={list.loading}
+              disabled={!list.data || list.data.meta.total === 0}
+            />
+            {canReplay ? <button type="button" className="btn" disabled={busy === 'dispatch'} onClick={dispatch}>{busy === 'dispatch' ? 'Dispatching…' : 'Dispatch due events now'}</button> : null}
+          </>
+        }
       />
       <RequirePermission permission={P.integrationRead} what="outbox events">
+        <ReconciliationExplainer screen="outbox" />
         <div className="toolbar">
           <select className="select" value={state.filters.status ?? ''} onChange={(e) => params.setFilter('status', e.target.value)} aria-label="Status">
             <option value="">All statuses</option>

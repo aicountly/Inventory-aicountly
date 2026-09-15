@@ -80,7 +80,14 @@ class DocumentsController extends BaseController
         $sort = in_array($p['sort'], ['document_date', 'document_no', 'document_type', 'status', 'created_at', 'document_id'], true) ? $p['sort'] : 'document_date';
         $rows = $b->select('d.document_id, d.document_uuid, d.document_type, d.document_no, d.document_date, d.status, d.source_app, d.source_document_type, d.source_document_id, d.source_document_uuid, d.source_document_no, d.party_ref, d.party_name, d.from_warehouse_id, d.to_warehouse_id, d.narration, d.posted_at, d.created_at, d.fy_id, d.bo_id, (SELECT COUNT(*) FROM inv_document_lines l WHERE l.document_id = d.document_id) AS line_count, (SELECT COALESCE(SUM(l.valuation_amount),0) FROM inv_document_lines l WHERE l.document_id = d.document_id) AS valuation_total', false)
             ->orderBy('d.' . $sort, $p['order'])->orderBy('d.document_id', 'DESC')
-            ->limit($p['limit'], $p['offset'])->get()->getResultArray();
+            ->limit($p['limit'], $p['offset'])->get();
+        // DBDebug is FALSE in production: ->get() returns FALSE on error and getResultArray() on
+        // false is fatal. This is the documents register's own read, so a failure here is a blank
+        // 500 on the screen the whole app now enters documents through.
+        if ($rows === false) {
+            return $this->failStructured(500, 'query_failed', 'Could not read the documents for this company');
+        }
+        $rows = $rows->getResultArray();
         foreach ($rows as &$r) {
             $r['document_type_label'] = DocumentTypeRegistry::get($r['document_type'])['label'] ?? $r['document_type'];
         }

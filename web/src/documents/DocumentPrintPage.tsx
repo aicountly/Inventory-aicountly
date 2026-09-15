@@ -11,17 +11,16 @@ import { PageShell } from '../ui/shell/PageShell'
 import { BreadcrumbHeader } from '../ui/shell/BreadcrumbHeader'
 import { useQuery } from '../hooks/useQuery'
 import { usePageKeyboard } from '../keyboard/usePageKeyboard'
-import { errorMessage, isApiError } from '../services/api'
-import { documentsApi } from '../services/documentsApi'
+import { errorMessage } from '../services/api'
 import { formatGeneratedStamp } from '../utils/format'
 import { COPY_SETS, COPY_SET_LABELS, buildDocumentSheet, defaultCopySet } from '../export/documentSheet'
 import type { CopySetId } from '../export/documentSheet'
 import { DocumentSheetPreview } from '../export/DocumentSheetPreview'
 import { exportDocumentPdf, printDocumentSheet } from '../export/documentExport'
 import { exportErrorMessage } from '../export/exportActions'
-import { getExportTheme } from '../export/exportTheme'
 import { useExportIdentity } from '../export/useExportIdentity'
 import type { DocumentSheetOptions } from '../export/sheetHtml'
+import { documentSheetOptions, loadDocumentSource } from './printDocument'
 import { labelForCode } from './registry'
 import { useReferenceData } from './useReferenceData'
 
@@ -47,51 +46,43 @@ export function DocumentPrintPage() {
   const [busy, setBusy] = useState<'print' | 'pdf' | null>(null)
   const [copySet, setCopySet] = useState<CopySetId | null>(null)
 
-  const snapshot = useQuery((signal) => documentsApi.printSnapshot(docId, signal), [docId], {
+  /*
+   * Snapshot first, live only on a 404 — and the rule itself lives in
+   * `printDocument.ts`, which is also what the register's bulk print calls.
+   * This screen used to carry its own copy of the fallback order, so relaxing
+   * one of the two (say, to render live data on any snapshot error during an
+   * outage) would have printed the same challan two different ways depending on
+   * which screen it was printed from.
+   */
+  const source = useQuery((signal) => loadDocumentSource(docId, signal), [docId], {
     enabled: Number.isFinite(docId),
   })
-  // Only a 404 means "no snapshot was captured". Any other failure is a real
-  // error and must not be papered over with a live render.
-  const missing = !!snapshot.error && isApiError(snapshot.error) && snapshot.error.status === 404
-  const live = useQuery((signal) => documentsApi.get(docId, signal), [docId], { enabled: missing })
 
+  // Built here rather than inside the query so the preview re-derives when the
+  // warehouse masters arrive: only the LIVE path reads them, and a live render
+  // must not be stuck showing "Warehouse #3" because it happened to load first.
   const sheet = useMemo(
     () =>
       buildDocumentSheet({
-        snapshot: snapshot.data ?? null,
-        live: live.data ?? null,
+        snapshot: source.data?.snapshot ?? null,
+        live: source.data?.live ?? null,
         warehouseName,
         typeLabel: (code) => labelForCode(code),
       }),
-    [snapshot.data, live.data, warehouseName],
+    [source.data, warehouseName],
   )
 
   // A goods movement defaults to three captioned copies; an internal record to
   // one. The reader can override, and the choice applies to print and PDF alike.
   const effectiveCopySet: CopySetId = copySet ?? (sheet ? defaultCopySet(sheet.documentCode) : 'single')
 
-  const sheetOptions = useMemo<DocumentSheetOptions | null>(() => {
-    if (!sheet) return null
-    return {
-      ...identity,
-      title: sheet.title,
-      documentNo: sheet.documentNo,
-      documentDate: sheet.documentDate,
-      headerPairs: sheet.headerPairs,
-      blocks: sheet.blocks,
-      columns: sheet.columns,
-      rows: sheet.rows,
-      totalsRow: sheet.totalsRow,
-      totalsLabel: sheet.totalsLabel,
-      footerPairs: sheet.footerPairs,
-      footerNotes: sheet.footerNotes,
-      provenance: sheet.provenance,
-      copies: COPY_SETS[effectiveCopySet],
-      orientation: 'portrait',
-      paperSize: 'A4',
-      theme: getExportTheme(),
-    }
-  }, [sheet, identity, effectiveCopySet])
+  // Built by the shared helper, which the register's bulk print also calls: one
+  // challan printed from here and the same challan printed in a batch of forty
+  // have to be the same piece of paper.
+  const sheetOptions = useMemo<DocumentSheetOptions | null>(
+    () => (sheet ? documentSheetOptions(sheet, identity, effectiveCopySet) : null),
+    [sheet, identity, effectiveCopySet],
+  )
 
   const runPrint = useCallback(() => {
     if (!sheetOptions) return
@@ -122,7 +113,7 @@ export function DocumentPrintPage() {
   // Ctrl+P prints the sheet, not the surrounding app.
   usePageKeyboard({ onPrint: runPrint })
 
-  if (snapshot.loading || (missing && live.loading)) {
+  if (source.loading) {
     return (
       <PageShell compact>
         <LoadingState label="Loading document…" />
@@ -130,13 +121,16 @@ export function DocumentPrintPage() {
     )
   }
 
-  if (snapshot.error && !missing) {
+  // A 403 or a 500 on the snapshot is rethrown by `loadDocumentSource` and
+  // lands here as a red page. It is NEVER papered over with a live render that
+  // would look like the record and is not.
+  if (source.error) {
     return (
       <PageShell compact>
         <ErrorState
           title="This document could not be loaded"
-          description={errorMessage(snapshot.error)}
-          onRetry={snapshot.reload}
+          description={errorMessage(source.error)}
+          onRetry={source.reload}
         />
       </PageShell>
     )
@@ -147,8 +141,8 @@ export function DocumentPrintPage() {
       <PageShell compact>
         <ErrorState
           title="Nothing to print"
-          description={live.error ? errorMessage(live.error) : 'This document has no printable content.'}
-          onRetry={missing ? live.reload : snapshot.reload}
+          description="This document has no printable content."
+          onRetry={source.reload}
         />
       </PageShell>
     )

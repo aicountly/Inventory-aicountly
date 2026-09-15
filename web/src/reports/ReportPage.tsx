@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { FileSearch, ListFilter } from 'lucide-react'
 import { useAccess } from '../access/AccessContext'
@@ -16,6 +16,7 @@ import {
   registerPermission,
 } from '../registers/RegisterConfig'
 import type { RegisterConfig, StatCardSpec } from '../registers/RegisterConfig'
+import type { ReportColumn } from './types'
 import { useListParams } from '../hooks/useListParams'
 import { useQuery } from '../hooks/useQuery'
 import type { ListQuery } from '../services/api'
@@ -196,6 +197,105 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
     return summaryItemsToCards(config.summary(summary, result.data))
   }, [config, result.data, summary])
 
+  // ---- selection -----------------------------------------------------------
+  // Held as id -> row so a reader can tick rows on page 1, page over to page 3
+  // and still act on all of them: a bulk print that silently dropped whatever
+  // scrolled off screen would print fewer documents than were asked for.
+  const selectable = config.selectable
+  const [selected, setSelected] = useState<Map<string | number, T>>(() => new Map())
+  const selectedRows = useMemo(() => [...selected.values()], [selected])
+  const clearSelection = useCallback(() => setSelected(new Map()), [])
+
+  // A new question was asked, so the previous answer's rows are no longer what
+  // the reader is looking at. Paging and sorting keep the ticks.
+  const filterFingerprint = JSON.stringify(apiFilters)
+  useEffect(() => {
+    setSelected(new Map())
+  }, [filterFingerprint])
+
+  const selectableRows = useMemo(
+    () => (selectable ? rows.filter((row) => !selectable.disabledReason?.(row)) : []),
+    [selectable, rows],
+  )
+  const allOnPageSelected =
+    selectableRows.length > 0 && selectableRows.every((row) => selected.has(selectable!.idOf(row)))
+  const someOnPageSelected =
+    !allOnPageSelected && selectableRows.some((row) => selected.has(selectable!.idOf(row)))
+
+  const toggleRow = useCallback(
+    (row: T) => {
+      if (!selectable) return
+      const id = selectable.idOf(row)
+      setSelected((prev) => {
+        const next = new Map(prev)
+        if (next.has(id)) next.delete(id)
+        else next.set(id, row)
+        return next
+      })
+    },
+    [selectable],
+  )
+
+  const togglePage = useCallback(() => {
+    if (!selectable) return
+    setSelected((prev) => {
+      const next = new Map(prev)
+      const everyone = selectableRows.every((row) => next.has(selectable.idOf(row)))
+      for (const row of selectableRows) {
+        if (everyone) next.delete(selectable.idOf(row))
+        else next.set(selectable.idOf(row), row)
+      }
+      return next
+    })
+  }, [selectable, selectableRows])
+
+  const selectColumn = useMemo<ReportColumn<T> | null>(() => {
+    if (!selectable) return null
+    const label = selectable.label ?? 'Select'
+    return {
+      key: '__select',
+      align: 'center',
+      width: '2.75rem',
+      alwaysVisible: true,
+      header: (
+        <input
+          type="checkbox"
+          className="rounded border-gray-300 text-primary focus:ring-primary/30"
+          aria-label={`${label} every row on this page`}
+          checked={allOnPageSelected}
+          ref={(el) => {
+            if (el) el.indeterminate = someOnPageSelected
+          }}
+          disabled={selectableRows.length === 0}
+          onChange={togglePage}
+        />
+      ),
+      render: (row: T) => {
+        const reason = selectable.disabledReason?.(row) ?? null
+        return (
+          <input
+            type="checkbox"
+            className="rounded border-gray-300 text-primary focus:ring-primary/30"
+            aria-label={`${label} ${String(selectable.idOf(row))}`}
+            checked={selected.has(selectable.idOf(row))}
+            disabled={reason !== null}
+            title={reason ?? undefined}
+            onClick={(e) => e.stopPropagation()}
+            onChange={() => toggleRow(row)}
+          />
+        )
+      },
+      // Chrome, not data: never in a CSV, a PDF or a printed sheet.
+      csv: () => '',
+    }
+  }, [selectable, selected, selectableRows, allOnPageSelected, someOnPageSelected, togglePage, toggleRow])
+
+  // The exports keep `visibleColumns`; only the table gains the checkbox.
+  const tableColumns = useMemo(
+    () => (selectColumn ? [selectColumn, ...visibleColumns] : visibleColumns),
+    [selectColumn, visibleColumns],
+  )
+
   // ---- totals --------------------------------------------------------------
   const totals = useMemo(() => {
     if (!config.totals || summary === undefined) return undefined
@@ -291,12 +391,13 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
 
   // ---- render --------------------------------------------------------------
   const breadcrumbs = useMemo(
-    () => [{ label: 'Registers', to: '/registers' }, { label: config.title }],
-    [config.title],
+    () => config.breadcrumbs ?? [{ label: 'Registers', to: '/registers' }, { label: config.title }],
+    [config.breadcrumbs, config.title],
   )
 
   const headerActions = (
     <>
+      {config.headerActions}
       <ConfigureColumns
         columns={config.columns}
         visibility={visibility}
@@ -338,7 +439,7 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
       searchInputRef={searchInputRef}
       onRefresh={result.reload}
       onPrint={runPrint}
-      backTo="/registers"
+      backTo={config.backTo === undefined ? '/registers' : (config.backTo ?? undefined)}
       scope={scopeLabel}
       filters={
         <RegisterFilterBar
@@ -372,6 +473,23 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
           }
         />
       }
+      toolbar={
+        selectable && selectedRows.length ? (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary-light/40 px-3 py-2 text-xs">
+            <span className="font-semibold text-gray-800">
+              {selectedRows.length} selected
+            </span>
+            {selectable.actions(selectedRows, clearSelection)}
+            <button
+              type="button"
+              className="ml-auto rounded-full bg-white px-2 py-1 text-gray-600 hover:text-red-600"
+              onClick={clearSelection}
+            >
+              Clear selection
+            </button>
+          </div>
+        ) : undefined
+      }
       summary={kpiCards.length ? <RegisterKpis cards={kpiCards} /> : undefined}
     >
       <RequirePermission permission={permission} what={config.title}>
@@ -388,7 +506,7 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
         ) : (
           <SmartTable
             {...REPORT_TABLE_PROPS}
-            columns={visibleColumns}
+            columns={tableColumns}
             rows={tableRows}
             rowKey={config.rowKey}
             rowGroup={grouping ? (row) => grouping.of(row) : undefined}

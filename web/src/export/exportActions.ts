@@ -26,7 +26,10 @@ const CHUNK_LOAD = /Failed to fetch dynamically imported module|Importing a modu
  * with an import error that means nothing to a user. Name the remedy instead.
  */
 export function exportErrorMessage(err: unknown, fallback: string): string {
-  const message = err instanceof Error ? err.message : String(err ?? '')
+  // Anything that is not an Error or a string has no message worth showing —
+  // `String({})` is "[object Object]", which tells a reader nothing and hides
+  // the fallback that would have.
+  const message = err instanceof Error ? err.message : typeof err === 'string' ? err : ''
   if (CHUNK_LOAD.test(message)) {
     return 'Export libraries could not load. Please refresh the page and try again.'
   }
@@ -47,6 +50,59 @@ export function slugifyExportFilename(parts: readonly (string | number | null | 
 
 export type ExportFormat = 'csv' | 'excel' | 'pdf' | 'print'
 
+/**
+ * What a short export says about itself.
+ *
+ * A file that holds 10,000 of 12,431 rows and says nothing reads as the whole
+ * set — the reader sums a column and files the figure. So the note states both
+ * counts and the difference between them, in the same words on the printed
+ * sheet, in the PDF, in the spreadsheet and in the CSV toast.
+ *
+ * `total` is the server's count for the same filters. When it is unknown (0, or
+ * not larger than what came back) the note still says the export is partial; it
+ * just cannot say by how much, and it never guesses a number.
+ */
+export function truncationNote(exported: number, total: number): string {
+  const dropped = Math.max(total - exported, 0)
+  const remedy = 'Narrow the filters and export again for the rest.'
+  if (dropped === 1) {
+    /*
+     * One row short is a race, not a cap: an offset pager loses a row to a
+     * concurrent insert between page fetches and exits on a short page. This
+     * text goes onto letterheaded paper, so it has to be a sentence — "1 are
+     * not" is not — and "narrow the filters" is not the remedy for a race.
+     */
+    return `Partial export — ${formatInt(exported)} of the ${formatInt(total)} rows matching these filters are included; 1 is not. The result changed while it was being read; export again to pick it up.`
+  }
+  if (dropped > 0) {
+    return `Partial export — ${formatInt(exported)} of the ${formatInt(total)} rows matching these filters are included; ${formatInt(dropped)} are not. ${remedy}`
+  }
+  return `Partial export — only the first ${formatInt(exported)} rows are included. ${remedy}`
+}
+
+/**
+ * The filename a short export gets, so the FILE says it is short.
+ *
+ * XLSX, PDF and the printed sheet carry the note inside them. A CSV cannot —
+ * a trailing sentence would land in the data as a row and be summed. The toast
+ * is not a substitute: it is polite (`role="status"`), it auto-dismisses after
+ * 4.5 seconds, and the .csv outlives it by months. So the marker goes where it
+ * travels with the file: `stock-movements-partial-10000-of-12431.csv` cannot be
+ * opened, summed and filed as the whole set by mistake.
+ */
+export function partialFilename(base: string, exported: number, total: number): string {
+  return total > exported
+    ? `${base}-partial-${exported}-of-${total}`
+    : `${base}-partial-${exported}`
+}
+
+/** `Rows: 10,000 of 12,431` when the export is short, `Rows: 412` when it is not. */
+export function rowCountMetaLine(exported: number, total: number): string {
+  return total > exported
+    ? `Rows: ${formatInt(exported)} of ${formatInt(total)}`
+    : `Rows: ${formatInt(exported)}`
+}
+
 export interface TabularExportRequest<T> {
   /** The visible columns — the same list the table renders. */
   columns: readonly ExportableColumn<T>[]
@@ -62,6 +118,13 @@ export interface TabularExportRequest<T> {
   totalsLabel?: string
   footerNotes?: readonly string[]
   warningNote?: string
+  /**
+   * Set when the export is short of the server's count for these filters.
+   *
+   * Carried separately from `warningNote` because the CSV writer needs the two
+   * numbers, not the sentence: it puts them in the filename.
+   */
+  partial?: { exported: number; total: number }
   orientation?: Orientation
   paperSize?: PaperSize
   /** Basis for the filename, before the date and extension. */
@@ -110,11 +173,23 @@ function guard(count: number, verb: string): boolean {
 export async function exportRegisterCsv<T>(request: TabularExportRequest<T>): Promise<void> {
   if (!guard(request.rows.length, 'export')) return
   try {
-    downloadCsv(
-      `${request.filenameBase}.csv`,
-      toCsv(request.rows, toCsvColumns(request.columns)),
-    )
-    notify.success(`Exported ${formatInt(request.rows.length)} rows to CSV.`)
+    // A CSV has nowhere inside it to carry a note — a trailing sentence would
+    // land in the data as a row and be summed. So a short export says so in the
+    // one place that travels with the file: its name. The toast says it too,
+    // and leads with it rather than with the word "Exported".
+    const short = request.partial
+    const base = short
+      ? partialFilename(request.filenameBase, short.exported, short.total)
+      : request.filenameBase
+    const filename = `${base}.csv`
+    downloadCsv(filename, toCsv(request.rows, toCsvColumns(request.columns)))
+    if (short || request.warningNote) {
+      notify.info(
+        `${request.warningNote ?? 'Partial export.'} Saved as ${filename}, so the file itself says it is short.`,
+      )
+    } else {
+      notify.success(`Exported ${formatInt(request.rows.length)} rows to CSV.`)
+    }
   } catch (err) {
     notify.error(exportErrorMessage(err, 'CSV export failed.'))
   }

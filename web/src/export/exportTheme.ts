@@ -62,8 +62,34 @@ const AMBER_600: RGB = [217, 119, 6]
 
 /** Books' brand defaults, used when no stylesheet is available (tests, SSR). */
 export const DEFAULT_PRIMARY: RGB = [37, 176, 3]
-export const DEFAULT_PRIMARY_LIGHT: RGB = [233, 252, 233]
 export const DEFAULT_NAV: RGB = [0, 63, 133]
+
+/**
+ * The light-mode blend ratio for the accent tint, copied from
+ * `theme/appearance.ts` (`towardWhite(base, 0.88)` in the light branch) so the
+ * paper tint and the light-mode screen tint are the same colour by
+ * construction, for a preset and for a custom accent alike.
+ */
+const LIGHT_TINT_RATIO = 0.88
+
+/**
+ * The accent's light-mode tint, derived rather than read.
+ *
+ * `--color-primary-light` is mode-dependent: tokens.css swaps it under `.dark`
+ * (233 252 233 → 21 47 26) and ThemeProvider writes an even darker inline value
+ * for a custom accent in dark mode. Reading it would put a near-black wash
+ * behind near-black ink on every totals band, company band and pill — a printed
+ * page that is legible only in the reader's imagination.
+ *
+ * Deriving it from the accent instead makes the tint light for *every* input:
+ * blending 88% toward white floors every channel at 224, so there is no theme,
+ * no custom colour and no appearance setting that can darken the paper.
+ */
+export function lightAccentTint(primary: RGB): RGB {
+  return primary.map((c) =>
+    Math.max(0, Math.min(255, Math.round(c + (255 - c) * LIGHT_TINT_RATIO))),
+  ) as RGB
+}
 
 export const GOOGLE_FONTS_URL =
   'https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Noto+Sans:wght@400;700&display=swap'
@@ -88,11 +114,14 @@ function readCssTriple(styles: CSSStyleDeclaration | null, name: string, fallbac
 /**
  * Snapshot of the accent currently on screen.
  *
- * Only the accent travels. The screen may be in dark mode and a dark-mode
- * snapshot would put white text on a white page — every printed register blank
- * but for the rules — so the surfaces in `buildSheetCss` are fixed light. This
- * is the one place an export deliberately ignores the user's appearance
- * setting, and the reason is that paper has no dark mode.
+ * Only the accent travels, and only as a hue. `getComputedStyle` resolves the
+ * *screen* cascade — `@media print` never applies to it — so every variable it
+ * returns is the dark-mode value while the reader is in dark mode. Surfaces are
+ * therefore never read from the page: `buildSheetCss` fixes them light, and the
+ * one accent-derived surface, `primaryLight`, is computed here by
+ * `lightAccentTint` rather than taken from `--color-primary-light`. This is the
+ * one place an export deliberately ignores the user's appearance setting, and
+ * the reason is that paper has no dark mode.
  *
  * Safe to call with no DOM: the brand defaults are returned instead, which is
  * what the unit tests build against.
@@ -106,12 +135,14 @@ export function getExportTheme(): ExportTheme {
   const fontFamily =
     (styles?.getPropertyValue('--font-family') ?? '').trim() || '"Nunito", sans-serif'
 
+  const primary = readCssTriple(styles, '--color-primary', DEFAULT_PRIMARY)
+
   return {
     fontFamily,
     fontFamilyName: 'Nunito',
     googleFontsUrl: GOOGLE_FONTS_URL,
-    primary: readCssTriple(styles, '--color-primary', DEFAULT_PRIMARY),
-    primaryLight: readCssTriple(styles, '--color-primary-light', DEFAULT_PRIMARY_LIGHT),
+    primary,
+    primaryLight: lightAccentTint(primary),
     nav: readCssTriple(styles, '--color-nav', DEFAULT_NAV),
     workspaceBg: WORKSPACE_BG,
     gray: GRAY,

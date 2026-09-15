@@ -59,6 +59,26 @@ export interface RegisterGrouping<T> {
   subtotal?: (rows: readonly T[], group: { key: string; label: string }) => Record<string, ReactNode>
 }
 
+/**
+ * Row selection, for the registers where a reader acts on a handful of rows.
+ *
+ * Declared rather than coded: the engine owns the checkbox column, the
+ * "N selected" bar and the clearing, and the register only says how to
+ * identify a row and what to offer once some are picked. Kept out of
+ * `columns` on purpose — the checkbox is a control, not data, and a register
+ * whose CSV carried an empty first column would be exporting its own chrome.
+ */
+export interface RegisterSelection<T> {
+  /** Stable identity for a row, unique across pages. */
+  idOf: (row: T) => string | number
+  /** Column header text for screen readers. Defaults to "Select". */
+  label?: string
+  /** Why this row cannot be picked, or null when it can. */
+  disabledReason?: (row: T) => string | null
+  /** Rendered in the toolbar while at least one row is selected. */
+  actions: (selected: readonly T[], clear: () => void) => ReactNode
+}
+
 export interface RegisterFetchArgs {
   query: ListQuery
   signal?: AbortSignal
@@ -78,6 +98,26 @@ export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
 
   /** Permission to read this register. Defaults to `reports.<slug>.read`. */
   permission?: PermissionKey
+
+  /**
+   * Breadcrumb trail and the back target.
+   *
+   * A register mounted outside `/registers` — the documents register lives at
+   * `/documents`, which is where Books hands off to — must not claim a trail
+   * it did not come down. Defaults to Registers > title.
+   */
+  breadcrumbs?: readonly { label: string; to?: string }[]
+  /** `null` = no back arrow at all (a top-level destination). */
+  backTo?: string | null
+
+  /**
+   * Register-specific header controls, rendered before Configure columns and
+   * the export menu — "New document" on the documents register, for instance.
+   */
+  headerActions?: ReactNode
+
+  /** Row selection and the bulk actions it enables. */
+  selectable?: RegisterSelection<T>
 
   /**
    * What the scope line says about the period, when the selected financial

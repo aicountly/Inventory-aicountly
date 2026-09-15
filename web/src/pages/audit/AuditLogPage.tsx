@@ -3,23 +3,46 @@ import { Link } from 'react-router-dom'
 import { useCompany } from '../../company/CompanyContext'
 import { DataTable } from '../../components/DataTable'
 import type { Column } from '../../components/DataTable'
-import { ExportCsvButton } from '../../components/ExportCsvButton'
 import { JsonBlock } from '../../components/JsonBlock'
+import { ListSheetActions } from '../../components/ListSheetActions'
 import { Modal } from '../../components/Modal'
 import { PageHeader } from '../../components/PageHeader'
 import { Pagination } from '../../components/Pagination'
 import { RequirePermission } from '../../components/RequirePermission'
 import { useListParams } from '../../hooks/useListParams'
 import { useQuery } from '../../hooks/useQuery'
+import type { ExportableColumn } from '../../registers/registerCells'
 import { P } from '../../services/access'
 import { AUDIT_ENTITY_TYPES, auditApi } from '../../services/auditApi'
 import type { AuditLogRow } from '../../services/auditApi'
 import { fetchAllRows } from '../../services/listAll'
-import { csvFilename } from '../../utils/csv'
-import { formatDateTime } from '../../utils/format'
+import { formatDateTime, humanize } from '../../utils/format'
 import '../views.css'
 
 const FILTER_KEYS = ['entity_type', 'entity_id', 'action_prefix', 'actor_uuid', 'source_app', 'source_document_id', 'request_id', 'from', 'to'] as const
+
+/**
+ * The sheet's columns.
+ *
+ * The before / after snapshots stay in, and stay last. They are the reason an
+ * auditor asks for this file at all, and a sheet that showed only the changed
+ * field names would answer a different question than the one that was asked.
+ */
+const EXPORT_COLUMNS: ExportableColumn<AuditLogRow>[] = [
+  { key: 'created_at', csvHeader: 'When', format: 'datetime' },
+  { key: 'action', csvHeader: 'Action' },
+  { key: 'entity_type', csvHeader: 'Entity type', csv: (r) => humanize(r.entity_type) },
+  { key: 'entity_id', csvHeader: 'Entity id', align: 'right', format: 'int' },
+  { key: 'actor_uuid', csvHeader: 'Actor', csv: (r) => r.actor_uuid ?? 'system' },
+  { key: 'source_app', csvHeader: 'Source app', csv: (r) => r.source_app ?? '' },
+  { key: 'source_document', csvHeader: 'Source document', csv: (r) => (r.source_document_id ? `${r.source_document_type ?? ''} #${r.source_document_id}`.trim() : '') },
+  { key: 'reason', csvHeader: 'Reason', csv: (r) => r.reason ?? '' },
+  { key: 'changed_fields', csvHeader: 'Changed fields', csv: (r) => Object.keys(r.after ?? {}).join('; ') },
+  { key: 'before', csvHeader: 'Before', csv: (r) => (r.before ? JSON.stringify(r.before) : '') },
+  { key: 'after', csvHeader: 'After', csv: (r) => (r.after ? JSON.stringify(r.after) : '') },
+  { key: 'request_id', csvHeader: 'Request id', csv: (r) => r.request_id ?? '' },
+  { key: 'ip_address', csvHeader: 'IP', csv: (r) => r.ip_address ?? '' },
+]
 
 function entityLink(r: AuditLogRow) {
   const label = `${r.entity_type.replace(/_/g, ' ')} #${r.entity_id}`
@@ -30,7 +53,7 @@ function entityLink(r: AuditLogRow) {
 }
 
 export function AuditLogPage() {
-  const { scope, companyName } = useCompany()
+  const { scope } = useCompany()
   const params = useListParams({ sort: 'created_at', order: 'desc', limit: 100, filterKeys: FILTER_KEYS })
   const { state, query } = params
   const list = useQuery((signal) => auditApi.list(query, signal), [JSON.stringify(query), scope?.cmp_id], { enabled: scope !== null })
@@ -50,27 +73,32 @@ export function AuditLogPage() {
     ],
     [],
   )
-  const csvColumns = useMemo(() => [
-    { header: 'When', value: (r: AuditLogRow) => r.created_at },
-    { header: 'Action', value: (r: AuditLogRow) => r.action },
-    { header: 'Entity type', value: (r: AuditLogRow) => r.entity_type },
-    { header: 'Entity id', value: (r: AuditLogRow) => r.entity_id },
-    { header: 'Actor', value: (r: AuditLogRow) => r.actor_uuid },
-    { header: 'Source app', value: (r: AuditLogRow) => r.source_app },
-    { header: 'Source document', value: (r: AuditLogRow) => r.source_document_id },
-    { header: 'Reason', value: (r: AuditLogRow) => r.reason },
-    { header: 'Before', value: (r: AuditLogRow) => (r.before ? JSON.stringify(r.before) : '') },
-    { header: 'After', value: (r: AuditLogRow) => (r.after ? JSON.stringify(r.after) : '') },
-    { header: 'Request id', value: (r: AuditLogRow) => r.request_id },
-    { header: 'IP', value: (r: AuditLogRow) => r.ip_address },
-  ], [])
 
   return (
     <div className="page">
       <PageHeader
         title="Audit log"
         subtitle="Who changed what, when — masters, documents, valuation, settings and access. Entries are append-only; before / after snapshots are kept for every write."
-        actions={<ExportCsvButton filename={csvFilename('audit-log', companyName)} columns={csvColumns} rows={rows} fetchAll={() => fetchAllRows<AuditLogRow>((page, limit) => auditApi.list({ ...query, page, limit }))} disabled={rows.length === 0} />}
+        actions={
+          <ListSheetActions<AuditLogRow>
+            columns={EXPORT_COLUMNS}
+            rows={rows}
+            fetchAll={() => fetchAllRows<AuditLogRow>((page, limit) => auditApi.list({ ...query, page, limit }))}
+            filenameBase="audit-log"
+            title="Audit log"
+            description="Append-only record of every write, with the before and after snapshot"
+            metaLines={[
+              state.filters.entity_type ? `Entity: ${humanize(state.filters.entity_type)}${state.filters.entity_id ? ` #${state.filters.entity_id}` : ''}` : '',
+              state.filters.action_prefix ? `Action starts with: ${state.filters.action_prefix}` : '',
+              state.filters.actor_uuid ? `Actor: ${state.filters.actor_uuid}` : '',
+              state.filters.source_app ? `Source app: ${state.filters.source_app}` : '',
+              state.filters.from || state.filters.to ? `Between: ${state.filters.from || '…'} and ${state.filters.to || '…'}` : '',
+            ].filter(Boolean)}
+            onRefresh={list.reload}
+            refreshing={list.loading}
+            disabled={!list.data || list.data.meta.total === 0}
+          />
+        }
       />
       <RequirePermission permission={P.auditRead} what="the audit log">
         <div className="toolbar">

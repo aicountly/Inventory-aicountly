@@ -16,6 +16,7 @@
 
 import type { ExportableColumn, CellFormat } from '../registers/registerCells'
 import { cellFormat, cellText, cellValue, columnLabel } from '../registers/registerCells'
+import { toNumber } from '../utils/format'
 
 export type ExportAlign = 'left' | 'right' | 'center'
 
@@ -100,20 +101,27 @@ export function toExportColumns<T>(columns: readonly ExportableColumn<T>[]): Exp
  * One cell, twice: as a number for Excel to add up, and as the exact text the
  * table shows. Excel gets the raw figure — a spreadsheet of pre-formatted
  * strings cannot be summed, which is the first thing a reader tries.
+ *
+ * The number is resolved by `toNumber`, which is the *same* resolver
+ * `cellText` used to produce the text, dispatched by the column's own
+ * `format`. That is the whole point: a second, looser coercion here (strip the
+ * commas, call `Number`) accepted strings the formatters reject, and a cell the
+ * printed register left blank then carried a figure in the spreadsheet — the
+ * two surfaces disagreeing about the same cell. One resolver, one number, and
+ * the sheet and the paper cannot drift.
  */
 export function toExportCell<T>(row: T, col: ExportableColumn<T>): ExportCell {
   const format = cellFormat(col)
   const text = cellText(row, col)
   if (!isNumericFormat(format)) return { value: text, text }
 
-  const raw = cellValue(row, col)
-  const n = typeof raw === 'number' ? raw : Number(String(raw ?? '').replace(/,/g, ''))
   // A blank stays blank. Writing 0 into an empty cell invents a figure, and a
   // column of invented zeroes changes the average and the count the reader
-  // then computes over it.
-  if (raw === null || raw === undefined || raw === '' || !Number.isFinite(n)) {
-    return { value: text, text }
-  }
+  // then computes over it. A cell whose value the column's own formatter could
+  // not read is blank on paper, so it is blank in the spreadsheet too.
+  if (text === '') return { value: '', text }
+  const n = toNumber(cellValue(row, col))
+  if (n === null) return { value: text, text }
   return { value: n, text }
 }
 

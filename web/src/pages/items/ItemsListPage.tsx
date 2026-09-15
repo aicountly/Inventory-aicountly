@@ -15,7 +15,25 @@ const api: CrudApi<ItemListRow> = {
   remove: (id) => itemsApi.remove(id),
 }
 
-const itemsConfig: MasterConfig<ItemListRow> = {
+/** Batch / Serial / Expiry, in the order the screen shows them. */
+function trackingFlags(r: ItemListRow): string[] {
+  return [
+    Number(r.track_batch) === 1 ? 'Batch' : null,
+    Number(r.track_serial) === 1 ? 'Serial' : null,
+    Number(r.track_expiry) === 1 ? 'Expiry' : null,
+  ].filter((f): f is string => f !== null)
+}
+
+/**
+ * Items.
+ *
+ * Exported so `masters/MasterPage.export.test.tsx` can hold the real config
+ * against the sheet it produces: every column here drives the table AND the
+ * CSV / Excel / PDF / print, and a computed or nested cell that forgets
+ * `exportValue` exports a silently blank column under a header that promises a
+ * figure. `tracking` and `on_hand` are both that shape.
+ */
+export const itemsConfig: MasterConfig<ItemListRow> = {
   slug: 'items',
   permissionSlug: 'items',
   title: 'Items',
@@ -58,14 +76,35 @@ const itemsConfig: MasterConfig<ItemListRow> = {
     { key: 'mrp', header: 'MRP', align: 'right', render: (r) => formatMoney(r.mrp) },
     { key: 'valuation_method', header: 'Valuation', render: (r) => r.valuation_method },
     {
+      /*
+       * Computed, so it MUST declare its own export value.
+       *
+       * There is no `tracking` field on an ItemListRow — the cell is derived
+       * from track_batch / track_serial / track_expiry. Without a resolver the
+       * sheet falls back to `row['tracking']`, which is undefined, and every row
+       * of the CSV, the spreadsheet and the letterheaded print sheet comes out
+       * blank under a header promising the tracking mode. A reader of that paper
+       * concludes the items carry no batch or serial tracking.
+       */
       key: 'tracking',
       header: 'Tracking',
       render: (r) => {
-        const flags = [Number(r.track_batch) === 1 ? 'Batch' : null, Number(r.track_serial) === 1 ? 'Serial' : null, Number(r.track_expiry) === 1 ? 'Expiry' : null].filter(Boolean)
+        const flags = trackingFlags(r)
         return flags.length ? flags.join(', ') : <span className="muted">—</span>
       },
+      exportValue: (r) => trackingFlags(r).join(', '),
     },
-    { key: 'on_hand', header: 'On hand', align: 'right', render: (r) => (r.stock ? formatQty(r.stock.on_hand) : '—') },
+    {
+      // Nested, so it MUST declare its own export value: the figure is at
+      // `stock.on_hand`, not `row['on_hand']`. A blank On hand column on a
+      // letterheaded sheet is a stock quantity presented as absent.
+      key: 'on_hand',
+      header: 'On hand',
+      align: 'right',
+      render: (r) => (r.stock ? formatQty(r.stock.on_hand) : '—'),
+      exportValue: (r) => r.stock?.on_hand ?? '',
+      exportFormat: 'qty',
+    },
     { key: 'is_active', header: 'Status', render: (r) => <ActiveBadge active={r.is_active} /> },
     { key: 'updated_at', header: 'Updated', sortKey: 'updated_at', render: (r) => <span className="nowrap muted">{formatDateTime(r.updated_at)}</span> },
   ],
