@@ -8,7 +8,7 @@ import { documentsApi } from '../services/documentsApi'
 import { DocumentForm } from './DocumentForm'
 import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS } from './actions'
 import { draftFromDocument } from './formModel'
-import { specForCode, specForSlug } from './registry'
+import { specForCode, specForSlug, UNAVAILABLE_TYPES } from './registry'
 import type { DocumentStatus } from './types'
 import './documents.css'
 
@@ -30,6 +30,14 @@ export function DocumentFormPage() {
       <div className="page">
         <PageHeader title="Unknown document type" breadcrumbs={crumbs} />
         <Notice kind="error">There is no native document type for &ldquo;{slug}&rdquo;.</Notice>
+      </div>
+    )
+  }
+  if (!editing && spec && UNAVAILABLE_TYPES.has(spec.code)) {
+    return (
+      <div className="page">
+        <PageHeader title={spec.label} breadcrumbs={crumbs} />
+        <Notice kind="warning">A {spec.label.toLowerCase()} cannot be created: the type is declared but nothing happens when it posts, so the document would record work it never did.</Notice>
       </div>
     )
   }

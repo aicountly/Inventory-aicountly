@@ -54,6 +54,9 @@ class DocumentService
         if ($spec === null) {
             throw InventoryException::validation('Unknown document_type ' . $type, ['allowed' => DocumentTypeRegistry::all()]);
         }
+        if (!DocumentTypeRegistry::isImplemented($type)) {
+            throw InventoryException::validation($spec['label'] . ' is not available: the type is declared but nothing happens when it posts, so the document would record work it never did', ['document_type' => $type]);
+        }
         $cmpId = (int) $ctx['cmp_id'];
         $db = \Config\Database::connect();
         $now = date('Y-m-d H:i:s');

@@ -496,6 +496,8 @@ export const stockBalanceRegister = defineRegister<StockBalanceGridRow, PageSumm
   group: 'stock',
   icon: Warehouse,
   permission: [P.report('warehouse_stock'), P.report('stock_summary')],
+  // inv_stock_balances has no fy_id: the grid is the position as it stands.
+  scopePeriod: 'Live balances, all financial years',
   defaultSort: 'item_name',
   minWidth: 1600,
   rowNoun: 'balance',

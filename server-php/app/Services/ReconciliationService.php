@@ -273,7 +273,7 @@ class ReconciliationService
     {
         $db = \Config\Database::connect();
         $b = $db->table('inv_documents d')
-            ->select('d.document_id, d.document_uuid, d.document_type, d.document_no, d.document_date, d.status, d.source_app, d.source_document_type, d.source_document_id, d.source_document_uuid, d.source_document_no, d.posted_at, d.cancelled_at, d.failure_reason, d.bo_id, (SELECT COALESCE(SUM(CASE WHEN l.direction = \'out\' THEN -1 ELSE 1 END * COALESCE(l.valuation_amount, l.source_transaction_amount, l.source_transaction_rate * l.qty, 0)), 0) FROM inv_document_lines l WHERE l.document_id = d.document_id) AS stock_effect', false)
+            ->select('d.document_id, d.document_uuid, d.document_type, d.document_no, d.document_date, d.status, d.stock_effect, d.source_app, d.source_document_type, d.source_document_id, d.source_document_uuid, d.source_document_no, d.posted_at, d.cancelled_at, d.failure_reason, d.bo_id, ' . self::lineValuationEffectSql() . ' AS valuation_effect', false)
             ->where('d.cmp_id', $cmpId)->where('d.fy_id', $fyId)->where('d.source_app', 'books')
             ->orderBy('d.document_date', 'ASC')->orderBy('d.document_id', 'ASC');
         if ($boId > 0) {
@@ -315,7 +315,7 @@ class ReconciliationService
                 'inventory'   => [
                     'document_id' => (int) $d['document_id'], 'document_uuid' => $d['document_uuid'], 'document_type' => $d['document_type'], 'document_no' => $d['document_no'],
                     'document_date' => substr((string) $d['document_date'], 0, 10), 'status' => $d['status'], 'posted_at' => $d['posted_at'], 'cancelled_at' => $d['cancelled_at'],
-                    'failure_reason' => $d['failure_reason'], 'stock_effect' => round((float) $d['stock_effect'], 4), 'bo_id' => (int) $d['bo_id'],
+                    'failure_reason' => $d['failure_reason'], 'stock_effect' => self::valuationEffect($d), 'bo_id' => (int) $d['bo_id'],
                 ],
                 'source'      => ['source_app' => $d['source_app'], 'source_document_type' => $d['source_document_type'], 'source_document_id' => $sid ?: null, 'source_document_uuid' => $d['source_document_uuid'], 'source_document_no' => $d['source_document_no']],
                 'books'       => $books,
@@ -344,6 +344,47 @@ class ReconciliationService
             'summary'         => $summary,
             'entries'         => $entries,
         ];
+    }
+
+    /**
+     * Signed valuation effect of a document's lines (in +, out −), as a correlated subquery on
+     * `inv_documents d`.
+     *
+     * A line that has been valued answers for itself. A line that has not — the document is still
+     * DRAFT, or its posting failed — may only be estimated from its source rate when that rate is
+     * the cost of the goods, which is what COST_BEARING_SOURCE_RATE names: a purchase rate, a GRN
+     * rate, an opening or adjustment cost typed in Inventory. On every other type the source rate
+     * is the COMMERCIAL figure Books owns — the selling price on a credit note, the challan value
+     * agreed with a job worker — and a stock value is not a selling price. Reading one as the
+     * other is the confusion this reconciliation exists to surface, so it may not commit it.
+     */
+    public static function lineValuationEffectSql(): string
+    {
+        $costBearing = "'" . implode("', '", DocumentTypeRegistry::COST_BEARING_SOURCE_RATE) . "'";
+
+        return "(SELECT COALESCE(SUM(CASE WHEN l.direction = 'out' THEN -1 ELSE 1 END"
+            . ' * COALESCE(l.valuation_amount, CASE WHEN d.document_type IN (' . $costBearing . ')'
+            . ' THEN COALESCE(l.source_transaction_amount, l.source_transaction_rate * l.qty) END, 0)), 0)'
+            . ' FROM inv_document_lines l WHERE l.document_id = d.document_id)';
+    }
+
+    /**
+     * Valuation effect of one document row read with lineValuationEffectSql().
+     *
+     * A document that carries no valuation on its lines — a packing list, a challan_only challan,
+     * a purchase whose goods arrive on a later challan — has no effect on the stock value at all.
+     * Zero is the answer; the commercial document behind it is Books' to report.
+     *
+     * @param array<string, mixed> $row
+     */
+    public static function valuationEffect(array $row): float
+    {
+        $type = (string) $row['document_type'];
+        if (!DocumentPostingService::valuesLinesNow($type, DocumentTypeRegistry::get($type), (string) ($row['stock_effect'] ?? ''))) {
+            return 0.0;
+        }
+
+        return round((float) ($row['valuation_effect'] ?? 0), 4);
     }
 
     // ------------------------------------------------------------------ buckets
@@ -422,7 +463,7 @@ class ReconciliationService
     {
         $db = \Config\Database::connect();
         $b = $db->table('inv_documents d')
-            ->select('d.document_id, d.document_uuid, d.document_type, d.document_no, d.document_date, d.status, d.stock_effect, d.source_app, d.source_document_type, d.source_document_id, d.source_document_uuid, d.source_document_no, d.failure_reason, d.cancel_reason, (SELECT COALESCE(SUM(CASE WHEN l.direction = \'out\' THEN -1 ELSE 1 END * COALESCE(l.valuation_amount, l.source_transaction_amount, l.source_transaction_rate * l.qty, 0)), 0) FROM inv_document_lines l WHERE l.document_id = d.document_id) AS value_effect', false)
+            ->select('d.document_id, d.document_uuid, d.document_type, d.document_no, d.document_date, d.status, d.stock_effect, d.source_app, d.source_document_type, d.source_document_id, d.source_document_uuid, d.source_document_no, d.failure_reason, d.cancel_reason, ' . self::lineValuationEffectSql() . ' AS valuation_effect', false)
             ->where('d.cmp_id', $cmpId)->where('d.fy_id', $fyId)->whereIn('d.status', $statuses)
             ->where('d.document_date <=', $asOf)
             ->orderBy('d.document_date', 'ASC')->orderBy('d.document_id', 'ASC');
@@ -448,11 +489,7 @@ class ReconciliationService
         $rows = [];
         $sum = 0.0;
         foreach ($b->get()->getResultArray() as $r) {
-            $spec = DocumentTypeRegistry::get((string) $r['document_type']);
-            // Documents that never carry valuation (packing, reservation, a challan_only challan ...)
-            // explain nothing. An inward challan that would have moved stock does: it is valued.
-            $valued = DocumentPostingService::valuesLines((string) $r['document_type'], $spec, (string) ($r['stock_effect'] ?? ''));
-            $effect = $valued ? round((float) $r['value_effect'], 4) : 0.0;
+            $effect = self::valuationEffect($r);
             if ((string) $r['status'] === 'REVERSED' && (string) $r['source_app'] === 'books'
                 && (isset($cancelledInBooks['id:' . (int) $r['source_document_id']]) || isset($cancelledInBooks['uuid:' . strtolower((string) $r['source_document_uuid'])]))) {
                 $effect = 0.0;

@@ -78,4 +78,32 @@ describe('CommandPalette accessibility', () => {
       expect(option.getAttribute('tabindex')).toBe('-1')
     }
   })
+
+  it('keeps Tab inside the dialog it calls aria-modal', () => {
+    openPalette()
+    input().focus()
+    // The options are not tab stops, so the input is the only one: the trap has
+    // to take the keystroke, or the browser hands focus to the page behind the
+    // aria-modal dialog and Escape — bound to this subtree — stops answering.
+    for (const shiftKey of [false, true]) {
+      const event = new KeyboardEvent('keydown', { key: 'Tab', shiftKey, bubbles: true, cancelable: true })
+      act(() => {
+        window.dispatchEvent(event)
+      })
+      expect(event.defaultPrevented, 'Tab must not walk out of a modal').toBe(true)
+      expect(document.activeElement).toBe(input())
+    }
+  })
+
+  it('closes on Escape even when focus has left it', () => {
+    openPalette()
+    expect(screen.queryByRole('dialog')).toBeTruthy()
+    // Whatever put focus outside — a Tab in an older build, a browser chrome
+    // round trip — Escape is the way out and it has to keep working.
+    document.body.focus()
+    act(() => {
+      fireEvent.keyDown(document.body, { key: 'Escape' })
+    })
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
 })

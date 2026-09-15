@@ -32,6 +32,14 @@ final class NegativeStockThresholdTest extends TestCase
         $this->assertStringNotContainsString('-0.00005', $dashboard, 'a second copy of the tolerance is how the two drift apart');
     }
 
+    public function testTheCardLeadsWithTheRowCountItsRegisterLists(): void
+    {
+        $dashboard = file_get_contents(APPPATH . 'Controllers/Api/V1/DashboardController.php');
+
+        $this->assertStringContainsString("'negative_stock_rows'", $dashboard, 'the card headline is the balance rows ?negative=1 lists');
+        $this->assertStringNotContainsString('negative_stock_warehouse_rows', $dashboard, 'they are item x warehouse x batch rows, not warehouse groups');
+    }
+
     public function testTheBalanceRegisterOffersTheFilterTheCardDrillsTo(): void
     {
         $service = file_get_contents(APPPATH . 'Services/StockBalanceService.php');

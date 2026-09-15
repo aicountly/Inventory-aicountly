@@ -40,9 +40,35 @@ describe('parseCompanyAddress', () => {
     ])
   })
 
+  it('keeps the flat root fields the nested object does not carry', () => {
+    // Manage sends both shapes at once for companies migrated mid-life: a
+    // premises line in `address`, the city and PIN still on the root. Dropping
+    // the root half prints a letterhead with no town on it.
+    expect(
+      parseCompanyAddress({
+        data: { ro_city: 'Pune', ro_pincode: '411057', address: { addr1: 'Plot 4' } },
+      }),
+    ).toEqual(['Plot 4', 'Pune, 411057'])
+  })
+
   it('is empty rather than half an address when Manage sends none', () => {
     expect(parseCompanyAddress({ data: { cmp_id: 9, comp_name: 'Acme Ltd' } })).toEqual([])
     expect(parseCompanyAddress(null)).toEqual([])
+  })
+
+  it('does not call a lone master field a registered office', () => {
+    // Every company row carries a state and a country whether or not Manage
+    // holds an address, so one of them on its own is not one.
+    expect(parseCompanyAddress({ data: { country_name: 'India' } })).toEqual([])
+    expect(parseCompanyAddress({ data: { state: 'Karnataka' } })).toEqual([])
+    expect(parseCompanyAddress({ data: { state: 'Karnataka', country_name: 'India' } })).toEqual([])
+    expect(parseCompanyAddress({ data: { address: { country_name: 'India' } } })).toEqual([])
+  })
+
+  it('accepts a locality carrying a PIN, which is a postal identity', () => {
+    expect(parseCompanyAddress({ data: { ro_city: 'Pune', ro_pincode: '411057' } })).toEqual([
+      'Pune, 411057',
+    ])
   })
 })
 

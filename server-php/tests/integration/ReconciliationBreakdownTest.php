@@ -70,7 +70,7 @@ final class ReconciliationBreakdownTest extends IntegrationTestCase
      *   PR  #501      10 @ 120 posted
      *   SI  #900      15 @ 300 posted  -> FIFO closing 5 @ 120 = 600
      *   PR  #601       2 @  50 DRAFT   -> pending_posting  (+100 stock effect, contribution -100)
-     *   SI  #700       1 @  20 FAILED  -> failed_posting   (-20 stock effect, contribution +20)
+     *   SI  #700       1 @  20 FAILED  -> failed_posting   (0: 20 is the selling price, not a cost)
      *   SI  #800       2 @ 200 posted then REVERSED -> cancelled_reversed (-240 effect, contribution +240)
      *   revision       delta 25 unacknowledged -> contribution -25
      */
@@ -146,11 +146,11 @@ final class ReconciliationBreakdownTest extends IntegrationTestCase
     {
         $s = $this->scenario();
         // Inventory closing 5 @ 120 = 600. Explained contributions:
-        //   opening +100 (1000 vs 900), pending -100, failed +20, reversed +240, revisions -25,
-        //   revaluation -10 (Books only), manual journal -40, missing source -55  => 130
-        // Books balance 469.70 -> difference 130.30 -> rounding 0.30.
+        //   opening +100 (1000 vs 900), pending -100, failed 0, reversed +240, revisions -25,
+        //   revaluation -10 (Books only), manual journal -40, missing source -55  => 110
+        // Books balance 489.70 -> difference 110.30 -> rounding 0.30.
         $this->books->balanceResponse = ['ok' => true, 'status' => 200, 'error' => null, 'body' => ['data' => [
-            'balance'            => 469.70,
+            'balance'            => 489.70,
             'opening_balance'    => 900,
             'manual_journals'    => [['journal_id' => 5, 'amount' => 40, 'narration' => 'stock write-up']],
             'revaluations'       => [['vch_txn_id' => 42, 'amount' => 10]],
@@ -164,8 +164,8 @@ final class ReconciliationBreakdownTest extends IntegrationTestCase
         $this->assertSame('COMPLETED', $run['status']);
         $this->assertEqualsWithDelta(600.0, $run['inventory_closing_value'], 0.0001);
         $this->assertEqualsWithDelta(5.0, $run['inventory_closing_qty'], 0.0001);
-        $this->assertEqualsWithDelta(469.70, $run['books_stock_ledger_balance'], 0.0001);
-        $this->assertEqualsWithDelta(130.30, $run['difference'], 0.0001);
+        $this->assertEqualsWithDelta(489.70, $run['books_stock_ledger_balance'], 0.0001);
+        $this->assertEqualsWithDelta(110.30, $run['difference'], 0.0001);
         $this->assertSame(['stockLedgerBalance', $this->cmpId, $this->fyId, $this->boId, '2026-04-30'], $this->books->calls[0]);
 
         $b = $run['breakdown']['buckets'];
@@ -174,8 +174,11 @@ final class ReconciliationBreakdownTest extends IntegrationTestCase
         $this->assertEqualsWithDelta(-100.0, $b['pending_posting']['amount'], 0.0001);
         $this->assertSame(1, $b['pending_posting']['count']);
         $this->assertSame(601, $b['pending_posting']['documents'][0]['source_document_id']);
-        $this->assertEqualsWithDelta(20.0, $b['failed_posting']['amount'], 0.0001);
+        // The sale failed before it ever valued a line, and 20 is what the customer was charged.
+        // A bucket that explains a stock-value gap may not spend a selling price doing it.
+        $this->assertEqualsWithDelta(0.0, $b['failed_posting']['amount'], 0.0001);
         $this->assertSame($s['failed_id'], $b['failed_posting']['documents'][0]['document_id']);
+        $this->assertEqualsWithDelta(0.0, $b['failed_posting']['documents'][0]['stock_effect'], 0.0001);
         $this->assertEqualsWithDelta(240.0, $b['cancelled_reversed']['amount'], 0.0001);
         $this->assertSame(800, $b['cancelled_reversed']['documents'][0]['source_document_id']);
         $this->assertEqualsWithDelta(-25.0, $b['unacknowledged_valuation_revisions']['amount'], 0.0001);
@@ -186,7 +189,7 @@ final class ReconciliationBreakdownTest extends IntegrationTestCase
         $this->assertEqualsWithDelta(-55.0, $b['missing_source']['amount'], 0.0001);
         $this->assertSame(1, $b['missing_source']['count']);
         $this->assertSame(777, $b['missing_source']['entries'][0]['source']['source_document_id']);
-        $this->assertEqualsWithDelta(130.0, $run['breakdown']['explained_total'], 0.0001);
+        $this->assertEqualsWithDelta(110.0, $run['breakdown']['explained_total'], 0.0001);
         $this->assertEqualsWithDelta(0.30, $b['rounding']['amount'], 0.0001);
         $this->assertEqualsWithDelta(0.0, $b['unexplained']['amount'], 0.0001);
 
@@ -199,7 +202,7 @@ final class ReconciliationBreakdownTest extends IntegrationTestCase
         // Persisted and readable back with the same numbers.
         $stored = $this->reconciliation->get($this->cmpId, (int) $run['run_id']);
         $this->assertNotNull($stored);
-        $this->assertEqualsWithDelta(130.30, $stored['difference'], 0.0001);
+        $this->assertEqualsWithDelta(110.30, $stored['difference'], 0.0001);
         $this->assertSame('2026-04-30', $stored['as_of_date']);
         $this->assertNull($this->reconciliation->get($this->cmpId + 1, (int) $run['run_id']), 'tenant isolation');
 
@@ -229,12 +232,12 @@ final class ReconciliationBreakdownTest extends IntegrationTestCase
 
         $run = $this->reconciliation->run($this->cmpId, $this->fyId, $this->boId, '2026-04-30');
         $b = $run['breakdown']['buckets'];
-        // explained: opening 0, pending -100, failed +20, reversed +240, revisions -25 => 135; difference 200 => residual 65
+        // explained: opening 0, pending -100, failed 0, reversed +240, revisions -25 => 115; difference 200 => residual 85
         $this->assertEqualsWithDelta(200.0, $run['difference'], 0.0001);
         $this->assertEqualsWithDelta(0.0, $b['opening_difference']['amount'], 0.0001);
-        $this->assertEqualsWithDelta(135.0, $run['breakdown']['explained_total'], 0.0001);
+        $this->assertEqualsWithDelta(115.0, $run['breakdown']['explained_total'], 0.0001);
         $this->assertEqualsWithDelta(0.0, $b['rounding']['amount'], 0.0001);
-        $this->assertEqualsWithDelta(65.0, $b['unexplained']['amount'], 0.0001);
+        $this->assertEqualsWithDelta(85.0, $b['unexplained']['amount'], 0.0001);
         // Books answered with no posting entries: posted documents are MISSING_IN_BOOKS.
         $summary = $run['document_status']['summary'];
         $this->assertSame(2, $summary['MISSING_IN_BOOKS']);

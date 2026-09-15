@@ -77,7 +77,15 @@ export function MiniTable<T>({
           const href = colIdx === 0 && to ? to(row) : null
           if (!href) return content
           return (
-            <Link to={href} aria-label={rowLabel?.(row)} className="block no-underline text-inherit">
+            <Link
+              to={href}
+              aria-label={rowLabel?.(row)}
+              // The row below is clickable too, and Link preventDefaults without
+              // stopping the click: let it bubble and one press of the first
+              // cell pushes the same path twice, so Back lands where it started.
+              onClick={(e) => e.stopPropagation()}
+              className="block no-underline text-inherit"
+            >
               {content}
             </Link>
           )

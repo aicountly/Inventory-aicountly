@@ -325,6 +325,11 @@ class Migrator
              ORDER BY h.vch_txn_id",
             [$cmpId]
         )->getResultArray();
+        // A document copied by an earlier run keeps the uuid that run gave it, and those runs
+        // minted the deterministic one even for a voucher Books had already named itself. Books
+        // owns source_document_uuid, so the copies are brought back onto its id before anything
+        // else is written; a re-run of a finished company is how that repair reaches them.
+        $this->applySourceUuidCorrections($cmpId, self::sourceUuidCorrections($headers, $this->migratedSourceUuids($cmpId)));
         $hasPackingMeta = $b->tableExists('books_voucher_packing_meta', false);
         $hasPackingLines = $b->tableExists('books_voucher_packing_lines', false);
         $hasJobLines = $b->tableExists('books_voucher_job_work_lines', false);
@@ -363,7 +368,7 @@ class Migrator
             $vchType = (int) $h['vch_type_id'];
             $docType = DocumentTypeRegistry::fromLegacyVchType($vchType);
             $status = $this->mapStatus((string) $h['status'], $h['deleted_at'] ?? null);
-            $uuid = $this->deterministicUuid('books_voucher_headers:' . $vchTxnId);
+            $uuid = self::sharedDocumentUuid($h);
             $meta = [];
             if (!empty($h['production_metadata_json'])) {
                 $meta['production'] = json_decode((string) $h['production_metadata_json'], true);
@@ -648,6 +653,75 @@ class Migrator
         static $codes = [2 => 'credit_note', 3 => 'debit_note', 4 => 'consignment_packing', 5 => 'journal', 6 => 'job_work_in', 7 => 'job_work_out', 10 => 'physical_stock', 11 => 'purchase', 14 => 'production', 15 => 'stock_transfer', 18 => 'sales', 20 => 'stock_journal', 23 => 'delivery_challan', 24 => 'inward_challan'];
 
         return $codes[$vchType] ?? ('type_' . $vchType);
+    }
+
+    /**
+     * The one id both halves of a voucher answer to.
+     *
+     * Books mints it — a random v4 the moment the voucher is posted — and hands it over as
+     * source_document_uuid on every live post, so a header that already carries one is adopted
+     * rather than replaced: minting a v5 over the top left the two databases naming the same
+     * document differently, which is the opposite of a shared reference. The deterministic v5 is
+     * for a header Books never named, and is the value books:backfill-vch-uuid will write into it.
+     *
+     * @param array<string, mixed> $header a books_voucher_headers row
+     */
+    public static function sharedDocumentUuid(array $header): string
+    {
+        $booksUuid = strtolower(trim((string) ($header['vch_uuid'] ?? '')));
+        if (preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/', $booksUuid) === 1) {
+            return $booksUuid;
+        }
+
+        return self::deterministicUuid('books_voucher_headers:' . (int) ($header['vch_txn_id'] ?? 0));
+    }
+
+    /**
+     * Documents already copied whose source_document_uuid is not the id Books holds.
+     *
+     * @param list<array<string, mixed>> $headers books_voucher_headers rows
+     * @param array<int, string> $migrated document_id => source_document_uuid as Inventory holds it
+     * @return array<int, string> document_id => the uuid it must carry
+     */
+    public static function sourceUuidCorrections(array $headers, array $migrated): array
+    {
+        $out = [];
+        foreach ($headers as $h) {
+            $vchTxnId = (int) ($h['vch_txn_id'] ?? 0);
+            if (!array_key_exists($vchTxnId, $migrated)) {
+                continue;
+            }
+            $uuid = self::sharedDocumentUuid($h);
+            if ($migrated[$vchTxnId] !== $uuid) {
+                $out[$vchTxnId] = $uuid;
+            }
+        }
+
+        return $out;
+    }
+
+    /** @return array<int, string> document_id => source_document_uuid */
+    private function migratedSourceUuids(int $cmpId): array
+    {
+        $rows = $this->inv->table('inv_documents')->select('document_id, source_document_uuid')->where('cmp_id', $cmpId)->where('legacy_source_table', 'books_voucher_headers')->get()->getResultArray();
+        $out = [];
+        foreach ($rows as $r) {
+            $out[(int) $r['document_id']] = strtolower(trim((string) ($r['source_document_uuid'] ?? '')));
+        }
+
+        return $out;
+    }
+
+    /** @param array<int, string> $corrections document_id => uuid, from sourceUuidCorrections() */
+    private function applySourceUuidCorrections(int $cmpId, array $corrections): void
+    {
+        if ($corrections === []) {
+            return;
+        }
+        foreach ($corrections as $documentId => $uuid) {
+            $this->inv->table('inv_documents')->where('document_id', $documentId)->where('cmp_id', $cmpId)->update(['source_document_uuid' => $uuid, 'updated_at' => $this->now]);
+        }
+        $this->log->event('source_uuid_realigned', ['cmp_id' => $cmpId, 'documents' => count($corrections)]);
     }
 
     /** RFC 4122 v5 UUID in the AICOUNTLY namespace — the same input always yields the same id. */

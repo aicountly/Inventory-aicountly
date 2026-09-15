@@ -88,7 +88,7 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
   const navigate = useNavigate()
   const searchInputRef = useRef<HTMLInputElement | null>(null)
 
-  const scopeLabel = useScopeLabel()
+  const scopeLabel = useScopeLabel(config.scopePeriod)
   // Filled by ExportActions so Ctrl+P prints the letterheaded sheet rather than
   // whatever slice of the app DOM happens to be on screen.
   const printRef = useRef<(() => void) | null>(null)
@@ -280,7 +280,7 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
 
   // Company, scope, registered office, GSTIN and logo — the letterhead every
   // export and every printed sheet carries.
-  const identity = useExportIdentity()
+  const identity = useExportIdentity(config.scopePeriod)
 
   // Label for the printed totals row when the register's own totals map leaves
   // the label cell blank.

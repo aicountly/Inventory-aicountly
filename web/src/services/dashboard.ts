@@ -37,8 +37,10 @@ export interface DashboardData {
     posted_by_type: Record<string, number>
   }
   stock: {
+    /** Balance rows below zero — item x warehouse x batch, what ?negative=1 lists. */
+    negative_stock_rows: number
+    /** Items still net-negative once a branch's warehouses offset each other. */
     negative_stock_items: number
-    negative_stock_warehouse_rows: number
     /**
      * Counted on the server's own default window, not the one the user picked.
      * The dashboard's expiry figures come from the near-expiry report; read

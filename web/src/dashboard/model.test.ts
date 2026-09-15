@@ -37,8 +37,8 @@ function core(overrides: Partial<DashboardData> = {}): DashboardData {
       posted_by_type: { SALES_ISSUE: 20, PURCHASE_RECEIPT: 10 },
     },
     stock: {
+      negative_stock_rows: 3,
       negative_stock_items: 2,
-      negative_stock_warehouse_rows: 3,
       near_expiry_batches: 7,
       expired_batches: 1,
       near_expiry_days: 30,
@@ -170,8 +170,8 @@ describe('buildKpiCards', () => {
           posted_by_type: {},
         },
         stock: {
+          negative_stock_rows: 0,
           negative_stock_items: 0,
-          negative_stock_warehouse_rows: 0,
           near_expiry_batches: 0,
           expired_batches: 0,
           near_expiry_days: 30,
@@ -185,6 +185,33 @@ describe('buildKpiCards', () => {
     expect(clean.find((c) => c.key === 'negative_stock')?.tone).toBe('neutral')
     expect(clean.find((c) => c.key === 'expired')?.tone).toBe('neutral')
     expect(clean.some((c) => c.attention)).toBe(false)
+  })
+
+  it('counts the rows its register lists, not what nets out between warehouses', () => {
+    // -5 in one warehouse and +12 in another: no item is net negative, but the
+    // stock balance register the card opens with ?negative=1 lists that row.
+    const netted = buildKpiCards({
+      asOf: ASOF,
+      nearExpiryDays: 30,
+      core: core({
+        stock: {
+          negative_stock_rows: 1,
+          negative_stock_items: 0,
+          near_expiry_batches: 0,
+          expired_batches: 0,
+          near_expiry_days: 30,
+          pending_quantities: {},
+        },
+      }),
+      stock,
+      expiry,
+      replenishment,
+    })
+    const card = netted.find((c) => c.key === 'negative_stock')
+    expect(card?.value, 'the headline is the row the register shows').toBe('1')
+    expect(card?.tone).toBe('danger')
+    expect(card?.attention).toBe(true)
+    expect(card?.hint).toBe('0 items net below zero once warehouses offset')
   })
 
   it('names the window the expiry card counted', () => {

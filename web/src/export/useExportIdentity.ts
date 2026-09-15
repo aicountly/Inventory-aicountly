@@ -19,9 +19,9 @@ import { useCompany } from '../company/CompanyContext'
 import { useScopeLabel } from '../company/useScopeLabel'
 import type { SheetIdentity } from './sheetHtml'
 
-export function useExportIdentity(): SheetIdentity {
+export function useExportIdentity(period?: string): SheetIdentity {
   const { companyName, addressLines, gstin, logo } = useCompany()
-  const scopeLabel = useScopeLabel()
+  const scopeLabel = useScopeLabel(period)
   return useMemo<SheetIdentity>(
     () => ({
       companyName: companyName || undefined,

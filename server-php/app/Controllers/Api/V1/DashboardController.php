@@ -54,9 +54,9 @@ class DashboardController extends BaseController
                 $postedByType[(string) $r['document_type']] = (int) $r['cnt'];
             }
 
-            // Negative stock: items whose on-hand across the branch is below zero, plus the rows
-            // behind them. The register the card drills to counts the same way, from the same
-            // table (StockBalanceService::listBalances with ?negative=1).
+            // Negative stock: the balance rows below zero — item x warehouse x batch, which is
+            // what the register the card drills to lists with ?negative=1 — plus the items those
+            // rows belong to once a branch's warehouses are netted against each other.
             $negative = (new StockBalanceService())->negativeStockCounts($cmpId, $boId);
 
             // Near-expiry / expired batches (active batches with an expiry date)
@@ -112,8 +112,8 @@ class DashboardController extends BaseController
                 'posted_by_type'    => $postedByType,
             ],
             'stock' => [
+                'negative_stock_rows'       => $negative['rows'],
                 'negative_stock_items'      => $negative['items'],
-                'negative_stock_warehouse_rows' => $negative['rows'],
                 'near_expiry_batches'       => (int) ($batches['near_expiry'] ?? 0),
                 'expired_batches'           => (int) ($batches['expired'] ?? 0),
                 'near_expiry_days'          => $days,

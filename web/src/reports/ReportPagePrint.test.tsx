@@ -133,6 +133,17 @@ const pageRegister = defineRegister<Row, PageSummary>({
   ],
 })
 
+/**
+ * A register whose query does not constrain the financial year. The scope line
+ * is the only record on paper of what was asked for, so it may not claim one.
+ */
+const unscopedRegister = defineRegister<Row, PageSummary>({
+  ...pageRegister,
+  slug: 'demo_unscoped',
+  path: 'demo_unscoped',
+  scopePeriod: 'All financial years',
+})
+
 const fetchSpy = vi.fn()
 
 // The reader is in India; the stamp on the paper has to be their clock.
@@ -144,11 +155,11 @@ afterAll(() => {
   process.env.TZ = ORIGINAL_TZ
 })
 
-function renderRegister() {
+function renderRegister(config = pageRegister) {
   return render(
     <MemoryRouter initialEntries={['/registers/demo']}>
       <Routes>
-        <Route path="/registers/demo" element={<ReportPage config={pageRegister} />} />
+        <Route path="/registers/demo" element={<ReportPage config={config} />} />
       </Routes>
     </MemoryRouter>,
   )
@@ -168,6 +179,7 @@ beforeEach(() => {
     Promise.resolve(response(Number(query.limit) > PAGE.length ? EVERYTHING : PAGE)),
   )
   pageRegister.fetch = (args) => fetchSpy(args) as Promise<ReportResponse<Row, PageSummary>>
+  unscopedRegister.fetch = pageRegister.fetch
   try {
     window.localStorage.clear()
   } catch {
@@ -278,5 +290,16 @@ describe('the register header', () => {
     renderRegister()
     await screen.findByText('Widget A')
     expect(screen.getByText(/Acme Ltd · FY 2026-27 · North branch/)).toBeTruthy()
+  })
+
+  it('names the period a register actually covers instead of the selected year', async () => {
+    renderRegister(unscopedRegister)
+    await screen.findByText('Widget A')
+    expect(screen.getByText(/Acme Ltd · All financial years · North branch/)).toBeTruthy()
+    expect(screen.queryByText(/FY 2026-27/)).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Print' }))
+    const sheet = await printedSheet()
+    expect(sheet.scopeLabel).toBe('Acme Ltd · All financial years · North branch')
   })
 })

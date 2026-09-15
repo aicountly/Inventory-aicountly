@@ -35,7 +35,7 @@ class DocumentTypeRegistry
         'BATCH_ADJUSTMENT'    => ['label' => 'Batch Adjustment',         'line_mode' => 'by_line',    'valuation' => false, 'cogs' => false, 'effects' => [],                       'legacy_vch_type' => null, 'native' => true],
         'SERIAL_ADJUSTMENT'   => ['label' => 'Serial Adjustment',        'line_mode' => 'by_line',    'valuation' => false, 'cogs' => false, 'effects' => [],                       'legacy_vch_type' => null, 'native' => true],
         'REVALUATION'         => ['label' => 'Stock Revaluation',        'line_mode' => 'status_only','valuation' => true,  'cogs' => false, 'effects' => ['STOCK_REVALUATION'],    'legacy_vch_type' => null, 'native' => true],
-        'LANDED_COST'         => ['label' => 'Landed Cost Allocation',   'line_mode' => 'status_only','valuation' => true,  'cogs' => false, 'effects' => ['LANDED_COST'],          'legacy_vch_type' => null, 'native' => true],
+        'LANDED_COST'         => ['label' => 'Landed Cost Allocation',   'line_mode' => 'status_only','valuation' => true,  'cogs' => false, 'effects' => [],                       'legacy_vch_type' => null, 'native' => true],
         'RESERVATION'         => ['label' => 'Inventory Reservation',    'line_mode' => 'status_only','valuation' => false, 'cogs' => false, 'effects' => [],                       'legacy_vch_type' => null, 'native' => true],
         'RESERVATION_RELEASE' => ['label' => 'Reservation Release',      'line_mode' => 'status_only','valuation' => false, 'cogs' => false, 'effects' => [],                       'legacy_vch_type' => null, 'native' => true],
         'DELIVERY_CHALLAN'    => ['label' => 'Delivery Challan / Dispatch','line_mode' => 'pending_only','valuation' => false,'cogs' => false, 'effects' => [],                     'legacy_vch_type' => 23,   'native' => true],
@@ -92,6 +92,22 @@ class DocumentTypeRegistry
     public const VALUES_MOVED_STOCK = ['INWARD_CHALLAN'];
 
     /**
+     * Types this registry still names — so a historic document and every register that prints one
+     * keeps its label — but which nobody may create or post, because what the type describes was
+     * never built.
+     *
+     * LANDED_COST is the whole list. Posting one runs no allocator: it opens no inv_landed_costs
+     * row, raises no cost layer, moves no average, sets no landed_cost_amount and emits no effect,
+     * so the operator who entered a freight bill to capitalise it is told POSTED while closing
+     * stock and COGS are exactly what they were. An unbuilt type that answers "done" is worse than
+     * one that refuses, so it refuses until an allocator exists — and until the document carries
+     * what an allocator needs, which the present type does not: no target receipt, no cost type,
+     * no allocation basis, and an amount collected in the commercial source_transaction_* pair
+     * Books owns, which may never become a cost by falling through to valuation.
+     */
+    public const UNIMPLEMENTED = ['LANDED_COST'];
+
+    /**
      * Books voucher types whose direction was driven by the line's dr_cr rather than the type
      * (InventoryMovementClassifier::drCrDrivenTypeIds): 15, 20, 10, 14, 6.
      */
@@ -126,6 +142,12 @@ class DocumentTypeRegistry
     public static function valuesMovedStock(string $type): bool
     {
         return in_array(strtoupper($type), self::VALUES_MOVED_STOCK, true);
+    }
+
+    /** Is this type's posting behaviour built? An unimplemented type may be read, never entered. */
+    public static function isImplemented(string $type): bool
+    {
+        return !in_array(strtoupper($type), self::UNIMPLEMENTED, true);
     }
 
     public static function fromLegacyVchType(int $vchTypeId): ?string

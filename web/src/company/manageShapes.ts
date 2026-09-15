@@ -243,24 +243,58 @@ function addressText(v: unknown): string {
   return /^\d{1,3}$/.test(text) ? '' : text
 }
 
-/** Pull `ro_city` / `co_pincode` up to `city` / `pincode` when the plain key is absent. */
+/**
+ * Pull `ro_city` / `co_pincode` up to `city` / `pincode` when the plain key is absent.
+ *
+ * Only keys that carry something are written. These rows are merged over one
+ * another — the nested address object over the flat root fields — and a key
+ * present with `undefined` wins that merge, so emitting one for every field
+ * would blank the very root value this exists to find.
+ */
 function flattenAddress(row: Row): Row {
   const out: Row = {}
   for (const field of ADDRESS_FIELDS) {
-    out[field] = row[field] ?? row[`ro_${field}`] ?? row[`co_${field}`]
+    const value = row[field] ?? row[`ro_${field}`] ?? row[`co_${field}`]
+    if (value !== undefined && value !== null && value !== '') out[field] = value
   }
   return out
 }
 
+interface AddressParts {
+  street: string[]
+  locality: string[]
+  pin: string
+  country: string
+}
+
+function addressParts(a: Row): AddressParts {
+  return {
+    street: [a.addr1, a.addr2, a.address_line1, a.address_line2, a.line1, a.line2, a.street]
+      .map(addressText)
+      .filter(Boolean),
+    locality: [a.city, a.district, a.state_name ?? a.state].map(addressText).filter(Boolean),
+    pin: addressText(a.pincode ?? a.pin ?? a.zip),
+    country: addressText(a.country_name ?? a.country),
+  }
+}
+
+/**
+ * Enough of a postal address to stand as a registered office.
+ *
+ * The field scan reads the whole companyinfo row, where `state` and
+ * `country_name` are masters every company carries whether or not Manage holds
+ * an address. A letterhead reading "India" over a delivery challan is worse
+ * than one with no address at all, so a premises line — or a PIN with the
+ * locality it belongs to — has to be there before the scan speaks.
+ */
+function isPostalAddress(a: Row): boolean {
+  const parts = addressParts(a)
+  return parts.street.length > 0 || (Boolean(parts.pin) && parts.locality.length > 0)
+}
+
 function structuredAddressLines(a: Row): string[] {
-  const street = [a.addr1, a.addr2, a.address_line1, a.address_line2, a.line1, a.line2, a.street]
-    .map(addressText)
-    .filter(Boolean)
-  const locality = [a.city, a.district, a.state_name ?? a.state, a.pincode ?? a.pin ?? a.zip]
-    .map(addressText)
-    .filter(Boolean)
-  const country = addressText(a.country_name ?? a.country)
-  return [street.join(', '), locality.join(', '), country].filter(Boolean)
+  const { street, locality, pin, country } = addressParts(a)
+  return [street.join(', '), [...locality, pin].filter(Boolean).join(', '), country].filter(Boolean)
 }
 
 /** The registered office as letterhead lines, from whichever shape Manage sent. */
@@ -272,12 +306,12 @@ export function parseCompanyAddress(body: unknown): string[] {
         return value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
       }
       if (isRow(value)) {
-        const lines = structuredAddressLines({ ...flattenAddress(source), ...flattenAddress(value), ...value })
-        if (lines.length) return lines
+        const merged = { ...flattenAddress(source), ...flattenAddress(value) }
+        if (isPostalAddress(merged)) return structuredAddressLines(merged)
       }
     }
-    const lines = structuredAddressLines(flattenAddress(source))
-    if (lines.length) return lines
+    const flat = flattenAddress(source)
+    if (isPostalAddress(flat)) return structuredAddressLines(flat)
   }
 
   return []

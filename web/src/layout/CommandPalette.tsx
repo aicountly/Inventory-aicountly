@@ -5,6 +5,7 @@ import { useAccess } from '../access/AccessContext'
 import { collectNavLeaves } from '../config/navRegistry'
 import type { NavLeaf } from '../config/navRegistry'
 import { COMMAND_PALETTE_EVENT } from '../keyboard/shortcutRegistry'
+import { useModalKeyboard } from '../keyboard/useModalKeyboard'
 import { Kbd } from '../ui/Kbd'
 import { cx } from '../ui/cx'
 
@@ -58,6 +59,7 @@ export function CommandPalette() {
   const [activeIndex, setActiveIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLUListElement>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
   const baseId = useId()
   const listId = `${baseId}-list`
   const optionId = (index: number) => `${baseId}-option-${index}`
@@ -100,13 +102,19 @@ export function CommandPalette() {
     return () => window.removeEventListener(COMMAND_PALETTE_EVENT, onOpen)
   }, [])
 
+  const close = useCallback(() => setOpen(false), [])
+
+  // Escape from anywhere and a Tab that cannot leave: the input is the only tab
+  // stop here, so the trap keeps returning focus to it and the whole widget
+  // stays reachable. Without it the first Tab walks out of an aria-modal dialog
+  // and Escape, bound to the dialog subtree, stops answering.
+  useModalKeyboard(open, close, dialogRef, { initialFocusRef: inputRef })
+
   useEffect(() => {
     if (!open) return undefined
-    const t = setTimeout(() => inputRef.current?.focus(), 20)
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     return () => {
-      clearTimeout(t)
       document.body.style.overflow = previousOverflow
     }
   }, [open])
@@ -125,12 +133,6 @@ export function CommandPalette() {
   )
 
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      e.stopPropagation()
-      setOpen(false)
-      return
-    }
     if (e.key === 'ArrowDown') {
       e.preventDefault()
       setActiveIndex((i) => Math.min(i + 1, results.length - 1))
@@ -166,6 +168,7 @@ export function CommandPalette() {
       role="presentation"
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label="Command palette"

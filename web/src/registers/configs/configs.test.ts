@@ -51,6 +51,18 @@ describe('register registry', () => {
     expect(registerPermission({ slug: 'x', permission: ['a', 'b'] })).toEqual(['a', 'b'])
   })
 
+  it('declares its own period where the server does not scope by financial year', () => {
+    // PendingQuantityService::listOpen is deliberately not FY-scoped (an open
+    // challan crosses the year boundary and ITC-04 counts it) and
+    // inv_stock_balances has no fy_id column. Without this the scope line —
+    // the only record on the printed sheet of what was asked for — stamps the
+    // selected FY over rows drawn from every year.
+    expect(registerByPath('pending-quantities')?.scopePeriod).toBe('All financial years')
+    expect(registerByPath('stock-balances')?.scopePeriod).toBe(
+      'Live balances, all financial years',
+    )
+  })
+
   it('places every register in a group the hub renders', () => {
     const grouped = REGISTER_GROUP_ORDER.flatMap((g) => registersInGroup(g))
     expect(grouped.length).toBe(REGISTER_CONFIGS.length)

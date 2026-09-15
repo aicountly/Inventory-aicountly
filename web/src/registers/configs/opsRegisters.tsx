@@ -357,6 +357,8 @@ export const pendingRegister = defineRegister<PendingRow, PendingSummary>({
   group: 'compliance',
   icon: Clock,
   permission: P.documentsRead,
+  // listOpen() is deliberately not FY-scoped — see PendingQuantityService.
+  scopePeriod: 'All financial years',
   defaultSort: 'document_date',
   minWidth: 1300,
   rowNoun: 'line',

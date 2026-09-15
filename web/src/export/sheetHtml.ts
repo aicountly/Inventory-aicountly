@@ -319,12 +319,18 @@ function footBar(generatedAt: string | undefined, product: string): string {
  * SPA around it. Without this link the sheet asks for Nunito and Noto Sans and
  * silently falls through to whatever the OS offers, while the PDF — which
  * embeds both faces — comes out in the real ones. Same register, two products.
+ *
+ * A stylesheet blocks rendering until it answers, and this one is on a CDN the
+ * reader's network may not reach. `data-webfont` is how the print path finds it
+ * again: see WEBFONT_LINK_SELECTOR in documentExport.ts, which drops it once
+ * the wait is over so the sheet prints in the fallback stack rather than not
+ * at all.
  */
 function fontLinks(theme: ExportTheme): string {
   if (!theme.googleFontsUrl) return ''
   return `<link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="${escapeHtml(theme.googleFontsUrl)}" rel="stylesheet" />`
+<link href="${escapeHtml(theme.googleFontsUrl)}" rel="stylesheet" data-webfont="1" />`
 }
 
 function htmlDocument(title: string, theme: ExportTheme, css: string, body: string): string {

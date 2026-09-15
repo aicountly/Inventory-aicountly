@@ -31,7 +31,7 @@ Same CRUD shape for `/v1/item-groups`, `/v1/stock-categories`, `/v1/brands`, `/v
 `GET /v1/stock-balances` → item × warehouse × batch grid.
 
 ## Inventory documents
-Types (`GET /v1/document-types`): `OPENING_STOCK, STOCK_TRANSFER, STOCK_JOURNAL, PHYSICAL_ADJUSTMENT, WRITE_OFF, WRITE_IN, CONSUMPTION, MATERIAL_ISSUE, MATERIAL_RECEIPT, PRODUCTION, ASSEMBLY, DISASSEMBLY, JOB_WORK_OUT, JOB_WORK_IN, DELIVERY_CHALLAN, INWARD_CHALLAN, PACKING, REVALUATION, LANDED_COST, RESERVATION, RESERVATION_RELEASE, SALES_ISSUE, PURCHASE_RECEIPT, SALES_RETURN, PURCHASE_RETURN, JOURNAL_ADJUSTMENT`.
+Types (`GET /v1/document-types`): `OPENING_STOCK, STOCK_TRANSFER, STOCK_JOURNAL, PHYSICAL_ADJUSTMENT, WRITE_OFF, WRITE_IN, CONSUMPTION, MATERIAL_ISSUE, MATERIAL_RECEIPT, PRODUCTION, ASSEMBLY, DISASSEMBLY, JOB_WORK_OUT, JOB_WORK_IN, DELIVERY_CHALLAN, INWARD_CHALLAN, PACKING, REVALUATION, RESERVATION, RESERVATION_RELEASE, SALES_ISSUE, PURCHASE_RECEIPT, SALES_RETURN, PURCHASE_RETURN, JOURNAL_ADJUSTMENT`.
 Statuses: `DRAFT → PENDING_APPROVAL → APPROVED → POSTING → POSTED → PARTIALLY_FULFILLED → COMPLETED`, plus `CANCELLED`, `REVERSED`, `FAILED`. Posted movements are never deleted: a reversal writes compensating movements.
 
 ```
@@ -48,7 +48,7 @@ POST /v1/inventory-documents/{id}/revise    reverse + re-create + post in one tr
 GET  /v1/inventory-documents/{id}/print-snapshot
 ```
 Create payload: `document_type, document_date, document_no?, series_id?, party_ref?, party_name?, from_warehouse_id?, to_warehouse_id?, stock_effect? (on_invoice|from_challan|defer_inward|challan_only|settle_deferred|from_packing), source_app, source_document_type, source_document_id, source_document_uuid, source_document_no, source_document_date, narration, currency_code, exchange_rate, negative_override?, fy_range?, metadata{challan_settlements:[{source_document_id, item_id, qty, warehouse_id}], linked_source_document_id, job_work_settlements:[{pending_id, qty, settlement_type consumed|returned}], bom_id, production_qty, finished_rate, …}, lines:[{source_line_ref, item_id, warehouse_id, unit_id, qty, rate, amount, direction in|out (or dr_cr 1|2 for by-line types), batch_id, serials[], book_qty, physical_qty, tax_cat_id, hsn_sac, description, fc_rate, fc_amount, exchange_rate, valuation_rate?}]`.
-Response line fields added by posting: `base_qty, conversion_factor, valuation_rate (per base unit), valuation_amount, valuation_method_applied`. `accounting_effects`: `[{effect: COGS_ISSUE, line_id, item_id, amount, base_qty, valuation_rate}, {effect: STOCK_ADJUSTMENT|STOCK_WRITE_OFF|STOCK_WRITE_IN|OPENING_STOCK|STOCK_REVALUATION|LANDED_COST, amount}]` — Inventory never posts to a ledger; the caller maps effects to accounts.
+Response line fields added by posting: `base_qty, conversion_factor, valuation_rate (per base unit), valuation_amount, valuation_method_applied`. `accounting_effects`: `[{effect: COGS_ISSUE, line_id, item_id, amount, base_qty, valuation_rate}, {effect: STOCK_ADJUSTMENT|STOCK_WRITE_OFF|STOCK_WRITE_IN|OPENING_STOCK|STOCK_REVALUATION, amount}]` — Inventory never posts to a ledger; the caller maps effects to accounts.
 
 ## Pending quantities, packing, reservations
 `GET /v1/pending-quantities?kind=challan|deferred_purchase|job_work&direction&party_ref&status` (open/partial rows with `document_id`, `item_id`, `qty_original`, `qty_settled`).

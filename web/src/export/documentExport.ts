@@ -820,6 +820,19 @@ export async function exportDocumentPdf(payload: DocumentExportPayload): Promise
 /* ------------------------------------------------------------------ print */
 
 /**
+ * How long the sheet waits for its webfont before printing without it.
+ *
+ * The sheet links Nunito and Noto Sans from a CDN (sheetHtml.ts fontLinks), and
+ * a reader behind a captive portal or an office firewall may reach neither.
+ * Waiting on `document.fonts.ready` for a stylesheet that never answers leaves
+ * the print dialog un-opened with no error and nothing to click — the font is
+ * worth a short wait and nothing more.
+ */
+const WEBFONT_WAIT_MS = 1200
+
+const WEBFONT_LINK_SELECTOR = 'link[data-webfont]'
+
+/**
  * Print a prepared document through a hidden iframe.
  *
  * Returns false when the iframe could not be created, so the caller can say so
@@ -845,7 +858,10 @@ export function printHtmlDocument(html: string): boolean {
   doc.write(html)
   doc.close()
 
+  let printed = false
   const run = () => {
+    if (printed) return
+    printed = true
     try {
       win.focus()
       win.print()
@@ -856,9 +872,21 @@ export function printHtmlDocument(html: string): boolean {
     }
   }
 
+  // A stylesheet that has not answered still blocks the render, so the link
+  // goes with the wait: an unreachable CDN then costs the reader the typeface,
+  // not the document.
+  const giveUpOnFonts = () => {
+    doc.querySelectorAll(WEBFONT_LINK_SELECTOR).forEach((link) => link.remove())
+    run()
+  }
+
   const fonts = (doc as Document & { fonts?: { ready: Promise<unknown> } }).fonts
-  if (fonts?.ready) void fonts.ready.then(run, run)
-  else window.setTimeout(run, 120)
+  if (fonts?.ready) {
+    window.setTimeout(giveUpOnFonts, WEBFONT_WAIT_MS)
+    void fonts.ready.then(run, run)
+  } else {
+    window.setTimeout(run, 120)
+  }
   return true
 }
 

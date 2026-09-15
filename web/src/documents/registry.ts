@@ -107,8 +107,15 @@ export const NATIVE_DOCUMENT_TYPES: DocumentTypeSpec[] = [
   spec({ code: 'PACKING', label: 'Packing List', description: 'Pack goods for a consignee; packed stock is held until sold or unpacked.', lineMode: 'status_only', formKind: 'packing', valuation: false, cogs: false, party: 'consignee' }),
 ]
 
-/** Types with their own screens elsewhere (reservations) or created only by other products. */
-export const HIDDEN_FROM_NEW_MENU = new Set(['RESERVATION', 'RESERVATION_RELEASE'])
+/**
+ * Declared so an existing document and every register that lists one keep their label, but not
+ * available to create: the server refuses one (Config\DocumentTypeRegistry::UNIMPLEMENTED),
+ * because nothing happens when the type posts. Mirror of the server list, which is the truth.
+ */
+export const UNAVAILABLE_TYPES = new Set(['LANDED_COST'])
+
+/** Types with their own screens elsewhere (reservations), unavailable, or created only by other products. */
+export const HIDDEN_FROM_NEW_MENU = new Set(['RESERVATION', 'RESERVATION_RELEASE', ...UNAVAILABLE_TYPES])
 
 const BY_CODE = new Map(NATIVE_DOCUMENT_TYPES.map((s) => [s.code, s]))
 

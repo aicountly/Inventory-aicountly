@@ -102,8 +102,8 @@ export interface KpiInput {
 export function buildKpiCards(input: KpiInput): KpiCardSpec[] {
   const { asOf, nearExpiryDays, core, stock, expiry, replenishment } = input
   const s = stock?.summary ?? null
+  const negativeRows = core?.stock.negative_stock_rows ?? null
   const negativeItems = core?.stock.negative_stock_items ?? null
-  const negativeRows = core?.stock.negative_stock_warehouse_rows ?? null
   const pendingApproval = core?.documents.pending_approval ?? null
   const failed = core?.documents.failed ?? null
   const reorder = replenishment?.summary.triggered_total ?? null
@@ -157,13 +157,19 @@ export function buildKpiCards(input: KpiInput): KpiCardSpec[] {
     {
       key: 'negative_stock',
       label: 'Negative stock',
-      value: negativeItems === null ? null : formatCount(negativeItems),
-      numeric: negativeItems,
+      // The rows, because the register this opens lists rows: an item at -5 in
+      // one warehouse and +12 in another nets to no item at all, and a card
+      // reading 0 in neutral grey over a register with a red line in it is the
+      // one figure here a stock manager would act on and cannot see.
+      value: negativeRows === null ? null : formatCount(negativeRows),
+      numeric: negativeRows,
       icon: 'negative',
-      tone: (negativeItems ?? 0) > 0 ? 'danger' : 'neutral',
-      hint: negativeRows ? `${formatCount(negativeRows)} stock rows below zero` : 'No item is below zero',
+      tone: (negativeRows ?? 0) > 0 ? 'danger' : 'neutral',
+      hint: negativeRows
+        ? `${formatCount(negativeItems ?? 0)} items net below zero once warehouses offset`
+        : 'No balance is below zero',
       to: drill.negativeStock(),
-      attention: (negativeItems ?? 0) > 0,
+      attention: (negativeRows ?? 0) > 0,
     },
     {
       key: 'expiring',

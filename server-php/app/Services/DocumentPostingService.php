@@ -66,6 +66,11 @@ class DocumentPostingService
         if ($spec === null) {
             throw InventoryException::validation('Unknown document type ' . $doc['document_type']);
         }
+        // A draft of an unimplemented type may still exist from before the type was withdrawn.
+        // POSTED would say its allocation ran; nothing here runs one, so it stays where it is.
+        if (!DocumentTypeRegistry::isImplemented((string) $doc['document_type'])) {
+            throw InventoryException::invalidState($spec['label'] . ' cannot be posted: the type is declared but nothing happens when it posts, so POSTED would record work it never did', ['document_type' => $doc['document_type']]);
+        }
         $settings = $this->settings->get($cmpId);
         if (!empty($settings['approval_required']) && $doc['status'] !== 'APPROVED' && empty($options['skip_approval'])) {
             throw InventoryException::invalidState('Document must be approved before posting', ['status' => $doc['status']]);
@@ -272,8 +277,9 @@ class DocumentPostingService
         if ($type === 'RESERVATION' || $type === 'RESERVATION_RELEASE') {
             $this->applyReservationDocument($cmpId, $doc, $type === 'RESERVATION' ? StockStatusService::MOV_RESERVE : StockStatusService::MOV_RELEASE);
         }
+        $revaluation = null;
         if ($type === 'REVALUATION') {
-            $this->applyRevaluation($db, $cmpId, $doc, $actor);
+            $revaluation = $this->applyRevaluation($db, $cmpId, $doc, $actor);
         }
 
         if ($movesStock) {
@@ -361,6 +367,9 @@ class DocumentPostingService
         if ($type === 'OPENING_STOCK' && $valuationTotal > 0) {
             $effects[] = ['effect' => 'OPENING_STOCK', 'amount' => round($valuationTotal, 4)];
         }
+        if ($revaluation !== null) {
+            $effects[] = $revaluation;
+        }
 
         return ['effects' => $effects, 'valuation_total' => round($valuationTotal, 4)];
     }
@@ -392,6 +401,25 @@ class DocumentPostingService
         }
 
         return DocumentTypeRegistry::valuesMovedStock($type) && self::movesStockNow($type, $spec ?? [], $stockEffect);
+    }
+
+    /**
+     * Does a document of this type and stock_effect carry valuation on the LINES themselves?
+     *
+     * Posting writes valuation_rate / valuation_amount only for the lines whose stock it moves, so
+     * a type that values its lines but defers the movement — a defer_inward purchase, a
+     * from_physical_challan sale — carries none until the document that moves the goods settles
+     * it. A revaluation is the one type that records its delta on its lines without moving any
+     * stock. Anyone reading a line's valuation as a document's effect on the stock value must ask
+     * this, not valuesLines(): valuesLines() answers what posting and reversal should DO.
+     */
+    public static function valuesLinesNow(string $type, ?array $spec, string $stockEffect): bool
+    {
+        if (!self::valuesLines($type, $spec, $stockEffect)) {
+            return false;
+        }
+
+        return $type === 'REVALUATION' || self::movesStockNow($type, $spec ?? [], $stockEffect);
     }
 
     /**
@@ -716,16 +744,25 @@ class DocumentPostingService
     /**
      * Revaluation: each line carries valuation_rate = new unit cost; layers still holding stock are
      * re-priced, WAC average replaced. The value delta is reported as STOCK_REVALUATION effect.
+     *
+     * The effect is RETURNED, not written here. post() persists accounting_effects_json and
+     * publishes the outbox event from the array applyPosting() returns, in this same transaction,
+     * so anything written straight to the column is overwritten before Books can ever read it.
+     *
+     * @return array<string, mixed>|null
      */
-    private function applyRevaluation($db, int $cmpId, array $doc, ?string $actor): void
+    private function applyRevaluation($db, int $cmpId, array $doc, ?string $actor): ?array
     {
-        $delta = 0.0;
+        $total = 0.0;
         foreach ($doc['lines'] as $line) {
             $itemId = (int) $line['item_id'];
             $newCost = (float) ($line['valuation_rate'] ?? 0);
             if ($newCost <= 0) {
                 throw InventoryException::validation('Revaluation line for item #' . $itemId . ' needs valuation_rate');
             }
+            // Each line reports the delta IT caused: a line stamped with the running total of the
+            // lines before it makes the document's own lines add up to more than it revalued.
+            $delta = 0.0;
             $wh = $this->valuation->scopeWarehouse($cmpId, $line['warehouse_id'] !== null ? (int) $line['warehouse_id'] : null);
             $b = $db->table('inv_cost_layers')->where('cmp_id', $cmpId)->where('item_id', $itemId)->where('qty_remaining >', 0);
             $wh === null ? $b->where('warehouse_id', null) : $b->where('warehouse_id', $wh);
@@ -739,10 +776,10 @@ class DocumentPostingService
                 $db->table('inv_wac_state')->where('cmp_id', $cmpId)->where('item_id', $itemId)->where('warehouse_id', $wh ?? 0)->update(['average_cost' => $newCost, 'updated_at' => date('Y-m-d H:i:s')]);
             }
             $db->table('inv_document_lines')->where('line_id', (int) $line['line_id'])->update(['valuation_amount' => round($delta, 4)]);
+            $total += $delta;
         }
-        $effects = json_decode((string) ($doc['accounting_effects_json'] ?? '[]'), true) ?: [];
-        $effects[] = ['effect' => 'STOCK_REVALUATION', 'amount' => round($delta, 4)];
-        $db->table('inv_documents')->where('document_id', (int) $doc['document_id'])->update(['accounting_effects_json' => json_encode($effects)]);
+
+        return abs($total) > 0.00001 ? ['effect' => 'STOCK_REVALUATION', 'amount' => round($total, 4)] : null;
     }
 
     private function applySerials($db, int $cmpId, array $doc, array $line, string $direction, ?int $wh): void

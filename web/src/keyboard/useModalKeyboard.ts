@@ -1,8 +1,22 @@
 import { useEffect, useRef } from 'react'
 import type { RefObject } from 'react'
 
-const FOCUSABLE =
-  'a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),[tabindex]:not([tabindex="-1"])'
+/**
+ * Tab stops, and only those: `tabindex="-1"` takes an element out of the tab
+ * order, so a trap that counted one as the last stop would let the real Tab
+ * walk straight past it and out of the dialog. A listbox option is the case —
+ * it is reachable, but through its combobox, not through Tab.
+ */
+const FOCUSABLE = [
+  'a[href]',
+  'button:not([disabled])',
+  'textarea:not([disabled])',
+  'input:not([disabled]):not([type="hidden"])',
+  'select:not([disabled])',
+]
+  .map((selector) => `${selector}:not([tabindex="-1"])`)
+  .concat('[tabindex]:not([tabindex="-1"])')
+  .join(',')
 
 function getFocusables(container: HTMLElement): HTMLElement[] {
   return [...container.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(

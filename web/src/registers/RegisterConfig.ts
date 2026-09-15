@@ -79,6 +79,19 @@ export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
   /** Permission to read this register. Defaults to `reports.<slug>.read`. */
   permission?: PermissionKey
 
+  /**
+   * What the scope line says about the period, when the selected financial
+   * year is not it.
+   *
+   * The scope line is stamped on the printed sheet, where it is the only
+   * record of what was asked for. Most registers are read inside the selected
+   * FY and say so. A few are not: the pending-quantity register is deliberately
+   * unscoped by year (goods sent to a job worker in February are still out in
+   * April, and ITC-04 counts them), and `inv_stock_balances` has no fy_id at
+   * all. "FY 2026-27" over those rows asserts a filter the query never applied.
+   */
+  scopePeriod?: string
+
   /** Row → destination URL. Enables click / Enter drill-through. */
   drillTo?: (row: T) => string | null
 

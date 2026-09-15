@@ -42,6 +42,10 @@ class SettingsController extends BaseController
         }
         $out = [];
         foreach (DocumentTypeRegistry::TYPES as $code => $spec) {
+            // The catalogue is what a caller may work with; an unimplemented type is not offered.
+            if (!DocumentTypeRegistry::isImplemented($code)) {
+                continue;
+            }
             $out[] = ['code' => $code, 'label' => $spec['label'], 'line_mode' => $spec['line_mode'], 'valuation' => $spec['valuation'], 'cogs' => $spec['cogs'], 'native' => $spec['native'], 'legacy_vch_type' => $spec['legacy_vch_type']];
         }
 

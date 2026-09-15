@@ -207,8 +207,8 @@ describe('the ops widgets render the whole payload', () => {
       posted_by_type: { SALES_ISSUE: 20, PURCHASE_RECEIPT: 10 },
     },
     stock: {
+      negative_stock_rows: 3,
       negative_stock_items: 2,
-      negative_stock_warehouse_rows: 3,
       near_expiry_batches: 7,
       expired_batches: 1,
       near_expiry_days: 30,
