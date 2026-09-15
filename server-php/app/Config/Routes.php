@@ -49,6 +49,13 @@ $routes->group('', ['namespace' => 'App\Controllers\Api', 'filter' => 'cors'], s
         $routes->delete('settings/period-locks/(:num)', 'SettingsController::releasePeriodLock/$1');
         $routes->get('document-types', 'SettingsController::documentTypes');
         $routes->get('dashboard', 'DashboardController::index');
+        // The four dashboards the overview counters do not answer. Registered
+        // BEFORE the bare 'dashboard' segment would ever be matched as an id,
+        // and each one authorises on dashboard.read like the overview.
+        $routes->get('dashboard/operations', 'DashboardController::operations');
+        $routes->get('dashboard/valuation-bridge', 'DashboardController::valuationBridge');
+        $routes->get('dashboard/demand', 'DashboardController::demand');
+        $routes->get('dashboard/controls', 'DashboardController::controls');
 
         // Masters
         foreach ([

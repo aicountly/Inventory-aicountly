@@ -72,6 +72,19 @@ export function useAccess(): AccessContextValue {
   return ctx
 }
 
+/**
+ * Permissions when they happen to be available, `null` when they are not.
+ *
+ * For the handful of things that sit ABOVE AccessProvider in the tree and still
+ * want to respect permissions — KeyboardProvider is the one — where throwing
+ * would take the app down and moving the provider would change mount order for
+ * everything under it. A caller that gets `null` must behave as though nothing
+ * is permitted yet, not as though everything is.
+ */
+export function useAccessOptional(): AccessContextValue | null {
+  return useContext(AccessContext)
+}
+
 export function useCan(key: PermissionKey): boolean {
   return useAccess().can(key)
 }

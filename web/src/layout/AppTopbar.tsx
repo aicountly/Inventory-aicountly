@@ -92,7 +92,7 @@ export function AppTopbar({ onToggleMobileNav }: AppTopbarProps) {
   const { isDark, setMode, setSettingsOpen } = useTheme()
 
   return (
-    <header className="aic app-topbar sticky top-0 z-20 flex h-12 shrink-0 items-center gap-2 border-b border-gray-200 bg-white px-2 md:px-3 print:hidden">
+    <header className="aic app-topbar sticky top-0 z-20 flex h-12 min-w-0 shrink-0 items-center gap-2 overflow-hidden border-b border-gray-200 bg-white px-2 md:px-3 print:hidden">
       <button
         type="button"
         onClick={onToggleMobileNav}
@@ -102,8 +102,15 @@ export function AppTopbar({ onToggleMobileNav }: AppTopbarProps) {
         <Menu className="h-4 w-4" />
       </button>
 
-      <AppLauncher />
-      <CompanySwitcher />
+      {/* Both may shrink: without `min-w-0` a flex child refuses to go below its
+          content width, and the row's overflow lands on the cluster at the far
+          right — which then pushes the whole page sideways on a phone. */}
+      <div className="shrink-0">
+        <AppLauncher />
+      </div>
+      <div className="min-w-0 shrink">
+        <CompanySwitcher />
+      </div>
 
       <button
         type="button"
@@ -119,7 +126,7 @@ export function AppTopbar({ onToggleMobileNav }: AppTopbarProps) {
       {/* The row's only spacer. A second auto margin earlier in the row would
           split the free space between the two instead of pushing this cluster
           to the edge. */}
-      <div className="ml-auto flex items-center gap-1">
+      <div className="ml-auto flex shrink-0 items-center gap-1">
         <Tooltip label={isDark ? 'Switch to light' : 'Switch to dark'} placement="bottom">
           <button
             type="button"
