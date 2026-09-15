@@ -55,6 +55,24 @@ function spacers(): HTMLElement[] {
 }
 
 describe('AppTopbar layout', () => {
+  // Regression guard: this header hosts three absolutely-positioned popovers
+  // (CompanySwitcher's two, UserMenu's one) that each extend below the
+  // header's own 48px box. `overflow: hidden` (or `-clip`/`-y-hidden`) on the
+  // header clips every one of them to that box — it does not matter that
+  // they use `position: absolute`, clipping applies to descendants
+  // regardless of positioning scheme. That shipped once: the header grew an
+  // `overflow-hidden` to stop its content pushing the whole page sideways on
+  // a phone, and every dropdown in it silently lost everything below its
+  // first few pixels. The real fix for that bug is `min-w-0` + `shrink` on
+  // the row's children (below), which stops the row from ever exceeding the
+  // viewport's width — so nothing needs clipping at all.
+  it('never clips its own popovers', () => {
+    renderTopbar()
+    const header = document.querySelector('header.app-topbar') as HTMLElement
+    expect(header, 'no topbar rendered').toBeTruthy()
+    expect(header.className).not.toMatch(/(^|\s)overflow-(hidden|clip|y-hidden|y-clip)(\s|$)/)
+  })
+
   it('renders the global controls', () => {
     renderTopbar()
     expect(screen.getByRole('button', { name: 'Search anything' })).toBeTruthy()
