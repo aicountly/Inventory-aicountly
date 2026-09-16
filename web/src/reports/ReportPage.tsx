@@ -665,6 +665,10 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
                 limit={state.limit}
                 onPage={params.setPage}
                 onLimit={params.setLimit}
+                // A register is read by jumping — "the negative rows are near
+                // the end" — so it takes the numbered pager the audit log added
+                // rather than a counter and four arrows.
+                numbered
               />
             }
           />

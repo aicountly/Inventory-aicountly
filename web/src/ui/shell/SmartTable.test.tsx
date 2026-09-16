@@ -193,6 +193,40 @@ describe('SmartTable', () => {
       expect(onRowActivate).toHaveBeenCalledWith(rows[2], 2)
     })
 
+    /**
+     * A row's kebab (ui/MenuButton) portals its menu to document.body and moves
+     * between its own items with the arrow keys. The table listens on `window`,
+     * so without a guard it answered the same press and dragged its cursor to
+     * another row underneath the open menu — and Enter then opened whichever
+     * row it had landed on rather than the menu item the reader was looking at.
+     */
+    it('leaves the arrow keys to a menu open over the table', () => {
+      const onRowActivate = vi.fn()
+      renderTable(
+        <SmartTable columns={columns} rows={rows} rowKey="id" onRowActivate={onRowActivate} />,
+      )
+      // A portalled menu, focused, exactly as MenuButton renders one.
+      const menu = document.createElement('div')
+      menu.setAttribute('role', 'menu')
+      const item = document.createElement('button')
+      item.setAttribute('role', 'menuitem')
+      menu.append(item)
+      document.body.append(menu)
+      item.focus()
+
+      fireEvent.keyDown(window, { key: 'ArrowDown' })
+      fireEvent.keyDown(window, { key: 'ArrowDown' })
+      // The cursor never moved, so Enter is still about the row it was on.
+      fireEvent.keyDown(window, { key: 'Enter' })
+      expect(onRowActivate).not.toHaveBeenCalled()
+
+      item.blur()
+      menu.remove()
+      // And the table has its keys back the moment the menu closes.
+      fireEvent.keyDown(window, { key: 'Enter' })
+      expect(onRowActivate).toHaveBeenCalledWith(rows[0], 0)
+    })
+
     it('does not open a row that is not activatable', () => {
       const onRowActivate = vi.fn()
       renderTable(

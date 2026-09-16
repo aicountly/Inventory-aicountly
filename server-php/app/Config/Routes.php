@@ -169,6 +169,7 @@ $routes->group('', ['namespace' => 'App\Controllers\Api', 'filter' => 'cors'], s
 
         // Audit
         $routes->get('audit-log', 'AuditController::index');
+        $routes->get('audit-log/summary', 'AuditController::summary');
         $routes->get('audit-log/entity/(:segment)/(:num)', 'AuditController::entity/$1/$2');
     });
 });
