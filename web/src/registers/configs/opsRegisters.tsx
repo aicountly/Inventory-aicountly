@@ -39,7 +39,7 @@ import { ValuationAnalytics } from '../valuation/ValuationAnalytics'
 import { ValuationHeaderActions } from '../valuation/ValuationHeaderActions'
 import { ValuationRowActions } from '../valuation/ValuationRowActions'
 import { ValuationSelectionActions } from '../valuation/ValuationSelectionActions'
-import { ValuationTableToolbar } from '../valuation/ValuationTableToolbar'
+import { ValuationAddItem } from '../valuation/ValuationAddItem'
 import { WarehouseScopeHint, WarehouseScopeValue } from '../valuation/WarehouseScopeValue'
 import { pageHint, summaryOverRows, withPageSummary } from './pageSummary'
 import type { PageSummary } from './pageSummary'
@@ -143,6 +143,8 @@ export const valuationRegister = defineRegister<ValuationSnapshotRow, ValuationS
     description: 'Value stock on hand at a date, under a costing method',
   },
   tableTitle: 'Item-wise valuation',
+  tableHint: 'Closing quantity, unit cost and value for each item with stock on hand',
+  tableActions: <ValuationAddItem />,
   defaultLimit: 50,
   headerActions: <ValuationHeaderActions />,
   // The snapshot endpoint already answers a real summary; it just does not
@@ -292,8 +294,6 @@ export const valuationRegister = defineRegister<ValuationSnapshotRow, ValuationS
       tone: 'warning',
     },
   ],
-  // The table's own heading, in the slot the engine already renders above it.
-  extra: (s) => <ValuationTableToolbar summary={s} />,
   analytics: ({ summary, values, loading }) => (
     <ValuationAnalytics
       summary={summary}

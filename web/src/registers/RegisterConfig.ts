@@ -299,6 +299,15 @@ export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
   tableTitle?: string
   /** One line under that heading, saying what the rows on screen are. */
   tableHint?: string
+  /**
+   * A register's own control in the table card's header, beside Customize
+   * columns — "Add item" on the valuation register.
+   *
+   * Here rather than in `extra` because `extra` renders ABOVE the card: a
+   * register that put its heading and button there would draw a second heading
+   * over the one the card already has.
+   */
+  tableActions?: ReactNode
 
   /**
    * Groupings the reader can switch between, with per-group subtotals. The
