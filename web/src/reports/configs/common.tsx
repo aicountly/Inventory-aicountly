@@ -100,8 +100,14 @@ export function intColumn<T>(key: keyof T & string, header: string, sortable = t
   return { key, header, align: 'right', sortKey: sortable ? key : undefined, format: 'int' }
 }
 
+/**
+ * `cellClassName` is not decoration: a date is one token, and a narrow column
+ * in a squeezed table breaks "28 Sept 2026" across three lines and takes the
+ * whole row's height with it. The table already scrolls sideways when the
+ * columns want more room than the viewport has.
+ */
 export function dateColumn<T>(key: keyof T & string, header: string, sortable = true): ReportColumn<T> {
-  return { key, header, sortKey: sortable ? key : undefined, format: 'date', render: (r) => formatDate(r[key]) }
+  return { key, header, sortKey: sortable ? key : undefined, format: 'date', cellClassName: 'whitespace-nowrap', render: (r) => formatDate(r[key]) }
 }
 
 export function dateTimeColumn<T>(key: keyof T & string, header: string, sortable = true): ReportColumn<T> {
@@ -110,6 +116,7 @@ export function dateTimeColumn<T>(key: keyof T & string, header: string, sortabl
     header,
     sortKey: sortable ? key : undefined,
     format: 'datetime',
+    cellClassName: 'whitespace-nowrap',
     render: (r) => formatDateTime(r[key]),
   }
 }

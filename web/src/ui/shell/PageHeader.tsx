@@ -11,6 +11,12 @@ export interface PageHeaderProps {
   badge?: ReactNode
   /** A line of context under the title — scope label, counts, timestamps. */
   meta?: ReactNode
+  /**
+   * Decoration between the title and the actions, shown only where there is
+   * genuinely room for it (≥1536px). Anything a reader needs goes in `meta` or
+   * `description`: this slot disappears on every laptop screen.
+   */
+  aside?: ReactNode
   actions?: ReactNode
   backTo?: string
   backLabel?: string
@@ -23,6 +29,7 @@ export function PageHeader({
   icon: Icon,
   badge,
   meta,
+  aside,
   actions,
   backTo,
   backLabel = 'Back',
@@ -32,11 +39,15 @@ export function PageHeader({
     <div
       className={cx(
         AIC,
-        'flex flex-col gap-2 md:flex-row md:items-start md:justify-between',
+        // `flex-wrap`: the actions drop to their own line rather than squeezing
+        // the title into an ellipsis. `md:` is 768px, which is exactly a
+        // portrait tablet, and five header buttons beside a heading there left
+        // the heading about 190px — "Inventory d…" over four lines of subtitle.
+        'flex flex-col gap-2 md:flex-row md:flex-wrap md:items-start md:justify-between',
         className,
       )}
     >
-      <div className="min-w-0 flex items-start gap-3">
+      <div className="min-w-0 flex-1 basis-72 flex items-start gap-3">
         {backTo ? (
           <Link
             to={backTo}
@@ -61,6 +72,11 @@ export function PageHeader({
           {meta ? <div className="mt-1.5">{meta}</div> : null}
         </div>
       </div>
+      {aside ? (
+        <div className="hidden 2xl:flex items-center min-w-0 shrink px-4 print:hidden" aria-hidden>
+          {aside}
+        </div>
+      ) : null}
       {actions ? (
         <div className="flex items-center flex-wrap gap-2 shrink-0 print:hidden">{actions}</div>
       ) : null}

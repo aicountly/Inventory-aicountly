@@ -189,3 +189,15 @@
     display: none;
   }
 }
+
+
+/*
+ * SearchBox draws its own clear button. WebKit adds a second one inside
+ * `input[type=search]`, so every search field in the app shows two × glyphs
+ * side by side — and the native one is not keyboard reachable or labelled.
+ */
+.aic input[type='search']::-webkit-search-cancel-button,
+.aic input[type='search']::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+}

@@ -16,10 +16,18 @@ export interface ReportListShellProps extends ReportCompactShellProps {
    * makes you guess.
    */
   scope?: ReactNode
+  /**
+   * The filters node already IS a card — render it as given rather than wrapping
+   * it in the shared toolbar card. The filter panel owns its own heading, chips
+   * and grid, and a card inside a card draws two borders around one control set.
+   */
+  bareFilters?: boolean
   /** Extra pinned row between the filters and the summary (view switches…). */
   toolbar?: ReactNode
   /** KPI cards above the table. */
   summary?: ReactNode
+  /** Grid the KPI cards are laid out in. Defaults to the six-up strip. */
+  summaryClassName?: string
 }
 
 /**
@@ -29,14 +37,18 @@ export interface ReportListShellProps extends ReportCompactShellProps {
 export function ReportListShell({
   filters,
   scope,
+  bareFilters = false,
   toolbar,
   summary,
+  summaryClassName,
   children,
   ...shell
 }: ReportListShellProps) {
   return (
     <ReportCompactShell {...shell}>
-      {filters || scope ? (
+      {bareFilters ? (
+        filters ?? null
+      ) : filters || scope ? (
         <div className={TOOLBAR_CARD}>
           {scope ? (
             <span className="text-xs font-semibold text-gray-500 whitespace-nowrap">{scope}</span>
@@ -46,7 +58,7 @@ export function ReportListShell({
         </div>
       ) : null}
       {toolbar ? <div className="shrink-0 print:hidden">{toolbar}</div> : null}
-      {summary ? <div className={SUMMARY_CARD_GRID}>{summary}</div> : null}
+      {summary ? <div className={summaryClassName ?? SUMMARY_CARD_GRID}>{summary}</div> : null}
       <div className="flex flex-col flex-1 min-h-0">{children}</div>
     </ReportCompactShell>
   )
