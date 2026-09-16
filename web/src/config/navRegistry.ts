@@ -16,17 +16,20 @@ import {
   Layers,
   LayoutDashboard,
   ListTree,
+  MapPin,
   Package,
   PackageCheck,
-  PackageSearch,
   Repeat,
   Ruler,
+  ScanBarcode,
   ScrollText,
   ShieldCheck,
   SlidersHorizontal,
+  Star,
   Tag,
   Timer,
   Warehouse,
+  Workflow,
   Boxes as BoxesIcon,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
@@ -122,7 +125,7 @@ export const MASTER_NAV: readonly MasterNavItem[] = [
     path: '/masters/stock-categories',
     permissionSlug: 'stock_categories',
     description: 'Cross-cutting classification independent of the group tree.',
-    icon: Layers,
+    icon: Tag,
     permissions: [P.masters('stock_categories', 'read')],
   },
   {
@@ -130,7 +133,7 @@ export const MASTER_NAV: readonly MasterNavItem[] = [
     path: '/masters/brands',
     permissionSlug: 'brands',
     description: 'Manufacturer or label an item is sold under.',
-    icon: Tag,
+    icon: Star,
     permissions: [P.masters('brands', 'read')],
   },
   {
@@ -162,7 +165,7 @@ export const MASTER_NAV: readonly MasterNavItem[] = [
     path: '/masters/locations',
     permissionSlug: 'locations',
     description: 'Zones, racks, shelves and bins inside a warehouse.',
-    icon: PackageSearch,
+    icon: MapPin,
     permissions: [P.masters('locations', 'read')],
   },
   {
@@ -170,7 +173,7 @@ export const MASTER_NAV: readonly MasterNavItem[] = [
     path: '/masters/bill-of-materials',
     permissionSlug: 'bill_of_materials',
     description: 'Components, by-products and scrap for a finished item.',
-    icon: ClipboardList,
+    icon: Workflow,
     permissions: [P.masters('bill_of_materials', 'read')],
   },
   {
@@ -178,7 +181,7 @@ export const MASTER_NAV: readonly MasterNavItem[] = [
     path: '/masters/batches',
     permissionSlug: 'batches',
     description: 'Lots with manufacturing and expiry dates.',
-    icon: FlaskConical,
+    icon: Barcode,
     permissions: [P.masters('batches', 'read')],
   },
   {
@@ -186,7 +189,7 @@ export const MASTER_NAV: readonly MasterNavItem[] = [
     path: '/masters/serials',
     permissionSlug: 'serials',
     description: 'Individual serial numbers, registered singly or in bulk.',
-    icon: Barcode,
+    icon: ScanBarcode,
     permissions: [P.masters('serials', 'read')],
   },
 ]

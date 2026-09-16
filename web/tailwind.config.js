@@ -26,6 +26,14 @@ export default {
     extend: {
       screens: {
         tall: { raw: '(min-height: 800px)' },
+        /*
+         * Two widths above Tailwind's own scale, for screens that put a
+         * contextual column beside their content (Masters). `2xl` is 1536px,
+         * which is already past the point where a 288px rail fits beside a
+         * card grid, so the split had nowhere to hang without these.
+         */
+        wide: '1400px',
+        ultra: '1600px',
       },
       fontFamily: {
         nunito: ['Nunito', 'sans-serif'],

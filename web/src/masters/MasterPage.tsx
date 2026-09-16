@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAccess } from '../access/AccessContext'
 import { useCompany } from '../company/CompanyContext'
 import { ConfirmDialog } from '../components/ConfirmDialog'
@@ -130,6 +130,37 @@ export function MasterPage<T>({ config, extraActions, children, breadcrumbs }: M
   const closeForm = useCallback(() => {
     if (!saving) setEditing(null)
   }, [saving])
+
+  /*
+   * `?new=1` opens the create form on arrival.
+   *
+   * The masters landing page's Quick Create menu needs a link it can put in an
+   * anchor, and most masters create through this modal rather than a routed
+   * form — without this the menu could only drop the user on a list and leave
+   * them to find the button. The flag is consumed on arrival: it is stripped
+   * from the URL before the form opens, so a reload, a Back, or simply closing
+   * the form does not open it again.
+   *
+   * It waits for access to load. `can()` answers false while permissions are
+   * in flight, and acting on that would silently swallow the request for a
+   * user who is in fact allowed to create.
+   */
+  const [searchParams, setSearchParams] = useSearchParams()
+  const createRequested = searchParams.get('new') === '1'
+  const openCreateRef = useRef(openCreate)
+  openCreateRef.current = openCreate
+  useEffect(() => {
+    if (!createRequested || accessLoading) return
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('new')
+        return next
+      },
+      { replace: true },
+    )
+    if (canWrite) openCreateRef.current()
+  }, [createRequested, accessLoading, canWrite, setSearchParams])
 
   const afterChange = () => {
     invalidateFormOptions()
