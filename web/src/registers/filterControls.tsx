@@ -306,6 +306,10 @@ export function FilterControl(props: FilterControlProps) {
             value={value}
             onChange={(next) => onChange(f.key, next)}
             placeholder={f.placeholder ?? f.label}
+            // The panel's grid is a row of `md` controls; a search box a
+            // notch shorter than the select beside it is the kind of thing
+            // nobody names but everybody sees.
+            size={full ? 'md' : 'sm'}
             className={full ? 'w-full' : 'w-[12rem]'}
           />
         </FilterField>
