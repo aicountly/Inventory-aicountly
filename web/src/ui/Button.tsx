@@ -1,6 +1,6 @@
 import { Loader2 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import type { ButtonHTMLAttributes, ReactNode } from 'react'
+import type { ButtonHTMLAttributes, ReactNode, Ref } from 'react'
 import { AIC, cx } from './cx'
 
 const VARIANTS = {
@@ -30,6 +30,13 @@ export type ButtonVariant = keyof typeof VARIANTS
 export type ButtonSize = keyof typeof SIZES
 
 export interface ButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children'> {
+  /**
+   * Declared, not inherited: React 19 passes `ref` to a function component as
+   * an ordinary prop, but `ButtonHTMLAttributes` does not name it, so without
+   * this a caller that needs the element (to anchor a menu to it, to focus it)
+   * cannot ask for it. It rides along in `...rest` onto the real `<button>`.
+   */
+  ref?: Ref<HTMLButtonElement>
   variant?: ButtonVariant
   size?: ButtonSize
   icon?: LucideIcon
