@@ -26,6 +26,17 @@ export default {
     extend: {
       screens: {
         tall: { raw: '(min-height: 800px)' },
+        /*
+         * The same idea as `tall`, raised for the `page` register layout.
+         *
+         * Pinning the header, the filters and the KPI cards and giving the
+         * table what is left only pays while "what is left" is a table. The
+         * panel layout's header stack is a good 200px taller than the compact
+         * one, and narrower than 1280px the filter grid folds to two columns
+         * and the KPI cards to two rows, which costs another 200px again. Under
+         * either, scrolling the page is plainly the better screen.
+         */
+        taller: { raw: '(min-height: 900px) and (min-width: 1280px)' },
       },
       fontFamily: {
         nunito: ['Nunito', 'sans-serif'],

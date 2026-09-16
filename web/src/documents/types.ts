@@ -28,6 +28,22 @@ export const DOCUMENT_STATUSES: DocumentStatus[] = [
   'FAILED',
 ]
 
+/**
+ * `GET /v1/inventory-documents?summary=1` — figures for EVERY matching document,
+ * not the page served (DocumentsController::summarise).
+ *
+ * `valuation_total` is SUM(inv_document_lines.valuation_amount): what the stock
+ * cost. It is not the commercial amount agreed with the party, which Books owns.
+ * `warehouses_impacted` counts the distinct warehouses the matching documents'
+ * lines post to or from.
+ */
+export interface DocumentListSummary {
+  documents: number
+  line_count: number
+  valuation_total: number
+  warehouses_impacted: number
+}
+
 export type LineDirection = 'in' | 'out' | 'none'
 
 export interface LineSerial {

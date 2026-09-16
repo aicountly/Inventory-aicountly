@@ -450,6 +450,9 @@ export function SmartTable<T>({
               className={cx(
                 padCls,
                 textCls,
+                // "Total (1,284 documents)" broken over three lines doubles the
+                // height of the one row a reader looks at last and trusts most.
+                'whitespace-nowrap',
                 alignCls(col.align),
                 col.align === 'right' && AMOUNT_CELL_CLASS,
                 scrollBody &&

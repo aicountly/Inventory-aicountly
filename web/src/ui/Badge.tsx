@@ -30,11 +30,20 @@ const SIZE_STYLES: Record<BadgeSize, string> = {
 export interface BadgeProps {
   tone?: BadgeTone
   size?: BadgeSize
+  /**
+   * A filled dot in the badge's own colour, before the text.
+   *
+   * For a status a reader scans down a column rather than reads: the dot is
+   * the same shape in every row, so the eye finds the odd one out by colour
+   * before it reads a word. Decoration, so it is hidden from assistive
+   * technology — the word beside it is the status.
+   */
+  dot?: boolean
   className?: string
   children?: ReactNode
 }
 
-export function Badge({ tone = 'neutral', size = 'sm', className, children }: BadgeProps) {
+export function Badge({ tone = 'neutral', size = 'sm', dot = false, className, children }: BadgeProps) {
   return (
     <span
       className={cx(
@@ -45,6 +54,12 @@ export function Badge({ tone = 'neutral', size = 'sm', className, children }: Ba
         className,
       )}
     >
+      {dot ? (
+        <span
+          className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-current"
+          aria-hidden
+        />
+      ) : null}
       {children}
     </span>
   )

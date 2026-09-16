@@ -40,6 +40,13 @@ export interface StatCardProps {
   emphasizeNegative?: boolean
   /** Makes the whole card a link — the drill-down contract. */
   to?: string
+  /**
+   * `stacked` (the default) is the dashboard tile: tile on top, then the label
+   * and the figure. `metric` puts the tile beside them, which reads better in a
+   * row of four wide cards over a table — the eye runs down one column of
+   * figures instead of stepping around four icons.
+   */
+  layout?: 'stacked' | 'metric'
   className?: string
 }
 
@@ -49,10 +56,13 @@ export interface StatCardProps {
  * can be guaranteed the same size.
  */
 const SHELL_CLASS = 'flex flex-col gap-2 min-w-[160px]'
+const METRIC_SHELL_CLASS = 'flex flex-row items-start gap-3 min-w-[160px] min-h-[92px]'
 const HEAD_ROW_CLASS = 'flex items-start justify-between gap-2'
 const LABEL_CLASS = 'text-[11px] font-medium text-gray-500 uppercase tracking-wide truncate'
 const VALUE_CLASS = 'mt-0.5 text-lg font-semibold tabular-nums truncate'
+const METRIC_VALUE_CLASS = 'mt-1 text-2xl leading-none font-semibold tabular-nums truncate'
 const DELTA_ROW_CLASS = 'flex items-center gap-1.5 text-[11px] text-gray-500 min-h-[16px]'
+const METRIC_DELTA_ROW_CLASS = 'mt-1.5 flex items-center gap-1.5 text-[11px] text-gray-500 min-h-[16px]'
 /** A line of shimmer that occupies exactly one line box of the text it replaces. */
 const BAR_CLASS = 'skeleton inline-block rounded text-transparent'
 
@@ -72,6 +82,7 @@ export function StatCard({
   invertDelta = false,
   emphasizeNegative = false,
   to,
+  layout = 'stacked',
   className,
 }: StatCardProps) {
   const pct = pctChange(current, previous)
@@ -94,6 +105,49 @@ export function StatCard({
     emphasizeNegative && typeof current === 'number' && current < 0
       ? 'text-red-600'
       : 'text-gray-900'
+
+  const delta = (
+    <>
+      {pct != null ? (
+        <>
+          <span className={cx('inline-flex items-center gap-0.5 font-semibold', deltaCls)}>
+            <DeltaIcon className="w-3 h-3" aria-hidden />
+            {flat ? '0.0%' : formatPct(pct)}
+          </span>
+          <span className="text-gray-400 truncate">{hint ?? 'vs previous period'}</span>
+        </>
+      ) : (
+        <span className="text-gray-400 truncate">{hint ?? '—'}</span>
+      )}
+    </>
+  )
+
+  if (layout === 'metric') {
+    return (
+      <Card
+        as={to ? Link : 'div'}
+        to={to}
+        aria-label={to ? `Open ${label}` : undefined}
+        padding="sm"
+        interactive={Boolean(to)}
+        className={cx(METRIC_SHELL_CLASS, className)}
+      >
+        <IconTile icon={icon} tone={tone} size="lg" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <p className={LABEL_CLASS}>{label}</p>
+            {badge ? (
+              <Badge tone={badge.tone ?? 'success'} size="xs">
+                {badge.label}
+              </Badge>
+            ) : null}
+          </div>
+          <p className={cx(METRIC_VALUE_CLASS, valueClass)}>{value}</p>
+          <div className={METRIC_DELTA_ROW_CLASS}>{delta}</div>
+        </div>
+      </Card>
+    )
+  }
 
   return (
     <Card
@@ -120,19 +174,7 @@ export function StatCard({
           {value}
         </p>
       </div>
-      <div className={DELTA_ROW_CLASS}>
-        {pct != null ? (
-          <>
-            <span className={cx('inline-flex items-center gap-0.5 font-semibold', deltaCls)}>
-              <DeltaIcon className="w-3 h-3" aria-hidden />
-              {flat ? '0.0%' : formatPct(pct)}
-            </span>
-            <span className="text-gray-400 truncate">{hint ?? 'vs previous period'}</span>
-          </>
-        ) : (
-          <span className="text-gray-400 truncate">{hint ?? '—'}</span>
-        )}
-      </div>
+      <div className={DELTA_ROW_CLASS}>{delta}</div>
     </Card>
   )
 }
@@ -146,7 +188,31 @@ export function StatCard({
  * shell, the same three rows and the same line boxes with the text made
  * transparent, so the placeholder is exactly as tall as what replaces it.
  */
-export function StatCardSkeleton({ className }: { className?: string }) {
+export function StatCardSkeleton({
+  layout = 'stacked',
+  className,
+}: {
+  layout?: 'stacked' | 'metric'
+  className?: string
+}) {
+  if (layout === 'metric') {
+    return (
+      <Card aria-hidden padding="sm" className={cx(METRIC_SHELL_CLASS, className)}>
+        <span className={cx('skeleton', ICON_TILE_SIZE.lg)} />
+        <div className="min-w-0 flex-1">
+          <p className={LABEL_CLASS}>
+            <span className={cx(BAR_CLASS, 'w-16')}>&nbsp;</span>
+          </p>
+          <p className={METRIC_VALUE_CLASS}>
+            <span className={cx(BAR_CLASS, 'w-20')}>&nbsp;</span>
+          </p>
+          <div className={METRIC_DELTA_ROW_CLASS}>
+            <span className={cx(BAR_CLASS, 'w-12')}>&nbsp;</span>
+          </div>
+        </div>
+      </Card>
+    )
+  }
   return (
     <Card aria-hidden padding="sm" className={cx(SHELL_CLASS, className)}>
       <div className={HEAD_ROW_CLASS}>
