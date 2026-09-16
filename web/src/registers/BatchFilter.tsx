@@ -13,6 +13,8 @@ export interface BatchFilterProps {
   itemId: number | null
   warehouseId: number | null
   onChange: (batchId: string) => void
+  /** Stack the label over the control (RegisterFilterCard's layout). */
+  stacked?: boolean
 }
 
 /**
@@ -26,7 +28,7 @@ export interface BatchFilterProps {
  * way the document line editor does, so the list is the one the reader already
  * knows — newest expiry first, batch number and expiry on the row.
  */
-export function BatchFilter({ label, value, itemId, warehouseId, onChange }: BatchFilterProps) {
+export function BatchFilter({ label, value, itemId, warehouseId, onChange, stacked = false }: BatchFilterProps) {
   const [rows, setRows] = useState<BatchRow[]>([])
 
   useEffect(() => {
@@ -56,13 +58,14 @@ export function BatchFilter({ label, value, itemId, warehouseId, onChange }: Bat
   }, [itemId, value, onChange])
 
   return (
-    <FilterField label={label}>
+    <FilterField label={label} stacked={stacked}>
       <Select
+        size={stacked ? 'md' : 'sm'}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         aria-label={label}
         disabled={!itemId}
-        className="w-auto min-w-[9rem]"
+        className={stacked ? 'w-full min-w-[9rem]' : 'w-auto min-w-[9rem]'}
         title={itemId ? undefined : 'Pick an item first — batches belong to one item'}
       >
         <option value="">{itemId ? 'All batches' : 'Pick an item first'}</option>

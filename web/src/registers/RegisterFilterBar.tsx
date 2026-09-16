@@ -30,6 +30,15 @@ export interface RegisterFilterBarProps {
   searchInputRef?: RefObject<HTMLInputElement | null>
   /** Right-aligned slot: export, columns, view switches, counts. */
   trailing?: ReactNode
+  /**
+   * Stack each label over its control and drop the leading funnel.
+   *
+   * What RegisterFilterCard uses: the card's own header carries the funnel and
+   * the word "Filters", so repeating both inside the row is noise, and a column
+   * of labelled controls reads far better than a wrapping line of
+   * `LABEL [control] LABEL [control]` once there are six of them.
+   */
+  stacked?: boolean
 }
 
 /**
@@ -51,12 +60,29 @@ export function RegisterFilterBar({
   ctx,
   searchInputRef,
   trailing,
+  stacked = false,
 }: RegisterFilterBarProps) {
   const { warehouses } = useReferenceData()
   const { options } = useFormOptions()
   const documentTypes = useDocumentTypeOptions()
   const visible = filters.filter((f) => !f.hidden)
   let firstText = true
+  /*
+   * Which control `/` and the Search button focus.
+   *
+   * A text filter takes it when there is one. Otherwise the item typeahead
+   * does: on the stock balance register the item picker IS the free-text box,
+   * and before this `/` fell through to the command palette while a "Search"
+   * button sat over a register it could not search.
+   */
+  const searchRefGoesToItem = !visible.some((f) => f.kind === 'text')
+
+  // Stacked, every field claims an equal share of the row and its control
+  // fills it, so six filters line up as a grid instead of as a ragged
+  // left-to-right run of differently sized boxes.
+  const fieldCls = stacked ? 'min-w-[10.5rem] flex-1' : undefined
+  const controlCls = (inline: string) => (stacked ? 'w-full' : inline)
+  const controlSize = stacked ? 'md' : 'sm'
 
   const setRange = (fromKey: string, toKey: string, range: { from: string; to: string }) => {
     if (onChangeMany) onChangeMany({ [fromKey]: range.from, [toKey]: range.to })
@@ -67,8 +93,14 @@ export function RegisterFilterBar({
   }
 
   return (
-    <div className={cx(FILTER_ROW, 'gap-y-2 w-full')}>
-      <Filter className="w-4 h-4 shrink-0 text-gray-400" aria-hidden />
+    <div
+      className={cx(
+        FILTER_ROW,
+        'w-full gap-y-2',
+        stacked && 'items-end gap-x-4 gap-y-3',
+      )}
+    >
+      {stacked ? null : <Filter className="w-4 h-4 shrink-0 text-gray-400" aria-hidden />}
 
       {visible.map((f) => {
         const value = values[f.key] ?? ''
@@ -83,21 +115,34 @@ export function RegisterFilterBar({
                 from={value}
                 to={values[toKey] ?? ''}
                 ctx={ctx}
+                size={controlSize}
                 onChange={(range) => setRange(f.key, toKey, range)}
               />
             )
           }
 
-          case 'item':
-            return (
+          case 'item': {
+            const picker = (
+              <ItemFilter
+                ref={searchRefGoesToItem ? searchInputRef : undefined}
+                value={value}
+                onChange={(id) => onChange(f.key, id)}
+                placeholder={f.placeholder ?? `${f.label}…`}
+              />
+            )
+            // Stacked, the control gets the same label treatment as every
+            // other field; inline it keeps the bare-typeahead shape it has
+            // always had, so the existing registers do not shift.
+            return stacked ? (
+              <FilterField key={f.key} label={f.label} stacked className="min-w-[14rem] max-w-[24rem] grow">
+                {picker}
+              </FilterField>
+            ) : (
               <div key={f.key} className="min-w-[13rem] max-w-[22rem] grow">
-                <ItemFilter
-                  value={value}
-                  onChange={(id) => onChange(f.key, id)}
-                  placeholder={f.placeholder ?? `${f.label}…`}
-                />
+                {picker}
               </div>
             )
+          }
 
           case 'batch':
             return (
@@ -110,29 +155,32 @@ export function RegisterFilterBar({
                 itemId={Number(values.item_id) || null}
                 warehouseId={Number(values.warehouse_id) || null}
                 onChange={(id) => onChange(f.key, id)}
+                stacked={stacked}
               />
             )
 
           case 'warehouse':
             return (
-              <FilterField key={f.key} label={f.label}>
+              <FilterField key={f.key} label={f.label} stacked={stacked} className={fieldCls}>
                 <WarehouseSelect
                   value={value ? Number(value) : null}
                   onChange={(id) => onChange(f.key, id ? String(id) : '')}
                   warehouses={warehouses}
                   emptyLabel={f.placeholder ?? 'All warehouses'}
+                  className={stacked ? 'w-full' : undefined}
                 />
               </FilterField>
             )
 
           case 'item_group':
             return (
-              <FilterField key={f.key} label={f.label}>
+              <FilterField key={f.key} label={f.label} stacked={stacked} className={fieldCls}>
                 <Select
+                  size={controlSize}
                   value={value}
                   onChange={(e) => onChange(f.key, e.target.value)}
                   aria-label={f.label}
-                  className="w-auto min-w-[9rem]"
+                  className={controlCls("w-auto min-w-[9rem]")}
                 >
                   <option value="">All item groups</option>
                   {(options?.item_groups ?? []).map((g) => (
@@ -146,12 +194,13 @@ export function RegisterFilterBar({
 
           case 'stock_category':
             return (
-              <FilterField key={f.key} label={f.label}>
+              <FilterField key={f.key} label={f.label} stacked={stacked} className={fieldCls}>
                 <Select
+                  size={controlSize}
                   value={value}
                   onChange={(e) => onChange(f.key, e.target.value)}
                   aria-label={f.label}
-                  className="w-auto min-w-[9rem]"
+                  className={controlCls("w-auto min-w-[9rem]")}
                 >
                   <option value="">All categories</option>
                   {(options?.stock_categories ?? []).map((c) => (
@@ -165,25 +214,27 @@ export function RegisterFilterBar({
 
           case 'date':
             return (
-              <FilterField key={f.key} label={f.label}>
+              <FilterField key={f.key} label={f.label} stacked={stacked} className={fieldCls}>
                 <Input
+                  size={controlSize}
                   type="date"
                   value={value}
                   onChange={(e) => onChange(f.key, e.target.value)}
                   aria-label={f.label}
-                  className="w-[8.5rem]"
+                  className={controlCls('w-[8.5rem]')}
                 />
               </FilterField>
             )
 
           case 'document_type':
             return (
-              <FilterField key={f.key} label={f.label}>
+              <FilterField key={f.key} label={f.label} stacked={stacked} className={fieldCls}>
                 <Select
+                  size={controlSize}
                   value={value}
                   onChange={(e) => onChange(f.key, e.target.value)}
                   aria-label={f.label}
-                  className="w-auto min-w-[10rem]"
+                  className={controlCls("w-auto min-w-[10rem]")}
                 >
                   <option value="">All document types</option>
                   {documentTypes.options.map((o) => (
@@ -197,12 +248,13 @@ export function RegisterFilterBar({
 
           case 'select':
             return (
-              <FilterField key={f.key} label={f.label}>
+              <FilterField key={f.key} label={f.label} stacked={stacked} className={fieldCls}>
                 <Select
+                  size={controlSize}
                   value={value}
                   onChange={(e) => onChange(f.key, e.target.value)}
                   aria-label={f.label}
-                  className="w-auto min-w-[8rem]"
+                  className={controlCls("w-auto min-w-[8rem]")}
                 >
                   {/* A select with no declared default needs an "any" row, or
                       the first option silently becomes a filter nobody chose. */}
@@ -220,14 +272,15 @@ export function RegisterFilterBar({
 
           case 'number':
             return (
-              <FilterField key={f.key} label={f.label}>
+              <FilterField key={f.key} label={f.label} stacked={stacked} className={fieldCls}>
                 <Input
+                  size={controlSize}
                   inputMode="numeric"
                   value={value}
                   onChange={(e) => onChange(f.key, e.target.value.replace(/[^\d]/g, ''))}
                   aria-label={f.label}
                   placeholder={f.placeholder}
-                  className="w-[5.5rem]"
+                  className={controlCls('w-[5.5rem]')}
                 />
               </FilterField>
             )
@@ -236,7 +289,12 @@ export function RegisterFilterBar({
             return (
               <label
                 key={f.key}
-                className="inline-flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer select-none"
+                className={cx(
+                  'inline-flex cursor-pointer select-none items-center gap-2 text-xs text-gray-600',
+                  // Matches the control height so a checkbox sits on the same
+                  // baseline as the inputs it stands beside, not above them.
+                  stacked && 'h-9 whitespace-nowrap',
+                )}
               >
                 <input
                   type="checkbox"
@@ -252,7 +310,7 @@ export function RegisterFilterBar({
             const isFirst = firstText
             firstText = false
             return (
-              <FilterField key={f.key} label={f.label}>
+              <FilterField key={f.key} label={f.label} stacked={stacked} className={fieldCls}>
                 {/* Debounced: every keystroke here is a navigation and a fetch,
                     and the value comes back asynchronously through the URL. */}
                 <SearchInput
@@ -260,7 +318,7 @@ export function RegisterFilterBar({
                   value={value}
                   onChange={(next) => onChange(f.key, next)}
                   placeholder={f.placeholder ?? f.label}
-                  className="w-[12rem]"
+                  className={controlCls('w-[12rem]')}
                 />
               </FilterField>
             )
@@ -283,7 +341,19 @@ export function RegisterFilterBar({
         </button>
       ) : null}
 
-      {trailing ? <div className="ml-auto flex flex-wrap items-center gap-2">{trailing}</div> : null}
+      {trailing ? (
+        <div
+          className={cx(
+            'flex flex-wrap items-center gap-2',
+            // Stacked, the trailing slot holds another labelled field (Group
+            // by) and belongs in the run of controls, not pushed to the far
+            // right away from them.
+            stacked ? 'min-w-[10.5rem] flex-1' : 'ml-auto',
+          )}
+        >
+          {trailing}
+        </div>
+      ) : null}
     </div>
   )
 }

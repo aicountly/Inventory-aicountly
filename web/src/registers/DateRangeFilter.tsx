@@ -19,6 +19,8 @@ export interface DateRangeFilterProps {
   label?: string
   /** Offer "All dates". Off for registers that must always be bounded. */
   allowAllDates?: boolean
+  /** Match the taller controls RegisterFilterCard uses. */
+  size?: 'sm' | 'md'
   className?: string
   id?: string
 }
@@ -47,6 +49,7 @@ export function DateRangeFilter({
   onChange,
   label = 'Period',
   allowAllDates = true,
+  size = 'sm',
   className,
   id,
 }: DateRangeFilterProps) {
@@ -69,8 +72,18 @@ export function DateRangeFilter({
     if (range) onChange(range)
   }
 
+  /*
+   * `!w-auto` / `!w-[…]` are deliberate.
+   *
+   * Input and Select carry `block w-full` from FIELD_BASE. This group used to
+   * sit in a row whose children were all content-sized, so `w-full` resolved to
+   * the content width and nobody noticed. Beside a flex sibling that can grow
+   * (RegisterFilterCard's stacked layout) the same `w-full` let the preset box
+   * and both date boxes stretch across the card and stack into three rows. The
+   * period picker is a compound control of a fixed shape, so it says so.
+   */
   return (
-    <div className={cx('flex flex-wrap items-center gap-1.5', className)}>
+    <div className={cx('flex shrink-0 flex-wrap items-center gap-1.5', className)}>
       <CalendarRange className="w-3.5 h-3.5 shrink-0 text-gray-400" aria-hidden />
       <span className="text-label-xs font-semibold uppercase tracking-wide text-gray-400">
         {label}
@@ -79,8 +92,9 @@ export function DateRangeFilter({
         id={id}
         value={presetId}
         onChange={(e) => applyPreset(e.target.value)}
+        size={size}
         aria-label={`${label} preset`}
-        className="w-auto min-w-[8.5rem]"
+        className="!w-auto min-w-[8.5rem]"
       >
         {groups.map((group, idx) =>
           group.label ? (
@@ -103,21 +117,23 @@ export function DateRangeFilter({
       {presetId === ALL_DATES_PRESET_ID ? null : (
         <>
           <Input
+            size={size}
             type="date"
             value={from}
             max={to || undefined}
             onChange={(e) => onChange({ from: e.target.value, to })}
             aria-label={`${label} from`}
-            className="w-[8.5rem]"
+            className="!w-[8.5rem]"
           />
           <span className="text-xs text-gray-400">to</span>
           <Input
+            size={size}
             type="date"
             value={to}
             min={from || undefined}
             onChange={(e) => onChange({ from, to: e.target.value })}
             aria-label={`${label} to`}
-            className="w-[8.5rem]"
+            className="!w-[8.5rem]"
           />
         </>
       )}

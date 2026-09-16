@@ -356,6 +356,13 @@ export function documentsRegister(
     breadcrumbs: typeLabel
       ? [{ label: 'Documents', to: '/documents' }, { label: `${typeLabel} register` }]
       : [{ label: 'Inventory documents' }],
+    // One line for the hero and the hub tile. `description` is the export
+    // sheet's blurb and, on an unvalued type, a three-sentence explanation the
+    // `extra` callout below already makes — printing both put the same
+    // paragraph on the screen twice.
+    shortDescription: typeLabel
+      ? `Every ${typeLabel.toLowerCase()} in the selected company, year and branch`
+      : 'Every stock document in the selected company, year and branch',
     // No parent screen: the documents register is a top-level destination, not
     // a register reached from /registers.
     backTo: null,

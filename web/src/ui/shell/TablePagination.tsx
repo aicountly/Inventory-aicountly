@@ -60,7 +60,7 @@ export function TablePagination({
                 onPageSizeChange(v === 'all' ? 'all' : Number(v))
                 onPageChange?.(1)
               }}
-              className="h-7 rounded-lg border border-gray-200 bg-white px-2 text-xs text-gray-700 focus:border-primary focus:ring-2 focus:ring-primary/30 focus:outline-none"
+              className="h-7 rounded-lg border border-gray-200 bg-white px-2 text-xs text-gray-700 transition-colors focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
               aria-label="Rows per page"
             >
               {PAGE_SIZE_OPTIONS.map((n) => (
@@ -89,9 +89,15 @@ export function TablePagination({
             onClick={() => onPageChange?.(page - 1)}
             aria-label="Previous page"
           />
-          <span className="px-2 tabular-nums text-gray-700">
-            Page {formatInt(page)} of {formatInt(totalPages)}
+          <span
+            className="inline-flex h-7 min-w-[1.75rem] items-center justify-center rounded-lg bg-primary px-2 text-xs font-semibold tabular-nums text-white"
+            aria-current="page"
+            aria-label={`Page ${formatInt(page)} of ${formatInt(totalPages)}`}
+            title={`Page ${formatInt(page)} of ${formatInt(totalPages)}`}
+          >
+            {formatInt(page)}
           </span>
+          <span className="px-0.5 text-gray-400 tabular-nums">of {formatInt(totalPages)}</span>
           <Button
             variant="ghost"
             size="xs"

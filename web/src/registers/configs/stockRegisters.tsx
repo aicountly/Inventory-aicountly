@@ -1,4 +1,18 @@
-import { ArrowLeftRight, BookOpen, Scale, Warehouse } from 'lucide-react'
+import {
+  ArrowLeftRight,
+  Boxes,
+  BookOpen,
+  ExternalLink,
+  CircleCheck,
+  ListChecks,
+  Lock,
+  Package,
+  RefreshCw,
+  Scale,
+  ScrollText,
+  TriangleAlert,
+  Warehouse,
+} from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { P } from '../../services/access'
 import { stockBalancesApi, stockLedgerApi, stockMovementsApi } from '../../services/stockViewsApi'
@@ -467,6 +481,31 @@ export const movementRegister = defineRegister<StockMovementRow, PageSummary>({
 
 /* -------------------------------------------------------- balance register */
 
+/**
+ * How far below zero an on-hand quantity has to be before it counts as
+ * negative. Mirrors StockBalanceService::NEGATIVE_ON_HAND_EPSILON exactly: the
+ * strip must agree with what `?negative=1` would actually return, or a reader
+ * who follows "3 negative stock alerts" into the filter finds two rows.
+ */
+const NEGATIVE_ON_HAND_EPSILON = -0.00005
+
+function isNegativeOnHand(row: StockBalanceGridRow): boolean {
+  return Number(row.on_hand_qty ?? 0) < NEGATIVE_ON_HAND_EPSILON
+}
+
+function countDistinct<T>(rows: readonly T[], of: (row: T) => string | number | null): number {
+  const seen = new Set<string | number>()
+  for (const row of rows) {
+    const key = of(row)
+    if (key !== null) seen.add(key)
+  }
+  return seen.size
+}
+
+function plural(n: number, one: string, many = `${one}s`): string {
+  return `${n} ${n === 1 ? one : many}`
+}
+
 const BALANCE_SUM_KEYS = [
   'on_hand_qty',
   'reserved_qty',
@@ -492,7 +531,7 @@ export const stockBalanceRegister = defineRegister<StockBalanceGridRow, PageSumm
   title: 'Stock balance register',
   description:
     'Item, warehouse and batch with every bucket behind the on-hand figure and what is free to promise',
-  shortDescription: 'On hand, reserved, packed, available — by bin',
+  shortDescription: 'Live balances across all warehouses and financial years',
   group: 'stock',
   icon: Warehouse,
   permission: [P.report('warehouse_stock'), P.report('stock_summary')],
@@ -555,6 +594,30 @@ export const stockBalanceRegister = defineRegister<StockBalanceGridRow, PageSumm
   rowKey: (r) => r.balance_id,
   drillTo: (r) =>
     `/registers/stock-ledger?item_id=${r.item_id}${r.warehouse_id ? `&warehouse_id=${r.warehouse_id}` : ''}`,
+  /*
+   * The two screens this row already leads to, and no others.
+   *
+   * Opening the ledger is what a click on the row does; it is listed here
+   * because nothing on screen told a reader with a mouse that the row was
+   * clickable at all. The engine drops either entry for a member without the
+   * permission beside it.
+   */
+  rowActions: (r) => [
+    {
+      key: 'ledger',
+      label: 'View stock ledger',
+      icon: ScrollText,
+      to: `/registers/stock-ledger?item_id=${r.item_id}${r.warehouse_id ? `&warehouse_id=${r.warehouse_id}` : ''}`,
+      permission: P.report('stock_ledger'),
+    },
+    {
+      key: 'item',
+      label: 'Open item',
+      icon: ExternalLink,
+      to: `/items/${r.item_id}`,
+      permission: P.masters('items', 'read'),
+    },
+  ],
   groupBy: [
     {
       key: 'warehouse',
@@ -582,14 +645,17 @@ export const stockBalanceRegister = defineRegister<StockBalanceGridRow, PageSumm
       Object.fromEntries(BALANCE_SUM_KEYS.map((key) => [key, formatQty(s.sums[key])])),
       { label: `${totalsLabel(s.pageRows, 'row')} — ${pageHint(s)}`, labelKey: 'item_name' },
     ),
+  // One icon per bucket. All five cards drew the same warehouse glyph, which
+  // made the strip a row of identical tiles and left the colour doing all the
+  // work of telling them apart.
   kpis: (s) => [
-    { key: 'rows', label: 'Rows', value: formatInt(s.total), icon: Warehouse, tone: 'primary' },
+    { key: 'rows', label: 'Rows', value: formatInt(s.total), hint: 'Total items', icon: ListChecks, tone: 'primary' },
     {
       key: 'on_hand',
       label: 'On hand',
       value: formatQty(s.sums.on_hand_qty),
-      hint: pageHint(s),
-      icon: Warehouse,
+      hint: `Live balance (${pageHint(s)})`,
+      icon: Boxes,
       tone: 'info',
     },
     {
@@ -597,7 +663,7 @@ export const stockBalanceRegister = defineRegister<StockBalanceGridRow, PageSumm
       label: 'Reserved',
       value: formatQty(s.sums.reserved_qty),
       hint: pageHint(s),
-      icon: Warehouse,
+      icon: Lock,
       tone: 'warning',
     },
     {
@@ -605,7 +671,7 @@ export const stockBalanceRegister = defineRegister<StockBalanceGridRow, PageSumm
       label: 'Packed',
       value: formatQty(s.sums.packed_qty),
       hint: pageHint(s),
-      icon: Warehouse,
+      icon: Package,
       tone: 'violet',
     },
     {
@@ -613,7 +679,7 @@ export const stockBalanceRegister = defineRegister<StockBalanceGridRow, PageSumm
       label: 'Available',
       value: formatQty(s.sums.available_qty),
       hint: pageHint(s),
-      icon: Warehouse,
+      icon: CircleCheck,
       tone: 'success',
       current: s.sums.available_qty,
       emphasizeNegative: true,
@@ -625,5 +691,72 @@ export const stockBalanceRegister = defineRegister<StockBalanceGridRow, PageSumm
     { label: 'Reserved', value: formatQty(s.sums.reserved_qty), hint: pageHint(s) },
     { label: 'Available', value: formatQty(s.sums.available_qty), hint: pageHint(s), tone: 'good' },
   ],
-  emptyMessage: 'No stock balances match these filters.',
+  emptyMessage: 'Try changing your item, warehouse, batch or stock filters.',
+  filtersHint: 'Refine your view of stock balances',
+  tableTitle: 'Stock balances',
+  tableHint: 'Showing live stock position for your items',
+
+  /**
+   * The at-a-glance strip.
+   *
+   * Every figure is counted from the rows this response actually carried, and
+   * the hint under it says which set that is. `/v1/stock-balances` sends no
+   * aggregate over the filtered result (see configs/pageSummary.ts), so on page
+   * 1 of 40 these are page figures and are labelled as such — "0 negative stock
+   * alerts · All good!" over a page that happens to hold none, while page 7
+   * holds twelve, is the most dangerous sentence this screen could print.
+   */
+  insights: (s, res) => {
+    const rows = res.data
+    const whole = s.isWholeResult
+    const scope = whole ? 'Across all rows' : 'On this page'
+
+    const skus = countDistinct(rows, (r) => r.item_id)
+    const warehouseNames = [
+      ...new Set(rows.map((r) => r.warehouse_name).filter((n): n is string => Boolean(n))),
+    ]
+    const warehouses = countDistinct(rows, (r) => r.warehouse_id ?? null)
+    const negatives = rows.filter(isNegativeOnHand).length
+
+    return {
+      items: [
+        {
+          key: 'skus',
+          label: `${plural(skus, 'SKU')} in view`,
+          hint: scope,
+          icon: ListChecks,
+          tone: 'primary',
+        },
+        {
+          key: 'warehouses',
+          label: plural(warehouses, 'warehouse'),
+          hint:
+            warehouseNames.length === 0
+              ? scope
+              : warehouseNames.length <= 2
+                ? warehouseNames.join(' · ')
+                : `${warehouseNames.slice(0, 2).join(' · ')} +${warehouseNames.length - 2} more`,
+          icon: Warehouse,
+          tone: 'info',
+        },
+        {
+          key: 'negative',
+          label: plural(negatives, 'negative stock alert'),
+          // "All good!" is a claim about the whole register, so it is only made
+          // when the page IS the whole register.
+          hint: negatives > 0 ? 'Review required' : whole ? 'All good!' : 'None on this page',
+          icon: TriangleAlert,
+          tone: negatives > 0 ? 'danger' : 'success',
+        },
+        {
+          key: 'sync',
+          label: 'Live sync',
+          hint: whole ? 'Data up to date' : 'Figures cover this page',
+          icon: RefreshCw,
+          tone: 'teal',
+        },
+      ],
+      note: whole && negatives === 0 && rows.length > 0 ? 'Your inventory. In perfect balance.' : undefined,
+    }
+  },
 })

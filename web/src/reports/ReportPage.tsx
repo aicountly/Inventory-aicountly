@@ -1,13 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { FileSearch, ListFilter } from 'lucide-react'
+import { Columns3, FileSearch, ListFilter, PackageSearch, RotateCcw } from 'lucide-react'
 import { useAccess } from '../access/AccessContext'
 import { useCompany } from '../company/CompanyContext'
 import { useScopeLabel } from '../company/useScopeLabel'
 import { RequirePermission } from '../components/RequirePermission'
 import { ConfigureColumns } from '../registers/ConfigureColumns'
 import { RegisterFilterBar } from '../registers/RegisterFilterBar'
-import { RegisterKpis, summaryItemsToCards } from '../registers/RegisterKpis'
+import { RegisterFilterCard } from '../registers/RegisterFilterCard'
+import {
+  RegisterInsightStrip,
+  RegisterInsightStripSkeleton,
+} from '../registers/RegisterInsightStrip'
+import { RegisterKpis, RegisterKpisSkeleton, summaryItemsToCards } from '../registers/RegisterKpis'
+import { RegisterRowMenu } from '../registers/RegisterRowMenu'
 import { describeDateRange } from '../registers/dateRangePresets'
 import { totalsLabel as registerTotalsLabel, totalsRowToText } from '../registers/registerTotals'
 import { useColumnConfig } from '../registers/useColumnConfig'
@@ -20,11 +26,14 @@ import type { ReportColumn } from './types'
 import { useListParams } from '../hooks/useListParams'
 import { useQuery } from '../hooks/useQuery'
 import type { ListQuery } from '../services/api'
+import { isApiError } from '../services/api'
 import { fetchAllRows } from '../services/listAll'
 import { fetchReport } from '../services/reportsApi'
 import type { ReportResponse } from '../services/reportsApi'
+import { Button } from '../ui/Button'
 import { EmptyState } from '../ui/EmptyState'
 import { FilterField } from '../ui/shell/FilterBar'
+import { LiveDataBadge } from '../ui/shell/LiveDataBadge'
 import { Select } from '../ui/Select'
 import { ExportActions } from '../export/ExportActions'
 import type { SheetSummaryCard } from '../export/sheetHtml'
@@ -34,6 +43,7 @@ import { ReportListShell } from '../ui/shell/ReportListShell'
 import { ServerTablePagination } from '../ui/shell/TablePagination'
 import { SmartTable } from '../ui/shell/SmartTable'
 import { REPORT_TABLE_PROPS } from '../styles/designTokens'
+import type { SmartTableError } from '../ui/shell/SmartTable'
 import type { IconTone } from '../ui/IconTile'
 import { todayIso } from '../utils/format'
 import { filterUrlKeys, resolveFilterValues } from './helpers'
@@ -197,6 +207,18 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
     return summaryItemsToCards(config.summary(summary, result.data))
   }, [config, result.data, summary])
 
+  // ---- the at-a-glance strip ----------------------------------------------
+  // Derived from the response already in hand — never a second request, and
+  // never a figure stated more widely than the register's own summary supports.
+  const insights = useMemo(() => {
+    if (!config.insights || !result.data || summary === undefined) return null
+    return config.insights(summary, result.data)
+  }, [config, result.data, summary])
+
+  // The same Configure Columns dialog is offered from the toolbar and from over
+  // the table, so the open flag lives here rather than inside either trigger.
+  const [columnsOpen, setColumnsOpen] = useState(false)
+
   // ---- selection -----------------------------------------------------------
   // Held as id -> row so a reader can tick rows on page 1, page over to page 3
   // and still act on all of them: a bulk print that silently dropped whatever
@@ -290,11 +312,34 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
     }
   }, [selectable, selected, selectableRows, allOnPageSelected, someOnPageSelected, togglePage, toggleRow])
 
-  // The exports keep `visibleColumns`; only the table gains the checkbox.
-  const tableColumns = useMemo(
-    () => (selectColumn ? [selectColumn, ...visibleColumns] : visibleColumns),
-    [selectColumn, visibleColumns],
-  )
+  // ---- row actions ---------------------------------------------------------
+  const rowActionsOf = config.rowActions
+  const actionsColumn = useMemo<ReportColumn<T> | null>(() => {
+    if (!rowActionsOf) return null
+    return {
+      key: '__actions',
+      header: <span className="sr-only">Row actions</span>,
+      align: 'center',
+      width: '3rem',
+      alwaysVisible: true,
+      render: (row: T) => {
+        // Filtered here, not in the config: permission is the engine's to know,
+        // and a menu listing a screen the member cannot open is a dead end.
+        const actions = rowActionsOf(row).filter((a) => !a.permission || can(a.permission))
+        if (!actions.length) return null
+        return <RegisterRowMenu actions={actions} label="Row actions" />
+      },
+      // Chrome, not data: never in a CSV, a PDF or a printed sheet.
+      csv: () => '',
+    }
+  }, [rowActionsOf, can])
+
+  // The exports keep `visibleColumns`; only the table gains the checkbox and
+  // the actions kebab.
+  const tableColumns = useMemo(() => {
+    const cols = selectColumn ? [selectColumn, ...visibleColumns] : [...visibleColumns]
+    return actionsColumn ? [...cols, actionsColumn] : cols
+  }, [selectColumn, visibleColumns, actionsColumn])
 
   // ---- totals --------------------------------------------------------------
   const totals = useMemo(() => {
@@ -389,6 +434,29 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
     [result.data?.meta.total, config.rowNoun, config.rowNounPlural],
   )
 
+  // ---- error ---------------------------------------------------------------
+  /**
+   * What the reader is told when the fetch fails.
+   *
+   * An ApiError carries a message the server wrote for a person, so it is shown.
+   * Anything else is a TypeError from the network stack or a bug in our own
+   * code, and its text is an implementation detail — the reader gets the
+   * guidance and the Retry, not the internals. The filters are still in the URL
+   * either way, which is worth saying: the common fear on a failed register is
+   * having to set six controls again.
+   */
+  const tableError = useMemo<SmartTableError>(() => {
+    if (!result.error) return null
+    const noun = (config.rowNounPlural ?? `${config.rowNoun ?? 'row'}s`).toLowerCase()
+    return {
+      title: `Unable to load ${noun}`,
+      description: isApiError(result.error)
+        ? `${result.error.message} Your filters have been preserved.`
+        : 'Please try again. Your filters have been preserved.',
+      onRetry: result.reload,
+    }
+  }, [result.error, result.reload, config.rowNoun, config.rowNounPlural])
+
   // ---- render --------------------------------------------------------------
   const breadcrumbs = useMemo(
     () => config.breadcrumbs ?? [{ label: 'Registers', to: '/registers' }, { label: config.title }],
@@ -406,6 +474,8 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
         // /v1/access/me answers has nowhere to be written and would be dropped
         // the moment the uuid arrives and the per-user key changes under it.
         disabled={!columnsReady}
+        open={columnsOpen}
+        onOpenChange={setColumnsOpen}
       />
       <ExportActions
         columns={visibleColumns}
@@ -433,45 +503,63 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
     <ReportListShell
       breadcrumbs={breadcrumbs}
       title={config.title}
-      description={`${config.description}.`}
+      // Same precedence the registers hub uses. `description` is the export
+      // sheet's blurb and runs to several sentences on some registers; a hero
+      // subtitle is one line, and the long form still has `extra` to live in.
+      description={config.shortDescription ?? config.description}
       icon={config.icon ?? FileSearch}
       headerActions={headerActions}
       searchInputRef={searchInputRef}
       onRefresh={result.reload}
       onPrint={runPrint}
       backTo={config.backTo === undefined ? '/registers' : (config.backTo ?? undefined)}
-      scope={scopeLabel}
+      heroAside={
+        <LiveDataBadge
+          fetchedAt={result.fetchedAt}
+          refreshing={result.loading}
+          // A failed reload leaves the previous answer on screen. Saying so is
+          // the difference between old figures and wrong ones.
+          stale={Boolean(result.error) && result.data !== null}
+        />
+      }
       filters={
-        <RegisterFilterBar
-          filters={config.filters}
-          values={values}
-          onChange={params.setFilter}
-          // Both ends of a period in one navigation — see useListParams.setFilters.
-          onChangeMany={params.setFilters}
+        <RegisterFilterCard
+          hint={config.filtersHint}
+          scope={scopeLabel}
           onReset={params.reset}
           showReset={Object.keys(state.filters).length > 0}
-          ctx={ctx}
-          searchInputRef={searchInputRef}
-          trailing={
-            config.groupBy?.length ? (
-              <FilterField label="Group by">
-                <Select
-                  value={groupKey}
-                  onChange={(e) => setGroupKey(e.target.value)}
-                  aria-label="Group by"
-                  className="w-auto min-w-[9rem]"
-                >
-                  <option value="">No grouping</option>
-                  {config.groupBy.map((g) => (
-                    <option key={g.key} value={g.key}>
-                      {g.label}
-                    </option>
-                  ))}
-                </Select>
-              </FilterField>
-            ) : undefined
-          }
-        />
+        >
+          <RegisterFilterBar
+            stacked
+            filters={config.filters}
+            values={values}
+            onChange={params.setFilter}
+            // Both ends of a period in one navigation — see useListParams.setFilters.
+            onChangeMany={params.setFilters}
+            ctx={ctx}
+            searchInputRef={searchInputRef}
+            trailing={
+              config.groupBy?.length ? (
+                <FilterField label="Group by" stacked>
+                  <Select
+                    size="md"
+                    value={groupKey}
+                    onChange={(e) => setGroupKey(e.target.value)}
+                    aria-label="Group by"
+                    className="w-full"
+                  >
+                    <option value="">No grouping</option>
+                    {config.groupBy.map((g) => (
+                      <option key={g.key} value={g.key}>
+                        {g.label}
+                      </option>
+                    ))}
+                  </Select>
+                </FilterField>
+              ) : undefined
+            }
+          />
+        </RegisterFilterCard>
       }
       toolbar={
         selectable && selectedRows.length ? (
@@ -490,7 +578,24 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
           </div>
         ) : undefined
       }
-      summary={kpiCards.length ? <RegisterKpis cards={kpiCards} /> : undefined}
+      summary={
+        // First load only. A refresh keeps the figures and dims them instead of
+        // replacing a number the reader is looking at with a grey bar.
+        result.loading && !result.data ? (
+          <RegisterKpisSkeleton count={config.kpis ? 5 : 4} />
+        ) : kpiCards.length ? (
+          <RegisterKpis cards={kpiCards} />
+        ) : undefined
+      }
+      insights={
+        config.insights ? (
+          result.loading && !result.data ? (
+            <RegisterInsightStripSkeleton />
+          ) : insights && insights.items.length ? (
+            <RegisterInsightStrip items={insights.items} note={insights.note} />
+          ) : undefined
+        ) : undefined
+      }
     >
       <RequirePermission permission={permission} what={config.title}>
         {config.extra && summary !== undefined ? (
@@ -512,7 +617,22 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
             rowGroup={grouping ? (row) => grouping.of(row) : undefined}
             groupSubtotal={grouping?.subtotal}
             loading={result.loading}
-            error={result.error}
+            error={tableError}
+            title={config.tableTitle ?? config.title}
+            description={config.tableHint}
+            headerAction={
+              // The same dialog the toolbar's Columns button opens — one flag,
+              // two doors, so the choice cannot be made twice over itself.
+              <Button
+                variant="secondary"
+                size="xs"
+                icon={Columns3}
+                onClick={() => setColumnsOpen(true)}
+                disabled={!columnsReady}
+              >
+                Customize columns
+              </Button>
+            }
             sort={{ key: state.sort, order: state.order }}
             onSort={params.toggleSort}
             onRowActivate={onRowActivate}
@@ -524,8 +644,19 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
             minWidth={config.minWidth ?? 1100}
             empty={
               <EmptyState
+                icon={PackageSearch}
                 title="No rows match these filters"
                 description={config.emptyMessage ?? 'Widen the period or clear a filter and try again.'}
+                action={
+                  // Only when there is something to clear: a reset offered on an
+                  // unfiltered register that is genuinely empty would do nothing
+                  // and read as a broken button.
+                  Object.keys(state.filters).length > 0 ? (
+                    <Button variant="secondary" icon={RotateCcw} onClick={params.reset}>
+                      Reset filters
+                    </Button>
+                  ) : undefined
+                }
               />
             }
             footer={

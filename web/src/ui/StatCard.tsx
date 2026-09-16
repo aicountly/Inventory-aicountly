@@ -40,6 +40,13 @@ export interface StatCardProps {
   emphasizeNegative?: boolean
   /** Makes the whole card a link — the drill-down contract. */
   to?: string
+  /**
+   * `lg` is the register treatment: a taller card with a larger figure, for a
+   * strip of five that is the first thing read on the page. The dashboard keeps
+   * `sm`, where a KPI sits among charts and tables and must not shout over
+   * them. Default stays `sm` so no existing caller moves.
+   */
+  size?: 'sm' | 'lg'
   className?: string
 }
 
@@ -53,6 +60,40 @@ const HEAD_ROW_CLASS = 'flex items-start justify-between gap-2'
 const LABEL_CLASS = 'text-[11px] font-medium text-gray-500 uppercase tracking-wide truncate'
 const VALUE_CLASS = 'mt-0.5 text-lg font-semibold tabular-nums truncate'
 const DELTA_ROW_CLASS = 'flex items-center gap-1.5 text-[11px] text-gray-500 min-h-[16px]'
+
+/* The `lg` counterparts. Kept as constants beside the originals for the same
+   reason: StatCardSkeleton has to reserve exactly the box the card will fill. */
+/*
+ * A plain surface, not a gradient, deliberately.
+ *
+ * theme/dark-overrides.css repaints `.dark .bg-white`, but a gradient sets
+ * `--tw-gradient-from` instead, which nothing in that sheet can reach — the
+ * cards stayed white on black in dark mode while every surface around them
+ * turned. Card's own `bg-white` IS remapped, so the plain surface is the one
+ * that follows the theme. darkAccents.test.tsx holds this.
+ */
+const SHELL_LG_CLASS = 'relative flex flex-col gap-2.5 min-w-[150px] overflow-hidden'
+const LABEL_LG_CLASS =
+  'text-[11px] font-semibold text-gray-500 uppercase tracking-[0.015em] truncate'
+const VALUE_LG_CLASS =
+  'mt-1 text-[1.6rem] leading-none font-bold tracking-tight tabular-nums truncate'
+const DELTA_LG_ROW_CLASS = 'flex items-center gap-1.5 text-[11px] text-gray-400 min-h-[16px]'
+
+/**
+ * The faint rotated square in the bottom-right of a large card.
+ *
+ * Purely ornamental, so it is `aria-hidden` and sits behind the content. It is
+ * the only decoration on the card, and it is kept at ~3% opacity: a KPI strip
+ * is read at a glance and anything louder competes with the figure itself.
+ */
+function CardFlourish() {
+  return (
+    <span
+      aria-hidden
+      className="pointer-events-none absolute -bottom-8 -right-6 h-24 w-24 rotate-[25deg] rounded-[2rem] bg-primary/[0.03]"
+    />
+  )
+}
 /** A line of shimmer that occupies exactly one line box of the text it replaces. */
 const BAR_CLASS = 'skeleton inline-block rounded text-transparent'
 
@@ -72,8 +113,10 @@ export function StatCard({
   invertDelta = false,
   emphasizeNegative = false,
   to,
+  size = 'sm',
   className,
 }: StatCardProps) {
+  const lg = size === 'lg'
   const pct = pctChange(current, previous)
   const flat = pct != null && Math.abs(pct) < 0.05
   const positive = pct == null ? null : invertDelta ? pct < 0 : pct > 0
@@ -100,27 +143,28 @@ export function StatCard({
       as={to ? Link : 'div'}
       to={to}
       aria-label={to ? `Open ${label}` : undefined}
-      padding="sm"
+      padding={lg ? 'md' : 'sm'}
       interactive={Boolean(to)}
-      className={cx(SHELL_CLASS, className)}
+      className={cx(lg ? SHELL_LG_CLASS : SHELL_CLASS, className)}
     >
-      <div className={HEAD_ROW_CLASS}>
-        <IconTile icon={icon} tone={tone} size="sm" />
+      {lg ? <CardFlourish /> : null}
+      <div className={cx(HEAD_ROW_CLASS, lg && 'relative')}>
+        <IconTile icon={icon} tone={tone} size={lg ? 'md' : 'sm'} />
         {badge ? (
           <Badge tone={badge.tone ?? 'success'} size="xs">
             {badge.label}
           </Badge>
         ) : null}
       </div>
-      <div className="min-w-0">
-        <p className={LABEL_CLASS}>
+      <div className={cx('min-w-0', lg && 'relative')}>
+        <p className={lg ? LABEL_LG_CLASS : LABEL_CLASS}>
           {label}
         </p>
-        <p className={cx(VALUE_CLASS, valueClass)}>
+        <p className={cx(lg ? VALUE_LG_CLASS : VALUE_CLASS, valueClass)}>
           {value}
         </p>
       </div>
-      <div className={DELTA_ROW_CLASS}>
+      <div className={cx(lg ? DELTA_LG_ROW_CLASS : DELTA_ROW_CLASS, lg && 'relative')}>
         {pct != null ? (
           <>
             <span className={cx('inline-flex items-center gap-0.5 font-semibold', deltaCls)}>
@@ -146,21 +190,32 @@ export function StatCard({
  * shell, the same three rows and the same line boxes with the text made
  * transparent, so the placeholder is exactly as tall as what replaces it.
  */
-export function StatCardSkeleton({ className }: { className?: string }) {
+export function StatCardSkeleton({
+  size = 'sm',
+  className,
+}: {
+  size?: 'sm' | 'lg'
+  className?: string
+}) {
+  const lg = size === 'lg'
   return (
-    <Card aria-hidden padding="sm" className={cx(SHELL_CLASS, className)}>
+    <Card
+      aria-hidden
+      padding={lg ? 'md' : 'sm'}
+      className={cx(lg ? SHELL_LG_CLASS : SHELL_CLASS, className)}
+    >
       <div className={HEAD_ROW_CLASS}>
-        <span className={cx('skeleton', ICON_TILE_SIZE.sm)} />
+        <span className={cx('skeleton', lg ? ICON_TILE_SIZE.md : ICON_TILE_SIZE.sm)} />
       </div>
       <div className="min-w-0">
-        <p className={LABEL_CLASS}>
+        <p className={lg ? LABEL_LG_CLASS : LABEL_CLASS}>
           <span className={cx(BAR_CLASS, 'w-16')}>&nbsp;</span>
         </p>
-        <p className={VALUE_CLASS}>
+        <p className={lg ? VALUE_LG_CLASS : VALUE_CLASS}>
           <span className={cx(BAR_CLASS, 'w-20')}>&nbsp;</span>
         </p>
       </div>
-      <div className={DELTA_ROW_CLASS}>
+      <div className={lg ? DELTA_LG_ROW_CLASS : DELTA_ROW_CLASS}>
         <span className={cx(BAR_CLASS, 'w-12')}>&nbsp;</span>
       </div>
     </Card>

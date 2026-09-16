@@ -350,6 +350,7 @@ export function ExportActions<T>({
           onClick={onRefresh}
           loading={refreshing}
           title="Refresh (Ctrl+R)"
+          kbd="Ctrl R"
         >
           Refresh
         </Button>
@@ -382,6 +383,7 @@ export function ExportActions<T>({
           loading={busy === 'print'}
           disabled={disabled || anyBusy}
           title="Print the register (Ctrl+P)"
+          kbd="Ctrl P"
         >
           Print
         </Button>

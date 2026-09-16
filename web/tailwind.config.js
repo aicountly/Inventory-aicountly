@@ -25,7 +25,18 @@ export default {
   theme: {
     extend: {
       screens: {
-        tall: { raw: '(min-height: 800px)' },
+        /*
+         * "Tall enough to lock the register to the viewport."
+         *
+         * Used by one file — ui/shell/ReportCompactShell — to decide between a
+         * page that scrolls and a page whose chrome is pinned while the table
+         * takes what is left. Raised from 800px when the register header gained
+         * the hero row and the at-a-glance strip: at 800px the pinned chrome
+         * left room for a single row of data, which is a worse answer than
+         * letting the page scroll. Below this the table renders in full and the
+         * page scrolls, which is the behaviour the shell falls back to.
+         */
+        tall: { raw: '(min-height: 940px)' },
       },
       fontFamily: {
         nunito: ['Nunito', 'sans-serif'],

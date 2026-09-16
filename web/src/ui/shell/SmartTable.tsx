@@ -103,6 +103,12 @@ export interface SmartTableProps<T> {
   empty?: ReactNode
   footer?: ReactNode
   caption?: string
+  /** Card heading over the table — "Stock balances". */
+  title?: ReactNode
+  /** One line under the heading, saying what the rows are. */
+  description?: ReactNode
+  /** Right of the heading — "Customize columns" on a register. */
+  headerAction?: ReactNode
   /** Raw `<tr>` rows for the table foot. Ignored when `totals` is given. */
   tfoot?: ReactNode
 
@@ -190,6 +196,9 @@ export function SmartTable<T>({
   empty,
   footer,
   caption,
+  title,
+  description,
+  headerAction,
   tfoot,
   totals,
   rowGroup,
@@ -441,7 +450,10 @@ export function SmartTable<T>({
     <tfoot>{tfoot}</tfoot>
   ) : totals ? (
     <tfoot>
-      <tr className="border-t-2 border-gray-200 bg-gray-50 font-semibold text-gray-900">
+      {/* The totals row is the register's answer, so it is tinted with the
+          brand rather than greyed like more chrome. Kept faint: it has to read
+          as a summary of the rows above, not as a selected row. */}
+      <tr className="border-t-2 border-primary/20 bg-primary-light/40 font-semibold text-gray-900">
         {columns.map((col) => {
           const value = typeof totals === 'function' ? totals(col) : totals[col.key]
           return (
@@ -453,7 +465,7 @@ export function SmartTable<T>({
                 alignCls(col.align),
                 col.align === 'right' && AMOUNT_CELL_CLASS,
                 scrollBody &&
-                  'sticky bottom-0 z-10 bg-gray-50 shadow-[0_-1px_0_0_rgb(var(--color-border))]',
+                  'sticky bottom-0 z-10 bg-[rgb(var(--color-primary-light))] shadow-[0_-1px_0_0_rgb(var(--color-primary)/0.2)]',
               )}
             >
               {value ?? ''}
@@ -468,16 +480,50 @@ export function SmartTable<T>({
     <Card
       padding={cardPadding}
       className={cx(
-        fillAvailable && 'flex flex-col min-h-0 h-full overflow-hidden',
+        /*
+         * The fill is gated on the same `tall:` breakpoint as the shell that
+         * locks the page to the viewport (ui/shell/ReportCompactShell).
+         *
+         * It used to be unconditional, which quietly broke the shell's own
+         * promise that "on a short viewport the page scrolls normally rather
+         * than squeezing the table into a few rows": below the breakpoint the
+         * page stopped constraining height, `h-full` resolved against a parent
+         * that had sized to its content, and the scroll area collapsed to about
+         * one row while the rest of the viewport sat empty underneath it.
+         * Gated, the short-viewport case renders the table at its natural
+         * height and lets the page scroll, which is what was meant all along.
+         */
+        fillAvailable && 'tall:flex tall:flex-col tall:min-h-0 tall:h-full tall:overflow-hidden',
         scrollBody && !fillAvailable && 'flex flex-col overflow-hidden',
         className,
       )}
     >
+      {title || headerAction ? (
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-gray-200 px-4 py-3 print:hidden">
+          <div className="min-w-0">
+            {title ? (
+              <h2 className="truncate text-[0.95rem] font-semibold tracking-tight text-gray-900">
+                {title}
+              </h2>
+            ) : null}
+            {description ? (
+              <p className="mt-0.5 truncate text-[11px] text-gray-400">{description}</p>
+            ) : null}
+          </div>
+          {headerAction ? <div className="shrink-0">{headerAction}</div> : null}
+        </div>
+      ) : null}
       <div
         ref={navEnabled ? containerRef : undefined}
         className={cx(
           'scrollbar-thin',
-          scrollBody ? 'overflow-auto flex-1 min-h-0' : 'overflow-x-auto',
+          scrollBody
+            ? fillAvailable
+              // Sideways always; up and down only once the card has a height to
+              // scroll within.
+              ? 'overflow-x-auto tall:overflow-auto tall:flex-1 tall:min-h-0'
+              : 'overflow-auto flex-1 min-h-0'
+            : 'overflow-x-auto',
         )}
         tabIndex={navEnabled ? -1 : undefined}
       >

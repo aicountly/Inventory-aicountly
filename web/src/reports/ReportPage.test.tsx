@@ -13,7 +13,9 @@ import type { ReportResponse } from '../services/reportsApi'
  * subject.
  */
 
-const can = vi.fn(() => true)
+// Typed with the key it really receives, so a test can answer differently per
+// permission rather than only flipping the whole gate.
+const can = vi.fn((_key?: string | readonly string[]) => true)
 
 vi.mock('../company/CompanyContext', () => ({
   useCompany: () => ({
@@ -149,7 +151,12 @@ describe('the register engine renders a config', () => {
     renderRegister()
     expect(await screen.findByText('GRN-001')).toBeTruthy()
     expect(screen.getByRole('link', { name: 'Registers' })).toBeTruthy()
-    expect(screen.getByText('Demo register')).toBeTruthy()
+    // The name is deliberately in two places now — as the last crumb of the
+    // trail, and as the page's own heading in the hero beneath it — so this
+    // asks for the heading rather than for "some element with this text".
+    expect(screen.getByRole('heading', { level: 1, name: 'Demo register' })).toBeTruthy()
+    const trail = screen.getByRole('navigation', { name: 'Breadcrumb' })
+    expect(within(trail).getByText('Demo register')).toBeTruthy()
   })
 
   it('pins a totals row built from the server summary, not the page', async () => {
@@ -313,3 +320,72 @@ describe('a register that needs a filter before it means anything', () => {
     expect(spy.mock.calls[0][0].query.item_id).toBe('12')
   })
 })
+
+/**
+ * The kebab at the end of a row.
+ *
+ * Its job is to make the drill-through a mouse can already do visible, so the
+ * things that matter are that it lists only what the member may open and that
+ * it never leaks into a file.
+ */
+describe('row actions', () => {
+  const withActions = defineRegister<Row, Summary>({
+    ...demoRegister,
+    rowActions: (r) => [
+      { key: 'open', label: 'Open document', to: `/documents/${r.document_id}`, permission: 'documents.read' },
+      { key: 'ledger', label: 'View ledger', to: '/registers/stock-ledger', permission: 'reports.stock_ledger.read' },
+    ],
+  })
+
+  function renderWithActions() {
+    withActions.fetch = (args) => fetchSpy(args) as Promise<ReportResponse<Row, Summary>>
+    return render(
+      <MemoryRouter initialEntries={['/registers/demo']}>
+        <Routes>
+          <Route path="/registers/demo" element={<ReportPage config={withActions} />} />
+          <Route path="/documents/:id" element={<p>Document screen</p>} />
+        </Routes>
+      </MemoryRouter>,
+    )
+  }
+
+  it('offers the row its actions without opening the row', async () => {
+    renderWithActions()
+    await screen.findByText('GRN-001')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Row actions' })[0])
+    const menu = await screen.findByRole('menu', { name: 'Row actions' })
+    expect(within(menu).getByRole('menuitem', { name: 'Open document' })).toBeTruthy()
+    // The row opens on click; the kebab must not take the reader with it.
+    expect(screen.queryByText('Document screen')).toBeNull()
+  })
+
+  it('drops an action the member has no permission for', async () => {
+    can.mockImplementation((key?: string | readonly string[]) => {
+      const keys = typeof key === 'string' ? [key] : (key ?? [])
+      return !keys.includes('reports.stock_ledger.read')
+    })
+    renderWithActions()
+    await screen.findByText('GRN-001')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Row actions' })[0])
+    const menu = await screen.findByRole('menu', { name: 'Row actions' })
+    expect(within(menu).getByRole('menuitem', { name: 'Open document' })).toBeTruthy()
+    expect(within(menu).queryByRole('menuitem', { name: 'View ledger' })).toBeNull()
+  })
+
+  it('keeps the kebab out of the export, which writes data and not chrome', async () => {
+    renderWithActions()
+    await screen.findByText('GRN-001')
+    const headers = screen.getAllByRole('columnheader').map((th) => th.textContent)
+    expect(headers).toContain('Row actions')
+    // Configure Columns lists what the file can carry; the kebab is not a column.
+    fireEvent.click(screen.getByRole('button', { name: /^Columns/ }))
+    expect(screen.queryByRole('checkbox', { name: 'Row actions' })).toBeNull()
+  })
+
+  it('adds no column at all to a register that declares none', async () => {
+    renderRegister()
+    await screen.findByText('GRN-001')
+    expect(screen.queryByRole('button', { name: 'Row actions' })).toBeNull()
+  })
+})
+

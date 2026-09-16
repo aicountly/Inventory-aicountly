@@ -168,7 +168,11 @@ describe('the documents register matches what Books offered', () => {
     renderPage()
     await screen.findByText('ST-0101')
 
-    expect(screen.getByRole('button', { name: /Configure columns|Columns/i })).toBeTruthy()
+    // Two doors to one dialog: the toolbar's counted button and "Customize
+    // columns" over the table. Name them separately rather than matching
+    // "columns" loosely and finding both.
+    expect(screen.getByRole('button', { name: /^Columns/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Customize columns' })).toBeTruthy()
     // Print is its own button; CSV / Excel / PDF live behind Export.
     expect(screen.getByRole('button', { name: /^Print/ })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Export' }))

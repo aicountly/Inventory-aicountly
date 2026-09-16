@@ -77,7 +77,14 @@ export function Button({
         <Icon className={cx('shrink-0', size === 'xs' ? 'w-3.5 h-3.5' : 'w-4 h-4')} aria-hidden />
       ) : null}
       {children ? <span className="truncate">{children}</span> : null}
-      {kbd ? <span className="kbd ml-1">{kbd}</span> : null}
+      {/* The chip shows the shortcut; it is not part of what the button is
+          called. Left in the accessible name, every such control announces
+          "Print Ctrl P", and the binding is already on the button's title. */}
+      {kbd ? (
+        <span className="kbd ml-1" aria-hidden>
+          {kbd}
+        </span>
+      ) : null}
       {IconRight ? <IconRight className="w-4 h-4 opacity-80 shrink-0" aria-hidden /> : null}
     </button>
   )

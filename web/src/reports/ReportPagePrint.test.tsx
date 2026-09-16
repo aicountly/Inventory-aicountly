@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi, beforeEach } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { defineRegister } from '../registers/RegisterConfig'
 import { buildTotalsRow, totalsLabel } from '../registers/registerTotals'
@@ -201,7 +201,13 @@ describe('Ctrl+P on a register', () => {
   it('is advertised because it is wired', async () => {
     renderRegister()
     await screen.findByText('Widget A')
-    expect(screen.getByText('Search · Refresh · Print · Back')).toBeTruthy()
+    // The shortcut is advertised on the control it belongs to, rather than in
+    // a detached row of chips beside the page title.
+    const print = screen.getByRole('button', { name: /^Print/ })
+    expect(within(print).getByText('Ctrl P')).toBeTruthy()
+    expect(within(screen.getByRole('button', { name: /^Refresh/ })).getByText('Ctrl R')).toBeTruthy()
+    expect(within(screen.getByRole('button', { name: /^Search/ })).getByText('/')).toBeTruthy()
+    expect(within(screen.getByRole('button', { name: /^Back/ })).getByText('Esc')).toBeTruthy()
   })
 
   it('does not fire on an empty register, exactly as the Print button does not', async () => {
@@ -224,10 +230,10 @@ describe('Ctrl+P on a register', () => {
         </ReportCompactShell>
       </MemoryRouter>,
     )
-    expect(screen.getByText('Search · Refresh · Back')).toBeTruthy()
-    // Ctrl+R stays; the P of Ctrl+P is the chip that would be a lie.
-    expect(screen.queryAllByText('P')).toHaveLength(0)
-    expect(screen.getAllByText('R').length).toBeGreaterThan(0)
+    // No print handler, so no Print button and therefore no Ctrl P chip: the
+    // advertisement cannot outlive the wiring, because it is part of it.
+    expect(screen.queryByRole('button', { name: /^Print/ })).toBeNull()
+    expect(screen.queryAllByText('Ctrl P')).toHaveLength(0)
   })
 })
 

@@ -19,6 +19,8 @@ import type { ReportResponse } from '../services/reportsApi'
 import type { ReportConfig } from '../reports/types'
 import type { IconTone } from '../ui/IconTile'
 import type { BadgeTone } from '../ui/Badge'
+import type { RegisterInsightSet } from './RegisterInsightStrip'
+import type { RegisterRowAction } from './RegisterRowMenu'
 
 export type { ReportConfig, ReportColumn, ReportFilter, FilterContext, FilterKind } from '../reports/types'
 
@@ -136,6 +138,17 @@ export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
   drillTo?: (row: T) => string | null
 
   /**
+   * Per-row actions, behind a kebab at the right edge of the row.
+   *
+   * Declare only what the register already supports — a route that exists and
+   * the member may open. The engine drops any action whose `permission` the
+   * member lacks, and drops the column entirely when that leaves nothing, so a
+   * restricted reader sees no empty menu. It is chrome, never data: the CSV,
+   * the spreadsheet and the printed sheet do not carry it.
+   */
+  rowActions?: (row: T) => readonly RegisterRowAction[]
+
+  /**
    * The pinned `<tfoot>`, keyed by column key.
    *
    * Build it from the server summary, not from `rows` — the whole point is that
@@ -161,6 +174,26 @@ export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
 
   /** Clickable KPI cards above the table. Falls back to `summary` when absent. */
   kpis?: (summary: S, response: ReportResponse<T, S>) => StatCardSpec[]
+
+  /**
+   * The operational strip under the KPI cards — what the rows on screen say
+   * about the state of things, rather than what they sum to.
+   *
+   * Derive it from the summary and the rows the register already has; never
+   * fetch for it, and never state a count more widely than the data supports.
+   * On an endpoint whose summary is the served page, say "on this page" in the
+   * hint the same way the cards and the footer do. A register that declares
+   * none simply shows no strip.
+   */
+  insights?: (summary: S, response: ReportResponse<T, S>) => RegisterInsightSet
+
+  /** One line under the "Filters" heading, naming what these filters narrow. */
+  filtersHint?: string
+
+  /** Heading over the table card. Defaults to the register's own title. */
+  tableTitle?: string
+  /** One line under that heading, saying what the rows on screen are. */
+  tableHint?: string
 
   /**
    * Groupings the reader can switch between, with per-group subtotals. The

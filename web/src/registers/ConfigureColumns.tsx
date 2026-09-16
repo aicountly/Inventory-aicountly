@@ -22,6 +22,18 @@ export interface ConfigureColumnsProps {
   disabled?: boolean
   title?: string
   description?: string
+  /**
+   * Drive the dialog from outside.
+   *
+   * The register offers the same dialog from two places — the toolbar, and
+   * "Customize columns" over the table — and two components each holding their
+   * own `open` would be two dialogs that can both be open at once over the
+   * same preference. Pass this pair and the caller owns the one flag; leave
+   * them out and the component keeps its own, which is what every other caller
+   * does.
+   */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }
 
 function labelFor(col: ConfigurableColumn): string {
@@ -48,8 +60,16 @@ export function ConfigureColumns({
   disabled = false,
   title = 'Configure columns',
   description = 'Choose the columns to show. The choice is remembered for your own sign-in, and the export and print follow it.',
+  open: openProp,
+  onOpenChange,
 }: ConfigureColumnsProps) {
-  const [open, setOpen] = useState(false)
+  const [ownOpen, setOwnOpen] = useState(false)
+  const controlled = openProp !== undefined
+  const open = controlled ? openProp : ownOpen
+  const setOpen = (next: boolean) => {
+    if (!controlled) setOwnOpen(next)
+    onOpenChange?.(next)
+  }
 
   const fixed = columns.filter((col) => col.alwaysVisible === true)
   const configurable = columns.filter((col) => col.alwaysVisible !== true)

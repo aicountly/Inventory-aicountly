@@ -12,6 +12,10 @@ export { FormSectionCard, FormGrid, FormField } from './FormSectionCard'
 export { PageTabBar, RouteTabBar } from './PageTabBar'
 export type { RouteTab } from './PageTabBar'
 export { StickyActionBar, ActionBarTotal } from './StickyActionBar'
+export { RegisterHero } from './RegisterHero'
+export type { RegisterHeroProps } from './RegisterHero'
+export { LiveDataBadge } from './LiveDataBadge'
+export type { LiveDataBadgeProps } from './LiveDataBadge'
 export { ReportCompactShell } from './ReportCompactShell'
 export type { ReportCompactShellProps } from './ReportCompactShell'
 export { ReportListShell } from './ReportListShell'
@@ -29,4 +33,5 @@ export {
   REPORT_TABLE_PROPS,
   DASHBOARD_TABLE_PROPS,
   STAGING_TABLE_PROPS,
+  REGISTER_KPI_GRID,
 } from '../../styles/designTokens'
