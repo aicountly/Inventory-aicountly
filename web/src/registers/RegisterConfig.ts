@@ -82,6 +82,44 @@ export interface RegisterSelection<T> {
 export interface RegisterFetchArgs {
   query: ListQuery
   signal?: AbortSignal
+  /**
+   * Why the rows are being fetched.
+   *
+   * `page` is the screen; `export` is the pager walking every page for a CSV,
+   * a sheet or a print. A register that asks its endpoint for an aggregate over
+   * the whole filtered set wants it once, with the page — asking again on each
+   * of seventeen export pages re-runs the same aggregate for figures the
+   * caller already holds.
+   */
+  purpose?: 'page' | 'export'
+}
+
+/**
+ * The filter *panel* arrangement: heading, quick period chips, a labelled grid
+ * and an overflow popover.
+ *
+ * Declaring this is what opts a register out of the one-row toolbar. It changes
+ * the arrangement only — the filters, their keys, their values and the moment
+ * they apply are the `filters` array's business either way.
+ */
+export interface RegisterFilterPanelSpec {
+  /** Card heading. Defaults to "Filters". */
+  title?: string
+  /** One line under the heading, naming what the filters are for. */
+  description?: string
+  /**
+   * Period presets offered as chips, by id (see registers/dateRangePresets).
+   * Only meaningful on a register that declares a `date_range` filter.
+   */
+  quickRanges?: readonly string[]
+  /** What the "no period at all" chip is called here — "All documents". */
+  allRangeLabel?: string
+  /**
+   * Filter keys that get a cell in the grid. Everything else declared moves
+   * behind "More filters", which carries the count of those that are set.
+   * Omit and every filter is in the grid.
+   */
+  primaryKeys?: readonly string[]
 }
 
 export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
@@ -116,8 +154,50 @@ export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
    */
   headerActions?: ReactNode
 
+  /**
+   * How the screen is arranged.
+   *
+   * `toolbar` (the default) is the one-row filter bar and the compact
+   * breadcrumb header every register has always had. `panel` is the wider
+   * treatment: a page header with the title and its description, the filter
+   * panel below it, and KPI cards laid out four to a row. It suits a register
+   * with many filters that people work in all day rather than glance at.
+   */
+  layout?: 'toolbar' | 'panel'
+
+  /** Panel arrangement for the filters. Implies `layout: 'panel'` is wanted. */
+  filterPanel?: RegisterFilterPanelSpec
+
+  /**
+   * Decoration beside the title in `page` layout, rendered only at ≥1536px and
+   * hidden from assistive technology. Nothing a reader needs belongs here.
+   */
+  headerAside?: ReactNode
+
+  /**
+   * The scope line's period, decided from the live filter values.
+   *
+   * `scopePeriod` is a constant, which is right for a register that is never
+   * read inside the selected year. A register carrying a filter that WIDENS the
+   * scope — "every financial year" — has to be able to say so, because the
+   * scope line is stamped on the printed sheet and is the only record there of
+   * what was asked for. Takes precedence over `scopePeriod` when it returns a
+   * string; return undefined to fall back to it.
+   */
+  scopePeriodFor?: (values: Record<string, string>) => string | undefined
+
   /** Row selection and the bulk actions it enables. */
   selectable?: RegisterSelection<T>
+
+  /**
+   * A per-row control pinned to the right of the table — the "⋮" menu.
+   *
+   * Declared here rather than as a column for the same reason the checkbox is:
+   * it is chrome, not data. A CSV whose last column was an empty string under
+   * the header "" would be exporting the screen's furniture, and the column
+   * configurator would offer to hide a menu.
+   */
+  rowActions?: (row: T) => ReactNode
 
   /**
    * What the scope line says about the period, when the selected financial
@@ -191,10 +271,29 @@ export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
   group?: RegisterGroup
   icon?: LucideIcon
   tone?: IconTone
-  /** Shown on the hub tile instead of `description` when the full text is long. */
+  /**
+   * The lead line, where the full `description` is too long to be one.
+   *
+   * Used by the hub tile and by the `page` header. `description` stays the
+   * register's full self-description and is what the export and the printed
+   * sheet carry — a caveat that belongs on paper ("this type carries no
+   * valuation…") should not also be the screen's subtitle when the screen
+   * already states it in its own callout.
+   */
   shortDescription?: string
   /** Register is reachable at `/registers/<path>` unless this overrides it. */
   routePath?: string
+  /**
+   * What to show when the register is empty and NO filter is set.
+   *
+   * "No rows match these filters. Widen the period or clear a filter" is the
+   * wrong sentence for a company that has simply never entered one of these —
+   * it sends the reader hunting for a filter that is not there. Registers that
+   * can be legitimately empty supply the other screen; the rest fall back to
+   * the filtered message, which is right often enough.
+   */
+  emptyUnfiltered?: ReactNode
+
   /** Noun used in the totals label: "Total (412 movements)". */
   rowNoun?: string
   rowNounPlural?: string

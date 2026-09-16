@@ -13,6 +13,18 @@ export interface ReportCompactShellProps {
   description?: ReactNode
   icon?: LucideIcon
   headerActions?: ReactNode
+  /**
+   * `compact` (the default) prints the breadcrumb trail, the toolbar and the
+   * actions on one row — right for a register reached from the hub, where the
+   * trail is how the reader knows where they are.
+   *
+   * `page` gives the screen a proper heading: title, description and actions,
+   * with the breadcrumbs above. A top-level destination people work in all day
+   * earns the two lines; `/documents` is one.
+   */
+  headerVariant?: 'compact' | 'page'
+  /** `page` only: decoration beside the title, shown only at ≥1536px. */
+  headerAside?: ReactNode
   toolbar?: ReactNode
   shortcutKeys?: readonly string[]
   shortcutLabel?: string
@@ -47,6 +59,8 @@ export function ReportCompactShell({
   description,
   icon,
   headerActions,
+  headerVariant = 'compact',
+  headerAside,
   toolbar,
   shortcutKeys,
   shortcutLabel,
@@ -66,34 +80,47 @@ export function ReportCompactShell({
   const hintLabel = shortcutLabel ?? `Search · Refresh${onPrint ? ' · Print' : ''} · Back`
 
   const showHint = Boolean(onRefresh || onPrint || searchInputRef)
-  const actions = (
-    <>
-      {showHint ? (
-        <KeyboardShortcutHint
-          keys={hintKeys}
-          label={hintLabel}
-          className="hidden xl:inline-flex"
-        />
-      ) : null}
-      {headerActions}
-    </>
-  )
+  const hint = showHint ? (
+    <KeyboardShortcutHint keys={hintKeys} label={hintLabel} className="hidden xl:inline-flex" />
+  ) : null
+
+  // In `page` mode the hint drops under the title instead of competing with the
+  // buttons. It is a reminder, not a control, and the action row is where the
+  // reader's eye goes for something to press.
+  const page = headerVariant === 'page'
 
   return (
     <PageShell
       compact
       paddingBottom={false}
-      className={cx('flex flex-col tall:h-[calc(100dvh-7rem)] tall:overflow-hidden', className)}
+      className={cx(
+        'flex flex-col',
+        page
+          ? 'taller:h-[calc(100dvh-7rem)] taller:overflow-hidden'
+          : 'tall:h-[calc(100dvh-7rem)] tall:overflow-hidden',
+        className,
+      )}
     >
       <BreadcrumbHeader
         breadcrumbs={breadcrumbs}
         title={title}
         description={description}
         icon={icon}
-        actions={actions}
-        toolbar={toolbar}
+        meta={page ? hint : undefined}
+        aside={page ? headerAside : undefined}
+        actions={
+          page ? (
+            headerActions
+          ) : (
+            <>
+              {hint}
+              {headerActions}
+            </>
+          )
+        }
+        toolbar={page ? undefined : toolbar}
         backTo={backTo}
-        compact
+        compact={!page}
         className="shrink-0 print:hidden"
       />
       <div className="flex flex-col flex-1 min-h-0 gap-2">{children}</div>
