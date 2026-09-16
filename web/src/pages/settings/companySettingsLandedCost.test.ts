@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { switchableCostTypes } from './CompanySettingsPage'
+import { switchableCostTypes } from './settingsDraft'
 import type { LandedCostPolicy, LandedCostType } from '../../documents/landedCost'
 
 const policy = (switchable: LandedCostType[]): LandedCostPolicy => ({

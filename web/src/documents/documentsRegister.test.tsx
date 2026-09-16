@@ -7,7 +7,7 @@ import {
   serverSortableOnly,
 } from './documentsRegister'
 import { NATIVE_DOCUMENT_TYPES, SOURCED_DOCUMENT_TYPES } from './registry'
-import type { PageSummary } from '../registers/configs/pageSummary'
+import type { DocumentsSummary } from './documentsSummary'
 import type { ReportColumn } from '../reports/types'
 import type { ReportResponse } from '../services/reportsApi'
 import type { DocumentListRow } from './types'
@@ -23,18 +23,20 @@ import type { DocumentListRow } from './types'
 
 vi.mock('../services/documentsApi', () => ({ documentsApi: { list: vi.fn() } }))
 
-function summary(over: Partial<PageSummary> = {}): PageSummary {
+function summary(over: Partial<DocumentsSummary> = {}): DocumentsSummary {
   return {
     total: 4182,
     pageRows: 50,
     sums: { line_count: 120, valuation_total: 98_500 },
     isWholeResult: false,
+    fromServer: false,
+    warehousesImpacted: null,
     ...over,
   }
 }
 
 /** The envelope the engine hands `summary` / `kpis`; only the summary is read. */
-function response(s: PageSummary): ReportResponse<DocumentListRow, PageSummary> {
+function response(s: DocumentsSummary): ReportResponse<DocumentListRow, DocumentsSummary> {
   return { data: [], meta: { total: s.total, limit: 50, offset: 0 }, summary: s, report: 'documents' }
 }
 
