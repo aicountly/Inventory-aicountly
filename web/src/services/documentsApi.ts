@@ -5,7 +5,7 @@
 
 import { api } from './api'
 import type { ItemResponse, ListQuery, ListResponse } from './api'
-import type { CreateDocumentPayload, DocumentListRow, DocumentTypeRow, InventoryDocument, PrintSnapshot } from '../documents/types'
+import type { CreateDocumentPayload, DocumentListRow, DocumentListSummary, DocumentTypeRow, InventoryDocument, PrintSnapshot } from '../documents/types'
 
 const BASE = 'v1/inventory-documents'
 
@@ -23,6 +23,18 @@ export interface DocumentListFilters extends ListQuery {
   source_app?: string
   party_ref?: number | string
   all_fy?: boolean
+  /**
+   * Ask for the aggregate over the whole filtered set (`summary=1`).
+   *
+   * Off by default: it is two extra reads, and a caller walking every page for
+   * an export wants them once, with the first page, not once per page.
+   */
+  summary?: number
+}
+
+/** The list, with the aggregate when `summary=1` was asked for. */
+export interface DocumentListResponse extends ListResponse<DocumentListRow> {
+  summary?: DocumentListSummary
 }
 
 export interface MutationResponse<T> extends ItemResponse<T> {
@@ -53,7 +65,7 @@ function idempotent(): { headers: Record<string, string> } {
 }
 
 export const documentsApi = {
-  list(filters: DocumentListFilters = {}, signal?: AbortSignal): Promise<ListResponse<DocumentListRow>> {
+  list(filters: DocumentListFilters = {}, signal?: AbortSignal): Promise<DocumentListResponse> {
     return api.list<DocumentListRow>(BASE, filters, { signal })
   },
 

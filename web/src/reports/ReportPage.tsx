@@ -7,6 +7,7 @@ import { useScopeLabel } from '../company/useScopeLabel'
 import { RequirePermission } from '../components/RequirePermission'
 import { ConfigureColumns } from '../registers/ConfigureColumns'
 import { RegisterFilterBar } from '../registers/RegisterFilterBar'
+import { RegisterFilterPanel } from '../registers/RegisterFilterPanel'
 import { RegisterKpis, summaryItemsToCards } from '../registers/RegisterKpis'
 import { describeDateRange } from '../registers/dateRangePresets'
 import { totalsLabel as registerTotalsLabel, totalsRowToText } from '../registers/registerTotals'
@@ -33,7 +34,7 @@ import { useExportIdentity } from '../export/useExportIdentity'
 import { ReportListShell } from '../ui/shell/ReportListShell'
 import { ServerTablePagination } from '../ui/shell/TablePagination'
 import { SmartTable } from '../ui/shell/SmartTable'
-import { REPORT_TABLE_PROPS } from '../styles/designTokens'
+import { METRIC_CARD_GRID, REPORT_TABLE_PROPS, TABLE_ROW_SELECTED } from '../styles/designTokens'
 import type { IconTone } from '../ui/IconTile'
 import { todayIso } from '../utils/format'
 import { filterUrlKeys, resolveFilterValues } from './helpers'
@@ -89,7 +90,7 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
   const navigate = useNavigate()
   const searchInputRef = useRef<HTMLInputElement | null>(null)
 
-  const scopeLabel = useScopeLabel(config.scopePeriod)
+  const scopePeriodFor = config.scopePeriodFor
   // Filled by ExportActions so Ctrl+P prints the letterheaded sheet rather than
   // whatever slice of the app DOM happens to be on screen.
   const printRef = useRef<(() => void) | null>(null)
@@ -116,6 +117,11 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
     [config.filters, state.filters, ctx],
   )
 
+  // A filter that widens the scope has to be able to say so: the scope line is
+  // stamped on every export and printed sheet, and is the only record there of
+  // what was actually asked for.
+  const scopeLabel = useScopeLabel(scopePeriodFor?.(values) ?? config.scopePeriod)
+
   // Some registers are meaningless without a filter — a stock ledger is one
   // item's ledger, and "every item ever" is not a smaller version of it.
   const missingRequired = useMemo(
@@ -129,9 +135,13 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
   )
 
   const fetchPage = useCallback(
-    (query: ListQuery, signal?: AbortSignal): Promise<ReportResponse<T, S>> =>
+    (
+      query: ListQuery,
+      signal?: AbortSignal,
+      purpose: 'page' | 'export' = 'page',
+    ): Promise<ReportResponse<T, S>> =>
       config.fetch
-        ? config.fetch({ query, signal })
+        ? config.fetch({ query, signal, purpose })
         : fetchReport<T, S>(config.path, query, signal),
     [config],
   )
@@ -290,10 +300,31 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
     }
   }, [selectable, selected, selectableRows, allOnPageSelected, someOnPageSelected, togglePage, toggleRow])
 
-  // The exports keep `visibleColumns`; only the table gains the checkbox.
+  const actionsColumn = useMemo<ReportColumn<T> | null>(() => {
+    const rowActions = config.rowActions
+    if (!rowActions) return null
+    return {
+      key: '__actions',
+      header: <span className="sr-only">Actions</span>,
+      align: 'right',
+      width: '3rem',
+      alwaysVisible: true,
+      render: (row: T) => rowActions(row),
+      // Chrome, not data: never in a CSV, a PDF or a printed sheet.
+      csv: () => '',
+    }
+  }, [config.rowActions])
+
+  // The exports keep `visibleColumns`; only the table gains the checkbox and
+  // the row menu.
   const tableColumns = useMemo(
-    () => (selectColumn ? [selectColumn, ...visibleColumns] : visibleColumns),
-    [selectColumn, visibleColumns],
+    () =>
+      [
+        ...(selectColumn ? [selectColumn] : []),
+        ...visibleColumns,
+        ...(actionsColumn ? [actionsColumn] : []),
+      ],
+    [selectColumn, visibleColumns, actionsColumn],
   )
 
   // ---- totals --------------------------------------------------------------
@@ -323,7 +354,14 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
   const fetchAll = useCallback(
     () =>
       fetchAllRows<T>((page, limit) =>
-        fetchPage({ ...apiFilters, sort: state.sort, order: state.order, page, limit }),
+        // `export`: the pager is walking every page, so a register that asks
+        // its endpoint for an aggregate over the whole filtered set skips it
+        // here rather than re-running it once per page.
+        fetchPage(
+          { ...apiFilters, sort: state.sort, order: state.order, page, limit },
+          undefined,
+          'export',
+        ),
       ),
     [fetchPage, apiFilters, state.sort, state.order],
   )
@@ -380,7 +418,7 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
 
   // Company, scope, registered office, GSTIN and logo — the letterhead every
   // export and every printed sheet carries.
-  const identity = useExportIdentity(config.scopePeriod)
+  const identity = useExportIdentity(scopePeriodFor?.(values) ?? config.scopePeriod)
 
   // Label for the printed totals row when the register's own totals map leaves
   // the label cell blank.
@@ -390,10 +428,58 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
   )
 
   // ---- render --------------------------------------------------------------
-  const breadcrumbs = useMemo(
-    () => config.breadcrumbs ?? [{ label: 'Registers', to: '/registers' }, { label: config.title }],
-    [config.breadcrumbs, config.title],
-  )
+  /**
+   * A ticked row looks ticked.
+   *
+   * The checkbox is 14 pixels at the far left of a table a thousand pixels
+   * wide; on a register where the reader ticks four rows out of fifty and then
+   * presses "Print 4 documents", the only way to check the batch before it goes
+   * to paper is to run an eye down that column. The row carries the state too.
+   */
+  const rowClassName = useMemo(() => {
+    const declared = config.rowClassName
+    if (!selectable) return declared ? (row: T) => declared(row) : undefined
+    return (row: T) => {
+      const parts = [declared?.(row)]
+      if (selected.has(selectable.idOf(row))) parts.push(TABLE_ROW_SELECTED)
+      const cls = parts.filter(Boolean).join(' ')
+      return cls || undefined
+    }
+  }, [config.rowClassName, selectable, selected])
+
+  /**
+   * How many filters the reader has actually set.
+   *
+   * Counted over the URL rather than the resolved values, because a declared
+   * default is the register's own choice and not something the reader can be
+   * asked to clear. A period counts once, not once per end.
+   */
+  const activeFilterCount = useMemo(() => {
+    const set = new Set(
+      Object.keys(state.filters).filter((k) => state.filters[k] && state.filters[k] !== '0'),
+    )
+    let n = 0
+    for (const f of config.filters) {
+      if (f.hidden) continue
+      if (f.kind === 'date_range') {
+        if (set.has(f.key) || set.has(f.toKey ?? 'to')) n += 1
+        continue
+      }
+      if (set.has(f.key)) n += 1
+    }
+    return n
+  }, [config.filters, state.filters])
+
+  const panel = config.layout === 'panel' || config.filterPanel !== undefined
+
+  const breadcrumbs = useMemo(() => {
+    const trail =
+      config.breadcrumbs ?? [{ label: 'Registers', to: '/registers' }, { label: config.title }]
+    // The page header prints the title as an <h1>. A trail of one unlinked crumb
+    // is that same title again, in smaller type, directly above it.
+    if (panel && trail.length === 1 && !trail[0].to) return undefined
+    return trail
+  }, [config.breadcrumbs, config.title, panel])
 
   const headerActions = (
     <>
@@ -429,49 +515,77 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
     </>
   )
 
+  const groupByControl = config.groupBy?.length ? (
+    <FilterField label="Group by">
+      <Select
+        value={groupKey}
+        onChange={(e) => setGroupKey(e.target.value)}
+        aria-label="Group by"
+        className="w-auto min-w-[9rem]"
+      >
+        <option value="">No grouping</option>
+        {config.groupBy.map((g) => (
+          <option key={g.key} value={g.key}>
+            {g.label}
+          </option>
+        ))}
+      </Select>
+    </FilterField>
+  ) : undefined
+
+  // The header takes the lead line; `description` in full is what the export and
+  // the printed sheet carry. Sentence-ended text is left as it is rather than
+  // gaining a second full stop.
+  const headerText = config.shortDescription ?? config.description
+  const headerDescription = /[.!?]$/.test(headerText.trim()) ? headerText : `${headerText}.`
+
   return (
     <ReportListShell
       breadcrumbs={breadcrumbs}
       title={config.title}
-      description={`${config.description}.`}
+      description={headerDescription}
       icon={config.icon ?? FileSearch}
+      headerVariant={panel ? 'page' : 'compact'}
+      headerAside={config.headerAside}
       headerActions={headerActions}
       searchInputRef={searchInputRef}
       onRefresh={result.reload}
       onPrint={runPrint}
       backTo={config.backTo === undefined ? '/registers' : (config.backTo ?? undefined)}
-      scope={scopeLabel}
+      scope={panel ? undefined : scopeLabel}
+      bareFilters={panel}
+      summaryClassName={panel ? METRIC_CARD_GRID : undefined}
       filters={
-        <RegisterFilterBar
-          filters={config.filters}
-          values={values}
-          onChange={params.setFilter}
-          // Both ends of a period in one navigation — see useListParams.setFilters.
-          onChangeMany={params.setFilters}
-          onReset={params.reset}
-          showReset={Object.keys(state.filters).length > 0}
-          ctx={ctx}
-          searchInputRef={searchInputRef}
-          trailing={
-            config.groupBy?.length ? (
-              <FilterField label="Group by">
-                <Select
-                  value={groupKey}
-                  onChange={(e) => setGroupKey(e.target.value)}
-                  aria-label="Group by"
-                  className="w-auto min-w-[9rem]"
-                >
-                  <option value="">No grouping</option>
-                  {config.groupBy.map((g) => (
-                    <option key={g.key} value={g.key}>
-                      {g.label}
-                    </option>
-                  ))}
-                </Select>
-              </FilterField>
-            ) : undefined
-          }
-        />
+        panel ? (
+          <RegisterFilterPanel
+            spec={config.filterPanel ?? {}}
+            filters={config.filters}
+            values={values}
+            onChange={params.setFilter}
+            // Both ends of a period in one navigation — see useListParams.setFilters.
+            onChangeMany={params.setFilters}
+            onReset={params.reset}
+            activeCount={activeFilterCount}
+            onApply={result.reload}
+            applying={result.loading}
+            ctx={ctx}
+            searchInputRef={searchInputRef}
+            scope={scopeLabel}
+          />
+        ) : (
+          <RegisterFilterBar
+            filters={config.filters}
+            values={values}
+            onChange={params.setFilter}
+            // Both ends of a period in one navigation — see useListParams.setFilters.
+            onChangeMany={params.setFilters}
+            onReset={params.reset}
+            showReset={Object.keys(state.filters).length > 0}
+            ctx={ctx}
+            searchInputRef={searchInputRef}
+            trailing={groupByControl}
+          />
+        )
       }
       toolbar={
         selectable && selectedRows.length ? (
@@ -488,9 +602,17 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
               Clear selection
             </button>
           </div>
+        ) : panel && groupByControl ? (
+          // The panel has no trailing slot, so the grouping control — a view of
+          // the rows rather than a filter — sits on its own row above the table.
+          <div className="flex flex-wrap items-center justify-end gap-2">{groupByControl}</div>
         ) : undefined
       }
-      summary={kpiCards.length ? <RegisterKpis cards={kpiCards} /> : undefined}
+      summary={
+        kpiCards.length ? (
+          <RegisterKpis cards={kpiCards} layout={panel ? 'metric' : 'stacked'} />
+        ) : undefined
+      }
     >
       <RequirePermission permission={permission} what={config.title}>
         {config.extra && summary !== undefined ? (
@@ -519,14 +641,25 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
             isRowActivatable={isRowActivatable}
             keyboardResetKey={[state.page, state.sort, state.order, columnsKey, groupKey]}
             searchInputRef={searchInputRef}
-            rowClassName={config.rowClassName ? (row) => config.rowClassName?.(row) : undefined}
+            rowClassName={rowClassName}
             totals={totals}
             minWidth={config.minWidth ?? 1100}
             empty={
-              <EmptyState
-                title="No rows match these filters"
-                description={config.emptyMessage ?? 'Widen the period or clear a filter and try again.'}
-              />
+              activeFilterCount === 0 && config.emptyUnfiltered ? (
+                config.emptyUnfiltered
+              ) : (
+                <EmptyState
+                  title="No rows match these filters"
+                  description={
+                    config.emptyMessage ?? 'Widen the period or clear a filter and try again.'
+                  }
+                  // The way out of an over-filtered register, where the reader
+                  // is already looking. Offered only when there is something to
+                  // clear — a button that does nothing is worse than no button.
+                  action={activeFilterCount > 0 ? 'Clear filters' : undefined}
+                  onAction={params.reset}
+                />
+              )
             }
             footer={
               <ServerTablePagination

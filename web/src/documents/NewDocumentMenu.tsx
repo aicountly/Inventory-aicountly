@@ -1,6 +1,8 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { ChevronDown, Plus } from 'lucide-react'
 import { useAccess } from '../access/AccessContext'
+import { Button } from '../ui/Button'
 import { allowedTypeCount, buildEntryHub } from './entryHub'
 
 /**
@@ -44,15 +46,21 @@ export function NewDocumentMenu() {
 
   return (
     <div className="menu" ref={rootRef}>
-      <button
-        type="button"
-        className="btn btn-primary"
+      {/* The shared Button, not the legacy `.btn` pair: this sits in a row with
+          Columns, Refresh, Export and Print, and a control a head taller than
+          its neighbours is the first thing a reader notices about the header. */}
+      <Button
+        variant="primary"
+        size="sm"
+        icon={Plus}
+        iconRight={ChevronDown}
         aria-expanded={open}
         aria-controls={panelId}
+        aria-haspopup="menu"
         onClick={() => setOpen((v) => !v)}
       >
-        New document ▾
-      </button>
+        New document
+      </Button>
       {open ? (
         <div className="menu-panel" id={panelId} role="menu">
           {allowed === 0 ? (
