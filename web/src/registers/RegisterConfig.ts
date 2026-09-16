@@ -84,6 +84,20 @@ export interface RegisterFetchArgs {
   signal?: AbortSignal
 }
 
+/** What an analytics band is handed. See `RegisterConfig.analytics`. */
+export interface AnalyticsArgs<T, S> {
+  /** The server's aggregate over the whole filtered set. */
+  summary: S
+  /** The rows on this page — never the basis of a figure about the whole set. */
+  rows: readonly T[]
+  /** Effective filter values, defaults resolved: what the register was asked. */
+  values: Record<string, string>
+  /** The filters as the API received them. */
+  query: ListQuery
+  /** True while the register itself is refetching. */
+  loading: boolean
+}
+
 export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
   /**
    * How the rows are fetched.
@@ -118,6 +132,17 @@ export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
 
   /** Row selection and the bulk actions it enables. */
   selectable?: RegisterSelection<T>
+
+  /**
+   * A per-row menu, pinned as the last column.
+   *
+   * Declared here rather than as a member of `columns` for the same reason the
+   * selection checkbox is: it is a control, not data. A register that shipped
+   * it as a column would carry an empty trailing field in every CSV, every
+   * spreadsheet and every printed sheet — `toExportColumns` maps whatever is
+   * visible on screen, and a column whose `csv` returns '' is still a column.
+   */
+  rowActions?: (row: T) => ReactNode
 
   /**
    * What the scope line says about the period, when the selected financial
@@ -161,6 +186,41 @@ export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
 
   /** Clickable KPI cards above the table. Falls back to `summary` when absent. */
   kpis?: (summary: S, response: ReportResponse<T, S>) => StatCardSpec[]
+
+  /**
+   * An analytics band between the KPI cards and the table.
+   *
+   * Opt-in, and deliberately a slot rather than a feature: most registers are
+   * read as a list and a chart strip above one is noise. The valuation register
+   * is the exception — "what is my stock worth, and where is that value" is a
+   * question about the shape of the set, not about any one row.
+   *
+   * It is handed the server's own summary and the page's rows so it can chart
+   * what the register reports rather than a second, differently-filtered
+   * answer; anything it needs beyond that it must fetch for itself, from the
+   * same endpoints under the same filters. It renders below the fold on paper
+   * — the sheet carries the figures, not the pictures.
+   */
+  analytics?: (args: AnalyticsArgs<T, S>) => ReactNode
+
+  /**
+   * How the screen is laid out.
+   *
+   * `list` (the default, and every register that exists today) is the compact
+   * treatment: one header line of breadcrumb, filters and actions, then a table
+   * bound to the viewport with its own scrolling body.
+   *
+   * `workspace` is for a register that has to be understood before it is read
+   * down — a masthead carrying the icon, title and subtitle; filters stacked in
+   * a labelled grid rather than strung along one line; Refresh as the trailing
+   * primary action, because re-running a dated snapshot is what a reader
+   * reaches for most; and the page scrolling as a whole, since KPI cards and a
+   * chart band leave a viewport nothing to give the table.
+   *
+   * One flag rather than four booleans: these choices only make sense together,
+   * and a register that took three of them would look like neither thing.
+   */
+  layout?: 'list' | 'workspace'
 
   /**
    * Groupings the reader can switch between, with per-group subtotals. The

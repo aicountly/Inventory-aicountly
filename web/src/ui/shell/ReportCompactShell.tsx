@@ -21,6 +21,23 @@ export interface ReportCompactShellProps {
   searchInputRef?: RefObject<HTMLInputElement | null>
   onRefresh?: () => void
   onPrint?: () => void
+  /**
+   * Draw the icon, title and subtitle as a block above the breadcrumb row.
+   *
+   * The compact header spends its one line on the breadcrumb, the filters and
+   * the actions, which is what a register that is a table wants. A register
+   * that opens onto a workspace — several cards and a chart band before the
+   * first row — wants to name itself first.
+   */
+  hero?: boolean
+  /**
+   * Let the page scroll rather than binding the table to the viewport.
+   *
+   * Default `true` keeps every existing register exactly as it is: header and
+   * filters pinned, the table taking the rest of the height. Turn it off when
+   * there is more above the table than a viewport can spare.
+   */
+  fill?: boolean
   children?: ReactNode
 }
 
@@ -55,6 +72,8 @@ export function ReportCompactShell({
   searchInputRef,
   onRefresh,
   onPrint,
+  hero = false,
+  fill = true,
   children,
 }: ReportCompactShellProps) {
   usePageKeyboard({ searchInputRef, onRefresh, onPrint })
@@ -83,8 +102,15 @@ export function ReportCompactShell({
     <PageShell
       compact
       paddingBottom={false}
-      className={cx('flex flex-col tall:h-[calc(100dvh-7rem)] tall:overflow-hidden', className)}
+      className={cx(
+        'flex flex-col',
+        fill && 'tall:h-[calc(100dvh-7rem)] tall:overflow-hidden',
+        className,
+      )}
     >
+      {hero ? (
+        <ReportHero icon={icon} title={title} description={description} />
+      ) : null}
       <BreadcrumbHeader
         breadcrumbs={breadcrumbs}
         title={title}
@@ -96,8 +122,48 @@ export function ReportCompactShell({
         compact
         className="shrink-0 print:hidden"
       />
-      <div className="flex flex-col flex-1 min-h-0 gap-2">{children}</div>
+      <div className={cx('flex flex-col gap-2', fill ? 'flex-1 min-h-0' : 'min-h-0')}>
+        {children}
+      </div>
     </PageShell>
+  )
+}
+
+/**
+ * The identity block: icon tile, page title, one line of what the page is for.
+ *
+ * Its own row above the breadcrumb bar rather than inside it, so the breadcrumb
+ * keeps the actions on its line at every width and nothing has to be dropped to
+ * fit. `print:hidden` because the exported sheet prints its own letterhead and
+ * title — this is screen chrome.
+ */
+function ReportHero({
+  icon: Icon,
+  title,
+  description,
+}: {
+  icon?: LucideIcon
+  title: ReactNode
+  description?: ReactNode
+}) {
+  return (
+    <div className="flex items-start gap-3 shrink-0 print:hidden">
+      {Icon ? (
+        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-primary-light text-primary">
+          <Icon className="h-5 w-5" aria-hidden />
+        </span>
+      ) : null}
+      <div className="min-w-0">
+        <h1 className="truncate text-xl font-semibold tracking-tight text-gray-900 sm:text-[22px]">
+          {title}
+        </h1>
+        {description ? (
+          <p className="mt-0.5 text-xs leading-relaxed text-gray-500 sm:text-[13px]">
+            {description}
+          </p>
+        ) : null}
+      </div>
+    </div>
   )
 }
 

@@ -68,7 +68,11 @@ export function BreadcrumbHeader({
           <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[12rem]">{toolbar}</div>
         ) : null}
         {actions ? (
-          <div className="flex items-center flex-wrap gap-2 shrink-0 ml-auto print:hidden">
+          // `flex-wrap` without `shrink-0`: a shrink-proof row cannot fall below
+          // its max-content width, so the buttons never wrap and a phone-width
+          // register scrolls the whole page sideways instead. Letting it shrink
+          // costs nothing where there is room — the row is max-content anyway.
+          <div className="flex items-center flex-wrap gap-2 min-w-0 ml-auto print:hidden">
             {actions}
           </div>
         ) : null}

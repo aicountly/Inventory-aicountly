@@ -20,6 +20,10 @@ export interface ReportListShellProps extends ReportCompactShellProps {
   toolbar?: ReactNode
   /** KPI cards above the table. */
   summary?: ReactNode
+  /** Replaces the default KPI grid — for a strip of four rather than six. */
+  summaryClassName?: string
+  /** Charts between the KPI cards and the table. See RegisterConfig.analytics. */
+  analytics?: ReactNode
 }
 
 /**
@@ -31,6 +35,8 @@ export function ReportListShell({
   scope,
   toolbar,
   summary,
+  summaryClassName,
+  analytics,
   children,
   ...shell
 }: ReportListShellProps) {
@@ -46,7 +52,8 @@ export function ReportListShell({
         </div>
       ) : null}
       {toolbar ? <div className="shrink-0 print:hidden">{toolbar}</div> : null}
-      {summary ? <div className={SUMMARY_CARD_GRID}>{summary}</div> : null}
+      {summary ? <div className={summaryClassName ?? SUMMARY_CARD_GRID}>{summary}</div> : null}
+      {analytics ? <div className="shrink-0 print:hidden">{analytics}</div> : null}
       <div className="flex flex-col flex-1 min-h-0">{children}</div>
     </ReportCompactShell>
   )

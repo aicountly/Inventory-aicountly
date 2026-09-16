@@ -1,5 +1,16 @@
-import { BookmarkCheck, Clock, Coins, Scale } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import {
+  BookmarkCheck,
+  Boxes,
+  Clock,
+  Coins,
+  Layers,
+  Package,
+  Scale,
+  ScrollText,
+  Warehouse,
+} from 'lucide-react'
+import { Link, useSearchParams } from 'react-router-dom'
+import { useAccess } from '../../access/AccessContext'
 import { P } from '../../services/access'
 import { reconciliationApi } from '../../services/reconciliationApi'
 import type { ReconciliationRun } from '../../services/reconciliationApi'
@@ -24,8 +35,13 @@ import {
   textColumn,
   warehouseFilter,
 } from '../../reports/configs/common'
+import { RowActionsMenu } from '../../ui/RowActionsMenu'
+import type { RowAction } from '../../ui/RowActionsMenu'
 import { buildTotalsRow, totalsLabel } from '../registerTotals'
 import { defineRegister } from '../RegisterConfig'
+import { ValuationAnalytics } from '../valuation/ValuationAnalytics'
+import { ValuationHeaderActions } from '../valuation/ValuationHeaderActions'
+import { WarehouseScopeHint, WarehouseScopeValue } from '../valuation/WarehouseScopeValue'
 import { pageHint, summaryOverRows, withPageSummary } from './pageSummary'
 import type { PageSummary } from './pageSummary'
 
@@ -56,14 +72,20 @@ export const valuationRegister = defineRegister<ValuationSnapshotRow, ValuationS
   path: 'valuation',
   title: 'Valuation register',
   description:
-    'Closing quantity, unit cost and value per item as at a date, under the valuation method you choose',
+    'Item-wise stock valuation as at the selected date, under the valuation method you choose',
   shortDescription: 'Closing value per item, any method, any date',
   group: 'valuation',
   icon: Coins,
   defaultSort: 'item_name',
-  minWidth: 1000,
+  minWidth: 1080,
   rowNoun: 'item',
   filenameBase: 'valuation',
+  // Read as a workspace, not as a list: the header names it, the filters are
+  // the question rather than a refinement of it, and the analytics band answers
+  // what no single row can. See RegisterConfig.layout.
+  layout: 'workspace',
+  defaultLimit: 50,
+  headerActions: <ValuationHeaderActions />,
   // The snapshot endpoint already answers a real summary; it just does not
   // label itself, so the envelope is completed here.
   fetch: async ({ query, signal }) => ({
@@ -76,16 +98,31 @@ export const valuationRegister = defineRegister<ValuationSnapshotRow, ValuationS
       key: 'method',
       kind: 'select',
       label: 'Method',
+      // Exactly the four ValuationController::REPORT_METHODS. A fifth option
+      // here would be a 422 from the API dressed up as a feature.
       options: REPORT_METHODS.map((m: ReportMethod) => ({ value: m, label: METHOD_LABELS[m] })),
       defaultValue: () => 'AS_PER_MASTER',
     },
-    itemFilter,
+    { ...itemFilter, placeholder: 'Search item code or name…' },
     { ...warehouseFilter, placeholder: 'Whole company' },
   ],
   columns: [
     {
+      key: 'item_sku',
+      header: 'Item code',
+      configureHint: 'The code on the item master.',
+      minWidth: 110,
+      render: (r) =>
+        r.item_sku ? (
+          <span className="font-medium tabular-nums text-gray-600">{r.item_sku}</span>
+        ) : (
+          DASH
+        ),
+      csv: (r) => r.item_sku ?? '',
+    },
+    {
       key: 'item_name',
-      header: 'Item',
+      header: 'Item name',
       sortKey: 'item_name',
       alwaysVisible: true,
       minWidth: 200,
@@ -96,7 +133,7 @@ export const valuationRegister = defineRegister<ValuationSnapshotRow, ValuationS
           onClick={(e) => e.stopPropagation()}
         >
           <strong className="font-semibold">{r.item_name ?? `Item #${r.item_id}`}</strong>
-          {r.item_sku ? <span className="text-gray-400"> · {r.item_sku}</span> : null}
+          {r.item_alias ? <span className="text-gray-400"> · {r.item_alias}</span> : null}
         </Link>
       ),
       csv: (r) => r.item_name ?? `Item #${r.item_id}`,
@@ -120,12 +157,15 @@ export const valuationRegister = defineRegister<ValuationSnapshotRow, ValuationS
     },
   ],
   rowKey: (r) => r.item_id,
+  // A control, not a column — so it never reaches a CSV or a printed sheet.
+  rowActions: (r) => <ValuationRowActions row={r} />,
   // The cost layers are the working behind the number, so that is where a
   // disputed valuation gets settled.
   drillTo: (r) => `/valuation/cost-layers?item_id=${r.item_id}`,
   totals: (s) =>
     buildTotalsRow(
       [
+        { key: 'item_sku' },
         { key: 'item_name' },
         { key: 'unit_symbol' },
         { key: 'valuation_method' },
@@ -137,35 +177,185 @@ export const valuationRegister = defineRegister<ValuationSnapshotRow, ValuationS
       { closing_qty: formatQty(s.total_qty), stock_value: formatMoney(s.total_value) },
       { label: totalsLabel(s.item_count, 'item'), labelKey: 'item_name' },
     ),
+  // The "Group by" control. Both groupings are over the rows on screen — the
+  // engine says so in each subtotal's own label, and the pinned footer stays the
+  // authority on the whole filtered set.
+  groupBy: [
+    {
+      key: 'valuation_method_applied',
+      label: 'Applied method',
+      of: (r) => ({
+        key: r.valuation_method_applied ?? 'unknown',
+        label: r.valuation_method_applied ?? 'No method applied',
+      }),
+      subtotal: (rows, group) =>
+        buildTotalsRow(
+          [
+            { key: 'item_sku' },
+            { key: 'item_name' },
+            { key: 'closing_qty', align: 'right' },
+            { key: 'stock_value', align: 'right' },
+          ],
+          {
+            closing_qty: formatQty(rows.reduce((a, r) => a + r.closing_qty, 0)),
+            stock_value: formatMoney(rows.reduce((a, r) => a + r.stock_value, 0)),
+          },
+          {
+            label: `${group.label} · ${totalsLabel(rows.length, 'item')} on this page`,
+            labelKey: 'item_name',
+          },
+        ),
+    },
+    {
+      key: 'valuation_method',
+      label: 'Item method',
+      of: (r) => ({
+        key: r.valuation_method ?? 'default',
+        label: r.valuation_method ?? 'Company default',
+      }),
+      subtotal: (rows, group) =>
+        buildTotalsRow(
+          [
+            { key: 'item_sku' },
+            { key: 'item_name' },
+            { key: 'closing_qty', align: 'right' },
+            { key: 'stock_value', align: 'right' },
+          ],
+          {
+            closing_qty: formatQty(rows.reduce((a, r) => a + r.closing_qty, 0)),
+            stock_value: formatMoney(rows.reduce((a, r) => a + r.stock_value, 0)),
+          },
+          {
+            label: `${group.label} · ${totalsLabel(rows.length, 'item')} on this page`,
+            labelKey: 'item_name',
+          },
+        ),
+    },
+  ],
+  // No delta chips: `/v1/valuation` answers one date at a time and sends no
+  // comparative, so a card here has nothing honest to compare against. The
+  // movement between dates is in the trend chart below, where every point is a
+  // date the server was actually asked about.
   kpis: (s) => [
     {
-      key: 'as_of',
-      label: 'As at',
-      value: s.as_of,
-      hint: METHOD_LABELS[s.method as ReportMethod] ?? s.method,
-      icon: Scale,
-      tone: 'slate',
+      key: 'items',
+      label: 'Total items',
+      value: formatInt(s.item_count),
+      hint: 'Items with stock on hand',
+      icon: Package,
+      tone: 'primary',
     },
-    { key: 'items', label: 'Items', value: formatInt(s.item_count), icon: Coins, tone: 'primary' },
-    { key: 'qty', label: 'Total qty', value: formatQty(s.total_qty), icon: Coins, tone: 'info' },
+    {
+      key: 'qty',
+      label: 'Total quantity',
+      value: formatQty(s.total_qty),
+      hint: 'Units in stock',
+      icon: Boxes,
+      tone: 'info',
+    },
     {
       key: 'value',
-      label: 'Total value',
+      label: 'Total stock value',
       value: formatMoney(s.total_value),
+      hint: `As at ${s.as_of} · ${METHOD_LABELS[s.method as ReportMethod] ?? s.method}`,
       icon: Coins,
-      tone: 'success',
+      tone: 'violet',
       current: s.total_value,
       emphasizeNegative: true,
     },
+    {
+      key: 'warehouses',
+      label: 'Warehouses',
+      value: <WarehouseScopeValue />,
+      hint: <WarehouseScopeHint />,
+      icon: Warehouse,
+      tone: 'warning',
+    },
   ],
+  // The table's own heading, in the slot the engine already renders above it.
+  extra: (s) => (
+    <div className="flex flex-wrap items-baseline justify-between gap-2 px-0.5 pt-1">
+      <h2 className="text-sm font-semibold text-gray-900">Item-wise valuation</h2>
+      <p className="text-xs text-gray-500">
+        {formatInt(s.item_count)} {s.item_count === 1 ? 'item' : 'items'} · valued at{' '}
+        {METHOD_LABELS[s.method as ReportMethod] ?? s.method} as at {s.as_of}
+      </p>
+    </div>
+  ),
+  analytics: ({ summary, values, loading }) => (
+    <ValuationAnalytics
+      summary={summary}
+      loading={loading}
+      filters={{
+        asOf: values.as_of ?? '',
+        method: values.method ?? 'AS_PER_MASTER',
+        itemId: values.item_id ?? '',
+        warehouseId: values.warehouse_id ?? '',
+      }}
+    />
+  ),
   summary: (s) => [
     { label: 'As at', value: s.as_of, hint: METHOD_LABELS[s.method as ReportMethod] ?? s.method },
     { label: 'Items', value: formatInt(s.item_count) },
     { label: 'Total qty', value: formatQty(s.total_qty) },
     { label: 'Total value', value: formatMoney(s.total_value), tone: 'good' },
   ],
-  emptyMessage: 'No stock on hand at this date.',
+  emptyMessage:
+    'No stock valuation is available for the selected date and filters. Widen the date or clear a filter and try again.',
 })
+
+/**
+ * The row menu: the four places a valuation figure can be taken apart.
+ *
+ * Every entry is a screen that exists and a filter the destination actually
+ * reads — the warehouse breakup is the warehouse-stock register narrowed to
+ * this item at this date, not a view invented for the menu. Each is gated on
+ * the permission its destination is gated on, so the menu never offers a door
+ * that answers 403.
+ */
+function ValuationRowActions({ row }: { row: ValuationSnapshotRow }) {
+  const { can } = useAccess()
+  const asOf = useSearchParams()[0].get('as_of') ?? ''
+  const name = row.item_name ?? `Item #${row.item_id}`
+  const dated = (key: string) => (asOf ? `&${key}=${asOf}` : '')
+
+  const actions: RowAction[] = []
+  if (can(P.report('valuation'))) {
+    actions.push({
+      key: 'layers',
+      label: 'View cost layers',
+      icon: Layers,
+      to: `/valuation/cost-layers?item_id=${row.item_id}`,
+    })
+  }
+  if (can(P.report('stock_ledger'))) {
+    actions.push({
+      key: 'ledger',
+      label: 'Movement history',
+      icon: ScrollText,
+      to: `/registers/stock-ledger?item_id=${row.item_id}${dated('to')}`,
+    })
+  }
+  if (can(P.report('warehouse_stock'))) {
+    actions.push({
+      key: 'warehouses',
+      label: 'Warehouse breakup',
+      icon: Warehouse,
+      to: `/registers/warehouse-stock?item_id=${row.item_id}${dated('to')}`,
+    })
+  }
+  if (can(P.masters('items', 'read'))) {
+    actions.push({
+      key: 'item',
+      label: 'Open item',
+      icon: Package,
+      to: `/items/${row.item_id}`,
+    })
+  }
+
+  if (actions.length === 0) return null
+  return <RowActionsMenu actions={actions} label={`Actions for ${name}`} />
+}
 
 /* -------------------------------------------------- reservation register */
 

@@ -83,6 +83,23 @@ export const DASHBOARD_TABLE_PROPS = {
 } as const
 
 /**
+ * A register that scrolls with its page (RegisterConfig.scrollPage).
+ *
+ * `fillAvailable` is off because the table is no longer the page's only flex
+ * child — there is a KPI strip and a chart band above it — and a bounded scroll
+ * box keeps the sticky header and the pinned totals row where they can be read
+ * without scrolling the whole page back up.
+ */
+export const SCROLL_PAGE_TABLE_PROPS = {
+  stickyHeader: true,
+  scrollBody: true,
+  fillAvailable: false,
+  density: 'compact',
+  totalsTone: 'primary',
+  className: 'max-h-[min(34rem,58vh)]',
+} as const
+
+/**
  * Staging / preview tables inside a form: scroll inside the table body,
  * pagination pinned below. Do not use fillAvailable — it collapses the scroll
  * area when the table is not the page's only flex child.

@@ -29,6 +29,7 @@ import { DocumentTypesPage } from './pages/settings/DocumentTypesPage'
 import { PeriodLocksPage } from './pages/settings/PeriodLocksPage'
 import { SettingsLayout } from './pages/settings/SettingsLayout'
 import { CostLayersPage } from './pages/valuation/CostLayersPage'
+import { MethodComparisonPage } from './pages/valuation/MethodComparisonPage'
 import { RecalculationsPage } from './pages/valuation/RecalculationsPage'
 import { RevisionsPage } from './pages/valuation/RevisionsPage'
 import { ValuationLayout } from './pages/valuation/ValuationLayout'
@@ -76,6 +77,7 @@ export function AppRoutes() {
         <Route path="valuation" element={<ValuationLayout />}>
           <Route index element={<LegacyRedirect to="/registers/valuation" />} />
           <Route path="cost-layers" element={<CostLayersPage />} />
+          <Route path="method-comparison" element={<MethodComparisonPage />} />
           <Route path="recalculations" element={<RecalculationsPage />} />
           <Route path="revisions" element={<RevisionsPage />} />
         </Route>

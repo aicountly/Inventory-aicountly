@@ -3,6 +3,7 @@ import type { ReactNode, RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { Download, FileSpreadsheet, FileText, Printer, RefreshCw, Table2 } from 'lucide-react'
 import { Button } from '../ui/Button'
+import type { ButtonVariant } from '../ui/Button'
 import type { FetchAllResult } from '../services/listAll'
 import { formatGeneratedStamp } from '../utils/format'
 import type { ExportableColumn } from '../registers/registerCells'
@@ -87,6 +88,20 @@ export interface ExportActionsProps<T> {
   generatedAt?: string
   onRefresh?: () => void
   refreshing?: boolean
+  /**
+   * Refresh's button style. Ghost by default — on a register the reader came to
+   * read, re-running the query is not the action the eye should land on.
+   */
+  refreshVariant?: ButtonVariant
+  /**
+   * Put Refresh after Export and Print instead of before them.
+   *
+   * Order is emphasis: leading and ghost reads as a utility beside the title,
+   * trailing and primary reads as the page's main action. A register that opens
+   * onto a dated snapshot is the second kind — "show me this again, now" is
+   * what a reader wants from it most often.
+   */
+  refreshLast?: boolean
   disabled?: boolean
   /** Hide formats a screen cannot support. All four are on by default. */
   formats?: readonly ExportFormat[]
@@ -152,6 +167,8 @@ export function ExportActions<T>({
   generatedAt,
   onRefresh,
   refreshing = false,
+  refreshVariant = 'ghost',
+  refreshLast = false,
   disabled = false,
   formats = ALL_FORMATS,
   size = 'xs',
@@ -340,20 +357,22 @@ export function ExportActions<T>({
     </div>
   ) : null
 
+  const refresh = onRefresh ? (
+    <Button
+      variant={refreshVariant}
+      size={size}
+      icon={RefreshCw}
+      onClick={onRefresh}
+      loading={refreshing}
+      title="Refresh (Ctrl+R)"
+    >
+      Refresh
+    </Button>
+  ) : null
+
   return (
     <div className="flex flex-wrap items-center gap-1.5 print:hidden">
-      {onRefresh ? (
-        <Button
-          variant="ghost"
-          size={size}
-          icon={RefreshCw}
-          onClick={onRefresh}
-          loading={refreshing}
-          title="Refresh (Ctrl+R)"
-        >
-          Refresh
-        </Button>
-      ) : null}
+      {refreshLast ? null : refresh}
 
       {menuFormats.length ? (
         <div className="relative" ref={anchorRef}>
@@ -386,6 +405,8 @@ export function ExportActions<T>({
           Print
         </Button>
       ) : null}
+
+      {refreshLast ? refresh : null}
     </div>
   )
 }

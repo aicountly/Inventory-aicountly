@@ -127,6 +127,15 @@ export interface SmartTableProps<T> {
   stickyHeader?: boolean
   scrollBody?: boolean
   fillAvailable?: boolean
+  /**
+   * The pinned totals row's tint.
+   *
+   * `neutral` (the default) is the grey every register has always used.
+   * `primary` gives it the faint green wash a workspace register's footer
+   * carries, where the totals row is the answer the reader came for rather
+   * than a summary of a list they are reading down.
+   */
+  totalsTone?: 'neutral' | 'primary'
   minWidth?: number
   className?: string
   cardPadding?: CardPadding
@@ -201,6 +210,7 @@ export function SmartTable<T>({
   stickyHeader = false,
   scrollBody = false,
   fillAvailable = false,
+  totalsTone = 'neutral',
   minWidth = 600,
   className,
   cardPadding = 'none',
@@ -437,11 +447,20 @@ export function SmartTable<T>({
     return grouped
   })()
 
+  // The cell keeps its own background because it is sticky: a colour set only
+  // on the <tr> scrolls away behind the pinned cells and the rows show through.
+  const totalsBg = totalsTone === 'primary' ? 'bg-primary-light/50' : 'bg-gray-50'
   const tableFoot = !totals && tfoot ? (
     <tfoot>{tfoot}</tfoot>
   ) : totals ? (
     <tfoot>
-      <tr className="border-t-2 border-gray-200 bg-gray-50 font-semibold text-gray-900">
+      <tr
+        className={cx(
+          'border-t-2 font-semibold text-gray-900',
+          totalsTone === 'primary' ? 'border-primary/30' : 'border-gray-200',
+          totalsBg,
+        )}
+      >
         {columns.map((col) => {
           const value = typeof totals === 'function' ? totals(col) : totals[col.key]
           return (
@@ -453,7 +472,7 @@ export function SmartTable<T>({
                 alignCls(col.align),
                 col.align === 'right' && AMOUNT_CELL_CLASS,
                 scrollBody &&
-                  'sticky bottom-0 z-10 bg-gray-50 shadow-[0_-1px_0_0_rgb(var(--color-border))]',
+                  cx('sticky bottom-0 z-10 shadow-[0_-1px_0_0_rgb(var(--color-border))]', totalsBg),
               )}
             >
               {value ?? ''}

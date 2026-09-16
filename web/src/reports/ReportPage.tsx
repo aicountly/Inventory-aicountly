@@ -33,7 +33,7 @@ import { useExportIdentity } from '../export/useExportIdentity'
 import { ReportListShell } from '../ui/shell/ReportListShell'
 import { ServerTablePagination } from '../ui/shell/TablePagination'
 import { SmartTable } from '../ui/shell/SmartTable'
-import { REPORT_TABLE_PROPS } from '../styles/designTokens'
+import { REPORT_TABLE_PROPS, SCROLL_PAGE_TABLE_PROPS } from '../styles/designTokens'
 import type { IconTone } from '../ui/IconTile'
 import { todayIso } from '../utils/format'
 import { filterUrlKeys, resolveFilterValues } from './helpers'
@@ -61,6 +61,20 @@ function toSheetCards(cards: readonly StatCardSpec[]): SheetSummaryCard[] {
       hint: typeof card.hint === 'string' ? card.hint : undefined,
       tone: (card.tone && SHEET_TONE[card.tone]) || undefined,
     }))
+}
+
+/**
+ * The KPI grid for a register that declares its own analytics band.
+ *
+ * The shared `SUMMARY_CARD_GRID` is six across, which is right for the registers
+ * that report six figures and leaves two dead columns under a strip of four.
+ * Only a register with an analytics band uses this, so no existing layout moves.
+ */
+const KPI_GRID: Record<number, string> = {
+  1: 'grid grid-cols-1 gap-2 shrink-0 print:hidden',
+  2: 'grid grid-cols-2 gap-2 shrink-0 print:hidden',
+  3: 'grid grid-cols-2 lg:grid-cols-3 gap-2 shrink-0 print:hidden',
+  4: 'grid grid-cols-2 xl:grid-cols-4 gap-2 shrink-0 print:hidden',
 }
 
 /**
@@ -290,11 +304,26 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
     }
   }, [selectable, selected, selectableRows, allOnPageSelected, someOnPageSelected, togglePage, toggleRow])
 
-  // The exports keep `visibleColumns`; only the table gains the checkbox.
-  const tableColumns = useMemo(
-    () => (selectColumn ? [selectColumn, ...visibleColumns] : visibleColumns),
-    [selectColumn, visibleColumns],
-  )
+  // ---- row actions ---------------------------------------------------------
+  const rowActions = config.rowActions
+  const actionsColumn = useMemo<ReportColumn<T> | null>(() => {
+    if (!rowActions) return null
+    return {
+      key: '__actions',
+      header: '',
+      align: 'center',
+      width: '3rem',
+      alwaysVisible: true,
+      render: (row: T) => rowActions(row),
+      csv: () => '',
+    }
+  }, [rowActions])
+
+  // The exports keep `visibleColumns`; only the table gains the two controls.
+  const tableColumns = useMemo(() => {
+    const cols = selectColumn ? [selectColumn, ...visibleColumns] : [...visibleColumns]
+    return actionsColumn ? [...cols, actionsColumn] : cols
+  }, [selectColumn, visibleColumns, actionsColumn])
 
   // ---- totals --------------------------------------------------------------
   const totals = useMemo(() => {
@@ -376,6 +405,16 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
 
   const printSummaryCards = useMemo(() => toSheetCards(kpiCards), [kpiCards])
 
+  // ---- analytics band ------------------------------------------------------
+  // Handed the server's summary and this page's rows under the same filters the
+  // table was fetched with, so a chart can never answer a different question
+  // from the register it sits on.
+  const analytics = config.analytics
+  const analyticsNode = useMemo(() => {
+    if (!analytics || summary === undefined) return undefined
+    return analytics({ summary, rows, values, query: apiFilters, loading: result.loading })
+  }, [analytics, summary, rows, values, apiFilters, result.loading])
+
   const filenameBase = config.filenameBase ?? config.slug
 
   // Company, scope, registered office, GSTIN and logo — the letterhead every
@@ -390,6 +429,9 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
   )
 
   // ---- render --------------------------------------------------------------
+  // One decision, four consequences — see RegisterConfig.layout.
+  const workspace = config.layout === 'workspace'
+
   const breadcrumbs = useMemo(
     () => config.breadcrumbs ?? [{ label: 'Registers', to: '/registers' }, { label: config.title }],
     [config.breadcrumbs, config.title],
@@ -424,6 +466,8 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
         printRef={printRef}
         onRefresh={result.reload}
         refreshing={result.loading}
+        refreshVariant={workspace ? 'primary' : undefined}
+        refreshLast={workspace}
         disabled={!result.data || result.data.meta.total === 0}
       />
     </>
@@ -440,6 +484,8 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
       onRefresh={result.reload}
       onPrint={runPrint}
       backTo={config.backTo === undefined ? '/registers' : (config.backTo ?? undefined)}
+      hero={workspace}
+      fill={!workspace}
       scope={scopeLabel}
       filters={
         <RegisterFilterBar
@@ -452,6 +498,7 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
           showReset={Object.keys(state.filters).length > 0}
           ctx={ctx}
           searchInputRef={searchInputRef}
+          stacked={workspace}
           trailing={
             config.groupBy?.length ? (
               <FilterField label="Group by">
@@ -491,6 +538,8 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
         ) : undefined
       }
       summary={kpiCards.length ? <RegisterKpis cards={kpiCards} /> : undefined}
+      summaryClassName={analytics ? KPI_GRID[kpiCards.length] : undefined}
+      analytics={analyticsNode}
     >
       <RequirePermission permission={permission} what={config.title}>
         {config.extra && summary !== undefined ? (
@@ -505,7 +554,7 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
           />
         ) : (
           <SmartTable
-            {...REPORT_TABLE_PROPS}
+            {...(workspace ? SCROLL_PAGE_TABLE_PROPS : REPORT_TABLE_PROPS)}
             columns={tableColumns}
             rows={tableRows}
             rowKey={config.rowKey}

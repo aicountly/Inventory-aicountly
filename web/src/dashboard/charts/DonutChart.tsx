@@ -21,6 +21,8 @@ export interface DonutChartProps {
   centerLabel?: string
   maxSlices?: number
   ariaLabel?: string
+  /** Slice colours. Defaults to the dashboard's multi-hue categorical palette. */
+  palette?: readonly string[]
 }
 
 const RADIUS = 40
@@ -32,6 +34,7 @@ export function DonutChart({
   centerLabel = 'Total',
   maxSlices = 6,
   ariaLabel = 'Value share',
+  palette,
 }: DonutChartProps) {
   const { tooltip, showTooltip, moveTooltip, hideTooltip } = useChartTooltip()
   const arcs = donutArcs(items, maxSlices)
@@ -51,7 +54,7 @@ export function DonutChart({
                 cy="50"
                 r={RADIUS}
                 fill="none"
-                stroke={chartColor(arc.colorIndex)}
+                stroke={chartColor(arc.colorIndex, palette)}
                 strokeWidth="14"
                 strokeDasharray={`${dash} ${CIRCUMFERENCE - dash}`}
                 strokeDashoffset={-((arc.offset / 100) * CIRCUMFERENCE)}
@@ -77,7 +80,7 @@ export function DonutChart({
             <>
               <span
                 className="w-2.5 h-2.5 rounded-full shrink-0"
-                style={{ background: chartColor(arc.colorIndex) }}
+                style={{ background: chartColor(arc.colorIndex, palette) }}
                 aria-hidden
               />
               <span className="text-gray-700 truncate flex-1" title={arc.label}>

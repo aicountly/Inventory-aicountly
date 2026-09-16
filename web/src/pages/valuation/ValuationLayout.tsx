@@ -5,6 +5,7 @@ import { P } from '../../services/access'
 const ITEMS = [
   { to: '/valuation', label: 'Stock valuation', end: true, permission: P.report('valuation') },
   { to: '/valuation/cost-layers', label: 'Cost layers', permission: P.report('valuation') },
+  { to: '/valuation/method-comparison', label: 'Method comparison', permission: P.report('valuation') },
   { to: '/valuation/recalculations', label: 'Recalculations', permission: P.report('valuation') },
   { to: '/valuation/revisions', label: 'Revisions', permission: P.report('valuation') },
 ] as const

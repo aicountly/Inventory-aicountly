@@ -30,6 +30,17 @@ export interface RegisterFilterBarProps {
   searchInputRef?: RefObject<HTMLInputElement | null>
   /** Right-aligned slot: export, columns, view switches, counts. */
   trailing?: ReactNode
+  /**
+   * Lay the filters out as a labelled grid instead of one flowing line.
+   *
+   * The flowing row is right for a register read as a list — it costs one line
+   * and each control sits beside its label. A register whose filters *are* the
+   * question being asked (a date and a costing method decide every figure on a
+   * valuation screen) gives each one a column with its label above it, which is
+   * also the layout that survives a narrow viewport without the controls
+   * wrapping into a zigzag.
+   */
+  stacked?: boolean
 }
 
 /**
@@ -51,12 +62,19 @@ export function RegisterFilterBar({
   ctx,
   searchInputRef,
   trailing,
+  stacked = false,
 }: RegisterFilterBarProps) {
   const { warehouses } = useReferenceData()
   const { options } = useFormOptions()
   const documentTypes = useDocumentTypeOptions()
   const visible = filters.filter((f) => !f.hidden)
   let firstText = true
+
+  // In the grid every control fills its column; in the row each keeps the width
+  // its content wants. Applied to the control rather than to its wrapper so a
+  // `<select>`'s intrinsic width cannot win over it.
+  const wide = (w: string) => (stacked ? 'w-full' : w)
+  const fieldProps = stacked ? { stacked: true, className: 'min-w-0' } : {}
 
   const setRange = (fromKey: string, toKey: string, range: { from: string; to: string }) => {
     if (onChangeMany) onChangeMany({ [fromKey]: range.from, [toKey]: range.to })
@@ -67,8 +85,16 @@ export function RegisterFilterBar({
   }
 
   return (
-    <div className={cx(FILTER_ROW, 'gap-y-2 w-full')}>
-      <Filter className="w-4 h-4 shrink-0 text-gray-400" aria-hidden />
+    <div
+      className={
+        stacked
+          ? // The approved proportions: date ~20%, method ~22%, item ~38%,
+            // warehouse ~20%, collapsing to two columns and then to one.
+            'grid w-full gap-x-3 gap-y-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,0.95fr)_minmax(0,1.65fr)_minmax(0,0.9fr)]'
+          : cx(FILTER_ROW, 'gap-y-2 w-full')
+      }
+    >
+      {stacked ? null : <Filter className="w-4 h-4 shrink-0 text-gray-400" aria-hidden />}
 
       {visible.map((f) => {
         const value = values[f.key] ?? ''
@@ -90,7 +116,10 @@ export function RegisterFilterBar({
 
           case 'item':
             return (
-              <div key={f.key} className="min-w-[13rem] max-w-[22rem] grow">
+              <div
+                key={f.key}
+                className={stacked ? 'min-w-0' : 'min-w-[13rem] max-w-[22rem] grow'}
+              >
                 <ItemFilter
                   value={value}
                   onChange={(id) => onChange(f.key, id)}
@@ -115,24 +144,25 @@ export function RegisterFilterBar({
 
           case 'warehouse':
             return (
-              <FilterField key={f.key} label={f.label}>
+              <FilterField key={f.key} label={f.label} {...fieldProps}>
                 <WarehouseSelect
                   value={value ? Number(value) : null}
                   onChange={(id) => onChange(f.key, id ? String(id) : '')}
                   warehouses={warehouses}
                   emptyLabel={f.placeholder ?? 'All warehouses'}
+                  className={stacked ? 'w-full' : undefined}
                 />
               </FilterField>
             )
 
           case 'item_group':
             return (
-              <FilterField key={f.key} label={f.label}>
+              <FilterField key={f.key} label={f.label} {...fieldProps}>
                 <Select
                   value={value}
                   onChange={(e) => onChange(f.key, e.target.value)}
                   aria-label={f.label}
-                  className="w-auto min-w-[9rem]"
+                  className={wide('w-auto min-w-[9rem]')}
                 >
                   <option value="">All item groups</option>
                   {(options?.item_groups ?? []).map((g) => (
@@ -146,12 +176,12 @@ export function RegisterFilterBar({
 
           case 'stock_category':
             return (
-              <FilterField key={f.key} label={f.label}>
+              <FilterField key={f.key} label={f.label} {...fieldProps}>
                 <Select
                   value={value}
                   onChange={(e) => onChange(f.key, e.target.value)}
                   aria-label={f.label}
-                  className="w-auto min-w-[9rem]"
+                  className={wide('w-auto min-w-[9rem]')}
                 >
                   <option value="">All categories</option>
                   {(options?.stock_categories ?? []).map((c) => (
@@ -165,25 +195,25 @@ export function RegisterFilterBar({
 
           case 'date':
             return (
-              <FilterField key={f.key} label={f.label}>
+              <FilterField key={f.key} label={f.label} {...fieldProps}>
                 <Input
                   type="date"
                   value={value}
                   onChange={(e) => onChange(f.key, e.target.value)}
                   aria-label={f.label}
-                  className="w-[8.5rem]"
+                  className={wide('w-[8.5rem]')}
                 />
               </FilterField>
             )
 
           case 'document_type':
             return (
-              <FilterField key={f.key} label={f.label}>
+              <FilterField key={f.key} label={f.label} {...fieldProps}>
                 <Select
                   value={value}
                   onChange={(e) => onChange(f.key, e.target.value)}
                   aria-label={f.label}
-                  className="w-auto min-w-[10rem]"
+                  className={wide('w-auto min-w-[10rem]')}
                 >
                   <option value="">All document types</option>
                   {documentTypes.options.map((o) => (
@@ -197,16 +227,21 @@ export function RegisterFilterBar({
 
           case 'select':
             return (
-              <FilterField key={f.key} label={f.label}>
+              <FilterField key={f.key} label={f.label} {...fieldProps}>
                 <Select
                   value={value}
                   onChange={(e) => onChange(f.key, e.target.value)}
                   aria-label={f.label}
-                  className="w-auto min-w-[8rem]"
+                  className={wide('w-auto min-w-[8rem]')}
                 >
                   {/* A select with no declared default needs an "any" row, or
-                      the first option silently becomes a filter nobody chose. */}
-                  {f.options?.some((o) => o.value === '') ? null : (
+                      the first option silently becomes a filter nobody chose.
+                      One WITH a default must not have it: `resolveFilterValues`
+                      reads '' as "use the default", so picking the row snaps
+                      straight back to the option above it — and on a valuation
+                      method it would read as "value the stock every way at
+                      once", which is not a question the endpoint answers. */}
+                  {f.defaultValue || f.options?.some((o) => o.value === '') ? null : (
                     <option value="">{f.placeholder ?? `All ${f.label.toLowerCase()}`}</option>
                   )}
                   {(f.options ?? []).map((o) => (
@@ -220,14 +255,14 @@ export function RegisterFilterBar({
 
           case 'number':
             return (
-              <FilterField key={f.key} label={f.label}>
+              <FilterField key={f.key} label={f.label} {...fieldProps}>
                 <Input
                   inputMode="numeric"
                   value={value}
                   onChange={(e) => onChange(f.key, e.target.value.replace(/[^\d]/g, ''))}
                   aria-label={f.label}
                   placeholder={f.placeholder}
-                  className="w-[5.5rem]"
+                  className={wide('w-[5.5rem]')}
                 />
               </FilterField>
             )
@@ -252,7 +287,7 @@ export function RegisterFilterBar({
             const isFirst = firstText
             firstText = false
             return (
-              <FilterField key={f.key} label={f.label}>
+              <FilterField key={f.key} label={f.label} {...fieldProps}>
                 {/* Debounced: every keystroke here is a navigation and a fetch,
                     and the value comes back asynchronously through the URL. */}
                 <SearchInput
@@ -271,19 +306,36 @@ export function RegisterFilterBar({
         }
       })}
 
-      {showReset && onReset ? (
-        <button
-          type="button"
-          onClick={onReset}
-          className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-1 text-xs text-gray-600 transition-colors hover:bg-red-50 hover:text-red-600"
-          title="Clear every filter"
+      {/* Reset and the view switches are not filters, so in the grid they get
+          their own full-width row beneath the columns rather than a column of
+          their own — which would leave one field narrower than the rest for a
+          control that is not part of the question. */}
+      {(showReset && onReset) || trailing ? (
+        <div
+          className={
+            stacked
+              ? 'col-span-full flex flex-wrap items-center gap-2 border-t border-gray-100 pt-2'
+              : 'contents'
+          }
         >
-          <X className="w-3 h-3" />
-          Reset
-        </button>
+          {showReset && onReset ? (
+            <button
+              type="button"
+              onClick={onReset}
+              className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-1 text-xs text-gray-600 transition-colors hover:bg-red-50 hover:text-red-600"
+              title="Clear every filter"
+            >
+              <X className="w-3 h-3" />
+              Reset
+            </button>
+          ) : null}
+          {trailing ? (
+            <div className={cx('flex flex-wrap items-center gap-2', !stacked && 'ml-auto')}>
+              {trailing}
+            </div>
+          ) : null}
+        </div>
       ) : null}
-
-      {trailing ? <div className="ml-auto flex flex-wrap items-center gap-2">{trailing}</div> : null}
     </div>
   )
 }
