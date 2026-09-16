@@ -56,6 +56,11 @@ export function RegisterFilterBar({
     }
   }
 
+  // `/` wants a free-text box. A register that declares no text filter has one
+  // anyway — the item typeahead — so it takes the ref rather than letting the
+  // shortcut fall through to the command palette.
+  const itemTakesSearch = !visible.some((f) => f.kind === 'text')
+
   return (
     <div className={cx(FILTER_ROW, 'gap-y-2 w-full')}>
       <Filter className="w-4 h-4 shrink-0 text-gray-400" aria-hidden />
@@ -73,7 +78,7 @@ export function RegisterFilterBar({
             setRange={setRange}
             ctx={ctx}
             layout="inline"
-            searchInputRef={isFirstText ? searchInputRef : undefined}
+            searchInputRef={isFirstText || (itemTakesSearch && f.kind === 'item') ? searchInputRef : undefined}
           />
         )
       })}

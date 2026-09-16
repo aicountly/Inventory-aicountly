@@ -5,10 +5,15 @@ import { useAccess } from '../access/AccessContext'
 import { useCompany } from '../company/CompanyContext'
 import { useScopeLabel } from '../company/useScopeLabel'
 import { RequirePermission } from '../components/RequirePermission'
+import { Columns3 } from 'lucide-react'
 import { ConfigureColumns } from '../registers/ConfigureColumns'
+import {
+  RegisterInsightStrip,
+  RegisterInsightStripSkeleton,
+} from '../registers/RegisterInsightStrip'
 import { RegisterFilterBar } from '../registers/RegisterFilterBar'
 import { RegisterFilterPanel } from '../registers/RegisterFilterPanel'
-import { RegisterKpis, summaryItemsToCards } from '../registers/RegisterKpis'
+import { RegisterKpis, RegisterKpisSkeleton, summaryItemsToCards } from '../registers/RegisterKpis'
 import { describeDateRange } from '../registers/dateRangePresets'
 import { totalsLabel as registerTotalsLabel, totalsRowToText } from '../registers/registerTotals'
 import { useColumnConfig } from '../registers/useColumnConfig'
@@ -34,7 +39,16 @@ import { useExportIdentity } from '../export/useExportIdentity'
 import { ReportListShell } from '../ui/shell/ReportListShell'
 import { ServerTablePagination } from '../ui/shell/TablePagination'
 import { SmartTable } from '../ui/shell/SmartTable'
-import { METRIC_CARD_GRID, REPORT_TABLE_PROPS, TABLE_ROW_SELECTED } from '../styles/designTokens'
+import type { SmartTableError } from '../ui/shell/SmartTable'
+import {
+  METRIC_CARD_GRID,
+  REGISTER_KPI_GRID,
+  REPORT_TABLE_PROPS,
+  TABLE_ROW_SELECTED,
+} from '../styles/designTokens'
+import { Button } from '../ui/Button'
+import { LiveDataBadge } from '../ui/shell/LiveDataBadge'
+import { isApiError } from '../services/api'
 import type { IconTone } from '../ui/IconTile'
 import { todayIso } from '../utils/format'
 import { filterUrlKeys, resolveFilterValues } from './helpers'
@@ -206,6 +220,18 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
     if (config.kpis) return config.kpis(summary, result.data)
     return summaryItemsToCards(config.summary(summary, result.data))
   }, [config, result.data, summary])
+
+  // ---- the at-a-glance strip ----------------------------------------------
+  // Derived from the response already in hand — never a second request, and
+  // never a figure stated more widely than the register's own summary supports.
+  const insights = useMemo(() => {
+    if (!config.insights || !result.data || summary === undefined) return null
+    return config.insights(summary, result.data)
+  }, [config, result.data, summary])
+
+  // The same Configure Columns dialog is offered from the toolbar and from over
+  // the table, so the open flag lives here rather than inside either trigger.
+  const [columnsOpen, setColumnsOpen] = useState(false)
 
   // ---- selection -----------------------------------------------------------
   // Held as id -> row so a reader can tick rows on page 1, page over to page 3
@@ -470,6 +496,28 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
     return n
   }, [config.filters, state.filters])
 
+  /**
+   * What the reader is told when the fetch fails.
+   *
+   * An ApiError carries a message the server wrote for a person, so it is shown.
+   * Anything else is a TypeError from the network stack or a bug in our own
+   * code, and its text is an implementation detail — the reader gets the
+   * guidance and the Retry, not the internals. The filters are still in the URL
+   * either way, which is worth saying: the common fear on a failed register is
+   * having to set six controls again.
+   */
+  const tableError = useMemo<SmartTableError>(() => {
+    if (!result.error) return null
+    const noun = (config.rowNounPlural ?? `${config.rowNoun ?? 'row'}s`).toLowerCase()
+    return {
+      title: `Unable to load ${noun}`,
+      description: isApiError(result.error)
+        ? `${result.error.message} Your filters have been preserved.`
+        : 'Please try again. Your filters have been preserved.',
+      onRetry: result.reload,
+    }
+  }, [result.error, result.reload, config.rowNoun, config.rowNounPlural])
+
   const panel = config.layout === 'panel' || config.filterPanel !== undefined
 
   const breadcrumbs = useMemo(() => {
@@ -492,6 +540,8 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
         // /v1/access/me answers has nowhere to be written and would be dropped
         // the moment the uuid arrives and the per-user key changes under it.
         disabled={!columnsReady}
+        open={columnsOpen}
+        onOpenChange={setColumnsOpen}
       />
       <ExportActions
         columns={visibleColumns}
@@ -546,7 +596,17 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
       description={headerDescription}
       icon={config.icon ?? FileSearch}
       headerVariant={panel ? 'page' : 'compact'}
-      headerAside={config.headerAside}
+      headerAside={
+        config.headerAside ?? (
+          <LiveDataBadge
+            fetchedAt={result.fetchedAt}
+            refreshing={result.loading}
+            // A failed reload leaves the previous answer on screen. Saying so is
+            // the difference between old figures and wrong ones.
+            stale={Boolean(result.error) && result.data !== null}
+          />
+        )
+      }
       headerActions={headerActions}
       searchInputRef={searchInputRef}
       onRefresh={result.reload}
@@ -554,7 +614,10 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
       backTo={config.backTo === undefined ? '/registers' : (config.backTo ?? undefined)}
       scope={panel ? undefined : scopeLabel}
       bareFilters={panel}
-      summaryClassName={panel ? METRIC_CARD_GRID : undefined}
+      // Four wide cards is main's metric strip; a register that declares five
+      // takes the auto-fit grid instead, which sizes the track to the count
+      // rather than wrapping the fifth onto a row of its own.
+      summaryClassName={panel ? (kpiCards.length === 4 ? METRIC_CARD_GRID : REGISTER_KPI_GRID) : undefined}
       filters={
         panel ? (
           <RegisterFilterPanel
@@ -609,8 +672,21 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
         ) : undefined
       }
       summary={
-        kpiCards.length ? (
+        // First load only. A refresh keeps the figures and dims them instead of
+        // replacing a number the reader is looking at with a grey bar.
+        result.loading && !result.data ? (
+          <RegisterKpisSkeleton count={config.kpis ? 5 : 4} layout={panel ? 'metric' : 'stacked'} />
+        ) : kpiCards.length ? (
           <RegisterKpis cards={kpiCards} layout={panel ? 'metric' : 'stacked'} />
+        ) : undefined
+      }
+      insights={
+        config.insights ? (
+          result.loading && !result.data ? (
+            <RegisterInsightStripSkeleton />
+          ) : insights && insights.items.length ? (
+            <RegisterInsightStrip items={insights.items} note={insights.note} />
+          ) : undefined
         ) : undefined
       }
     >
@@ -634,7 +710,26 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
             rowGroup={grouping ? (row) => grouping.of(row) : undefined}
             groupSubtotal={grouping?.subtotal}
             loading={result.loading}
-            error={result.error}
+            error={tableError}
+            title={config.tableTitle ?? config.title}
+            description={config.tableHint}
+            headerAction={
+              // The same dialog the toolbar's Columns button opens — one flag,
+              // two doors, so the choice cannot be made twice over itself.
+              <Button
+                variant="secondary"
+                size="xs"
+                icon={Columns3}
+                onClick={() => setColumnsOpen(true)}
+                disabled={!columnsReady}
+              >
+                Customize columns
+              </Button>
+            }
+            // The shell locks the page to the viewport at `taller:` in the panel
+            // layout and at `tall:` otherwise; the table has to fill against the
+            // same breakpoint or it fills a parent that never got a height.
+            fillAt={panel ? 'taller' : 'tall'}
             sort={{ key: state.sort, order: state.order }}
             onSort={params.toggleSort}
             onRowActivate={onRowActivate}
@@ -667,6 +762,10 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
                 limit={state.limit}
                 onPage={params.setPage}
                 onLimit={params.setLimit}
+                // A register is read by jumping — "the negative rows are near
+                // the end" — so it takes the numbered pager rather than a
+                // counter and four arrows.
+                numbered
               />
             }
           />

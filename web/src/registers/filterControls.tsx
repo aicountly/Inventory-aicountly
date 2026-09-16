@@ -46,7 +46,15 @@ export interface FilterControlProps {
   setRange: (fromKey: string, toKey: string, range: { from: string; to: string }) => void
   ctx: DateRangeContext
   layout?: FilterControlLayout
-  /** `/` focuses this control when it is the first text filter on the screen. */
+  /**
+   * `/` focuses this control.
+   *
+   * The caller decides which control gets it: the first text filter, or — on a
+   * register that declares none — the item typeahead, which is then the only
+   * free-text box on the screen. Without that second case `/` on Stock
+   * balances fell through to the command palette while the control the reader
+   * meant sat right there.
+   */
   searchInputRef?: RefObject<HTMLInputElement | null>
 }
 
@@ -144,7 +152,13 @@ function StockCategoryControl({ filter, value, onChange, layout }: FilterControl
  * mounted. `htmlFor` names the input instead, which is what a screen reader
  * follows either way.
  */
-function ItemControl({ filter, value, onChange, layout }: FilterControlProps & { layout: FilterControlLayout }) {
+function ItemControl({
+  filter,
+  value,
+  onChange,
+  layout,
+  searchInputRef,
+}: FilterControlProps & { layout: FilterControlLayout }) {
   const id = `filter-${filter.key}`
   if (layout === 'stacked') {
     return (
@@ -156,6 +170,7 @@ function ItemControl({ filter, value, onChange, layout }: FilterControlProps & {
           {filter.label}
         </label>
         <ItemFilter
+          ref={searchInputRef}
           id={id}
           value={value}
           onChange={(next) => onChange(filter.key, next)}
@@ -167,6 +182,7 @@ function ItemControl({ filter, value, onChange, layout }: FilterControlProps & {
   return (
     <div className="min-w-[13rem] max-w-[22rem] grow">
       <ItemFilter
+        ref={searchInputRef}
         id={id}
         value={value}
         onChange={(next) => onChange(filter.key, next)}

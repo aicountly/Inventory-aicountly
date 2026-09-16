@@ -181,6 +181,26 @@ export function useListKeyboardNav<T>({
       const isSearchFocused = Boolean(searchEl) && document.activeElement === searchEl
       if (isTypingTarget(e.target) && !isSearchFocused) return
 
+      /*
+       * A menu open over the list owns the arrow keys.
+       *
+       * The default scope is `window`, so the containment check below does not
+       * run and this listener would otherwise answer every Arrow press on the
+       * page. A row's kebab (ui/MenuButton) portals its menu to document.body
+       * and moves focus between its own items with Arrow — and the list, firing
+       * on the same event, dragged its cursor to another row underneath the
+       * open menu. Same for anything else that claims the keys while focused:
+       * a dialog, or a combobox's listbox.
+       */
+      const focused = document.activeElement
+      if (
+        focused instanceof Element &&
+        focused !== document.body &&
+        focused.closest('[role="menu"],[role="dialog"],[role="listbox"]')
+      ) {
+        return
+      }
+
       if (listenScope === 'container') {
         const container = containerRef.current
         const active = document.activeElement

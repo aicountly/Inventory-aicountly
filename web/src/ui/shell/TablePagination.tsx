@@ -103,7 +103,7 @@ export function TablePagination({
                 onPageSizeChange(v === 'all' ? 'all' : Number(v))
                 onPageChange?.(1)
               }}
-              className="h-7 rounded-lg border border-gray-200 bg-white px-2 text-xs text-gray-700 focus:border-primary focus:ring-2 focus:ring-primary/30 focus:outline-none"
+              className="h-7 rounded-lg border border-gray-200 bg-white px-2 text-xs text-gray-700 transition-colors focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
               aria-label="Rows per page"
             >
               {PAGE_SIZE_OPTIONS.map((n) => (

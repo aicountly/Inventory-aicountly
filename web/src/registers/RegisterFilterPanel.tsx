@@ -76,6 +76,10 @@ export function RegisterFilterPanel({
   const morePanelId = useId()
 
   const visible = useMemo(() => filters.filter((f) => !f.hidden), [filters])
+  // `/` wants a free-text box. A register that declares no text filter has one
+  // anyway — the item typeahead — so it takes the ref rather than letting the
+  // shortcut fall through to the command palette.
+  const itemTakesSearch = useMemo(() => !visible.some((f) => f.kind === 'text'), [visible])
   const primaryKeys = spec.primaryKeys
   const primary = useMemo(
     () => (primaryKeys ? visible.filter((f) => primaryKeys.includes(f.key)) : visible),
@@ -159,7 +163,9 @@ export function RegisterFilterPanel({
         setRange={setRange}
         ctx={ctx}
         layout="stacked"
-        searchInputRef={isFirstText ? searchInputRef : undefined}
+        searchInputRef={
+          isFirstText || (itemTakesSearch && f.kind === 'item') ? searchInputRef : undefined
+        }
       />
     )
   }

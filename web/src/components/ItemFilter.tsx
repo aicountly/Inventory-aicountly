@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { forwardRef, useEffect, useState } from 'react'
 import { isAbortError } from '../services/api'
 import { lookupApi } from '../services/lookupApi'
 import { ItemPicker } from './ItemPicker'
@@ -16,7 +16,10 @@ interface ItemFilterProps {
  * Item typeahead bound to a URL filter. When the page loads with an `item_id`
  * already in the URL the name is looked up so the chip does not read "Item #12".
  */
-export function ItemFilter({ value, onChange, placeholder = 'Filter by item…', id }: ItemFilterProps) {
+export const ItemFilter = forwardRef<HTMLInputElement, ItemFilterProps>(function ItemFilter(
+  { value, onChange, placeholder = 'Filter by item…', id },
+  ref,
+) {
   const [picked, setPicked] = useState<PickedItem | null>(null)
   const wanted = value ? Number(value) : null
 
@@ -41,6 +44,7 @@ export function ItemFilter({ value, onChange, placeholder = 'Filter by item…',
     return (
       <div className="grow" style={{ maxWidth: '22rem' }}>
         <ItemPicker
+          ref={ref}
           id={id}
           value={null}
           placeholder={placeholder}
@@ -72,4 +76,4 @@ export function ItemFilter({ value, onChange, placeholder = 'Filter by item…',
       </button>
     </div>
   )
-}
+})

@@ -1,7 +1,7 @@
 import { Activity } from 'lucide-react'
 import { SUMMARY_ICON, SUMMARY_TONE } from '../components/SummaryStrip'
 import type { SummaryItem } from '../components/SummaryStrip'
-import { StatCard } from '../ui/StatCard'
+import { StatCard, StatCardSkeleton } from '../ui/StatCard'
 import type { StatCardSpec } from './RegisterConfig'
 
 /**
@@ -38,6 +38,31 @@ export function RegisterKpis({
           current={card.current}
           emphasizeNegative={card.emphasizeNegative}
         />
+      ))}
+    </>
+  )
+}
+
+/**
+ * The strip's own geometry while the first response is in flight.
+ *
+ * `count` is how many cards the register will show, so the placeholder does not
+ * hand the reader three boxes and then reflow into five. Rendered only on the
+ * FIRST load: a refresh keeps the figures on screen and dims them, because
+ * replacing a number a reader is looking at with a grey bar is a worse answer
+ * than a number that is one second old.
+ */
+export function RegisterKpisSkeleton({
+  count = 5,
+  layout = 'stacked',
+}: {
+  count?: number
+  layout?: 'stacked' | 'metric'
+}) {
+  return (
+    <>
+      {Array.from({ length: count }).map((_, i) => (
+        <StatCardSkeleton key={i} layout={layout} />
       ))}
     </>
   )

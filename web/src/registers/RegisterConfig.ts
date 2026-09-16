@@ -19,6 +19,7 @@ import type { ReportResponse } from '../services/reportsApi'
 import type { ReportConfig } from '../reports/types'
 import type { IconTone } from '../ui/IconTile'
 import type { BadgeTone } from '../ui/Badge'
+import type { RegisterInsightSet } from './RegisterInsightStrip'
 
 export type { ReportConfig, ReportColumn, ReportFilter, FilterContext, FilterKind } from '../reports/types'
 
@@ -215,6 +216,7 @@ export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
   /** Row → destination URL. Enables click / Enter drill-through. */
   drillTo?: (row: T) => string | null
 
+
   /**
    * The pinned `<tfoot>`, keyed by column key.
    *
@@ -241,6 +243,24 @@ export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
 
   /** Clickable KPI cards above the table. Falls back to `summary` when absent. */
   kpis?: (summary: S, response: ReportResponse<T, S>) => StatCardSpec[]
+
+  /**
+   * The operational strip under the KPI cards — what the rows on screen say
+   * about the state of things, rather than what they sum to.
+   *
+   * Derive it from the summary and the rows the register already has; never
+   * fetch for it, and never state a count more widely than the data supports.
+   * On an endpoint whose summary is the served page, say "on this page" in the
+   * hint the same way the cards and the footer do. A register that declares
+   * none simply shows no strip.
+   */
+  insights?: (summary: S, response: ReportResponse<T, S>) => RegisterInsightSet
+
+
+  /** Heading over the table card. Defaults to the register's own title. */
+  tableTitle?: string
+  /** One line under that heading, saying what the rows on screen are. */
+  tableHint?: string
 
   /**
    * Groupings the reader can switch between, with per-group subtotals. The

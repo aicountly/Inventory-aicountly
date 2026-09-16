@@ -26,6 +26,13 @@ export interface ReportListShellProps extends ReportCompactShellProps {
   toolbar?: ReactNode
   /** KPI cards above the table. */
   summary?: ReactNode
+  /**
+   * The at-a-glance strip under the KPI cards.
+   *
+   * Counts and states read off the response the register already has — what
+   * the rows say about the state of things, rather than what they sum to.
+   */
+  insights?: ReactNode
   /** Grid the KPI cards are laid out in. Defaults to the six-up strip. */
   summaryClassName?: string
 }
@@ -41,6 +48,7 @@ export function ReportListShell({
   toolbar,
   summary,
   summaryClassName,
+  insights,
   children,
   ...shell
 }: ReportListShellProps) {
@@ -59,6 +67,7 @@ export function ReportListShell({
       ) : null}
       {toolbar ? <div className="shrink-0 print:hidden">{toolbar}</div> : null}
       {summary ? <div className={summaryClassName ?? SUMMARY_CARD_GRID}>{summary}</div> : null}
+      {insights}
       <div className="flex flex-col flex-1 min-h-0">{children}</div>
     </ReportCompactShell>
   )
