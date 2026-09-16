@@ -1,7 +1,7 @@
 import { Activity } from 'lucide-react'
 import { SUMMARY_ICON, SUMMARY_TONE } from '../components/SummaryStrip'
 import type { SummaryItem } from '../components/SummaryStrip'
-import { StatCard } from '../ui/StatCard'
+import { StatCard, StatCardSkeleton } from '../ui/StatCard'
 import type { StatCardSpec } from './RegisterConfig'
 
 /**
@@ -13,13 +13,21 @@ import type { StatCardSpec } from './RegisterConfig'
  * Inventing a percentage here would put a number on a manager's screen that no
  * server ever computed.
  */
-export function RegisterKpis({ cards }: { cards: readonly StatCardSpec[] }) {
+export function RegisterKpis({
+  cards,
+  layout = 'stacked',
+}: {
+  cards: readonly StatCardSpec[]
+  /** `metric` is the wide four-up row the panel layout uses. */
+  layout?: 'stacked' | 'metric'
+}) {
   if (!cards.length) return null
   return (
     <>
       {cards.map((card) => (
         <StatCard
           key={card.key}
+          layout={layout}
           label={card.label}
           value={card.value}
           hint={card.hint}
@@ -30,6 +38,31 @@ export function RegisterKpis({ cards }: { cards: readonly StatCardSpec[] }) {
           current={card.current}
           emphasizeNegative={card.emphasizeNegative}
         />
+      ))}
+    </>
+  )
+}
+
+/**
+ * The strip's own geometry while the first response is in flight.
+ *
+ * `count` is how many cards the register will show, so the placeholder does not
+ * hand the reader three boxes and then reflow into five. Rendered only on the
+ * FIRST load: a refresh keeps the figures on screen and dims them, because
+ * replacing a number a reader is looking at with a grey bar is a worse answer
+ * than a number that is one second old.
+ */
+export function RegisterKpisSkeleton({
+  count = 5,
+  layout = 'stacked',
+}: {
+  count?: number
+  layout?: 'stacked' | 'metric'
+}) {
+  return (
+    <>
+      {Array.from({ length: count }).map((_, i) => (
+        <StatCardSkeleton key={i} layout={layout} />
       ))}
     </>
   )

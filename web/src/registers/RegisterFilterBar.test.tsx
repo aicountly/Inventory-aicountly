@@ -1,3 +1,4 @@
+import { forwardRef, createRef } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
@@ -49,9 +50,16 @@ vi.mock('../services/lookupApi', () => ({
   },
 }))
 
+// Forwards the ref, as the real ItemFilter does — the bar hands it the page's
+// search ref on a register with no text filter, and a mock that swallowed it
+// would let that wiring rot unnoticed.
 vi.mock('../components/ItemFilter', () => ({
-  ItemFilter: ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
-    <input aria-label="Item" value={value} onChange={(e) => onChange(e.target.value)} />
+  ItemFilter: forwardRef<HTMLInputElement, { value: string; onChange: (v: string) => void }>(
+    function ItemFilter({ value, onChange }, ref) {
+      return (
+        <input ref={ref} aria-label="Item" value={value} onChange={(e) => onChange(e.target.value)} />
+      )
+    },
   ),
 }))
 
@@ -274,5 +282,31 @@ describe('RegisterFilterBar', () => {
   it('renders the trailing slot for exports and counts', () => {
     renderBar([], {}, { trailing: <span>412 movements</span> })
     expect(screen.getByText('412 movements')).toBeTruthy()
+  })
+})
+
+/**
+ * `/` and the toolbar's Search button focus "this register's search box".
+ * On the stock balance register that box is the item typeahead — there is no
+ * text filter — and before the ref was wired here both fell through to the
+ * command palette while a Search button sat over a register it could not
+ * search.
+ */
+describe('which control the page search focuses', () => {
+  it('hands the search ref to the item picker when no text filter wants it', () => {
+    const ref = createRef<HTMLInputElement>()
+    renderBar([itemFilterSpec], {}, { searchInputRef: ref })
+    expect(ref.current).toBe(screen.getByLabelText('Item'))
+  })
+
+  it('leaves it with the text filter when there is one', () => {
+    const ref = createRef<HTMLInputElement>()
+    renderBar(
+      [itemFilterSpec, { key: 'q', kind: 'text', label: 'Search' }],
+      {},
+      { searchInputRef: ref },
+    )
+    expect(ref.current).not.toBe(screen.getByLabelText('Item'))
+    expect(ref.current?.tagName).toBe('INPUT')
   })
 })

@@ -7,6 +7,15 @@ export interface QueryState<T> {
   loading: boolean
   error: Error | null
   reload: () => void
+  /**
+   * Clock reading of the last SUCCESSFUL response, or null before one lands.
+   *
+   * The register header reports data freshness from this. It deliberately does
+   * not move on a failed reload: the rows on screen are still as old as they
+   * were, and stamping them "just now" because a request was attempted would
+   * make the badge a liar at exactly the moment it matters.
+   */
+  fetchedAt: number | null
 }
 
 interface QueryOptions {
@@ -38,6 +47,7 @@ export function useQuery<T>(fetcher: (signal: AbortSignal) => Promise<T>, deps: 
   const [data, setData] = useState<T | null>(null)
   const [loading, setLoading] = useState<boolean>(enabled)
   const [error, setError] = useState<Error | null>(null)
+  const [fetchedAt, setFetchedAt] = useState<number | null>(null)
   const [tick, setTick] = useState(0)
   const fetcherRef = useRef(fetcher)
   fetcherRef.current = fetcher
@@ -51,6 +61,10 @@ export function useQuery<T>(fetcher: (signal: AbortSignal) => Promise<T>, deps: 
     lastResetKey.current = resetKey
     if (data !== null) setData(null)
     if (error !== null) setError(null)
+    // The freshness stamp belongs to the data it described. Dropping the rows
+    // but keeping "updated just now" would date the new tenant's empty screen
+    // by the old tenant's fetch.
+    if (fetchedAt !== null) setFetchedAt(null)
   }
 
   useEffect(() => {
@@ -68,6 +82,7 @@ export function useQuery<T>(fetcher: (signal: AbortSignal) => Promise<T>, deps: 
       .then((result) => {
         if (controller.signal.aborted) return
         setData(result)
+        setFetchedAt(Date.now())
         setLoading(false)
       })
       .catch((err: unknown) => {
@@ -82,5 +97,5 @@ export function useQuery<T>(fetcher: (signal: AbortSignal) => Promise<T>, deps: 
 
   const reload = useCallback(() => setTick((t) => t + 1), [])
 
-  return { data, loading, error, reload }
+  return { data, loading, error, reload, fetchedAt }
 }

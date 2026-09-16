@@ -16,14 +16,25 @@ export interface ReportListShellProps extends ReportCompactShellProps {
    * makes you guess.
    */
   scope?: ReactNode
+  /**
+   * The filters node already IS a card — render it as given rather than wrapping
+   * it in the shared toolbar card. The filter panel owns its own heading, chips
+   * and grid, and a card inside a card draws two borders around one control set.
+   */
+  bareFilters?: boolean
   /** Extra pinned row between the filters and the summary (view switches…). */
   toolbar?: ReactNode
   /** KPI cards above the table. */
   summary?: ReactNode
-  /** Replaces the default KPI grid — for a strip of four rather than six. */
+  /**
+   * The at-a-glance strip under the KPI cards.
+   *
+   * Counts and states read off the response the register already has — what
+   * the rows say about the state of things, rather than what they sum to.
+   */
+  insights?: ReactNode
+  /** Grid the KPI cards are laid out in. Defaults to the six-up strip. */
   summaryClassName?: string
-  /** Charts between the KPI cards and the table. See RegisterConfig.analytics. */
-  analytics?: ReactNode
 }
 
 /**
@@ -33,16 +44,19 @@ export interface ReportListShellProps extends ReportCompactShellProps {
 export function ReportListShell({
   filters,
   scope,
+  bareFilters = false,
   toolbar,
   summary,
   summaryClassName,
-  analytics,
+  insights,
   children,
   ...shell
 }: ReportListShellProps) {
   return (
     <ReportCompactShell {...shell}>
-      {filters || scope ? (
+      {bareFilters ? (
+        filters ?? null
+      ) : filters || scope ? (
         <div className={TOOLBAR_CARD}>
           {scope ? (
             <span className="text-xs font-semibold text-gray-500 whitespace-nowrap">{scope}</span>
@@ -53,7 +67,7 @@ export function ReportListShell({
       ) : null}
       {toolbar ? <div className="shrink-0 print:hidden">{toolbar}</div> : null}
       {summary ? <div className={summaryClassName ?? SUMMARY_CARD_GRID}>{summary}</div> : null}
-      {analytics ? <div className="shrink-0 print:hidden">{analytics}</div> : null}
+      {insights}
       <div className="flex flex-col flex-1 min-h-0">{children}</div>
     </ReportCompactShell>
   )

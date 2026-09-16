@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Coins, FileText, Layers, Printer } from 'lucide-react'
+import { BarChart3, Coins, FileText, Layers, Printer, Warehouse } from 'lucide-react'
 import { Button } from '../ui/Button'
 import { StatusBadge } from '../ui/StatusBadge'
 import { notify } from '../ui/notify'
@@ -9,12 +9,19 @@ import { documentsApi } from '../services/documentsApi'
 import { defineRegister } from '../registers/RegisterConfig'
 import type { RegisterConfig, RegisterSelection } from '../registers/RegisterConfig'
 import { buildTotalsRow, totalsLabel } from '../registers/registerTotals'
-import { pageHint, summaryOverRows, withPageSummary } from '../registers/configs/pageSummary'
-import type { PageSummary } from '../registers/configs/pageSummary'
+import { pageHint } from '../registers/configs/pageSummary'
+import {
+  documentsSummaryOverRows,
+  withDocumentsSummary,
+} from './documentsSummary'
+import type { DocumentsSummary } from './documentsSummary'
+import { EmptyState } from '../ui/EmptyState'
 import { DASH, dateColumn, dateTimeColumn, itemFilter, warehouseFilter } from '../reports/configs/common'
 import type { ReportColumn, ReportFilter } from '../reports/types'
 import { formatInt, formatMoney } from '../utils/format'
 import { STATUS_LABELS } from './actions'
+import { DocumentRowActions } from './DocumentRowActions'
+import { DocumentTypeCell } from './documentTypeIcon'
 import { NewDocumentMenu } from './NewDocumentMenu'
 import { bulkPrintDocuments } from './printDocument'
 import { labelForCode, specForCode } from './registry'
@@ -120,8 +127,15 @@ const COLUMNS: ReportColumn<DocumentListRow>[] = serverSortableOnly<DocumentList
     key: 'document_type',
     header: 'Type',
     sortKey: 'document_type',
-    minWidth: 160,
-    render: (r) => r.document_type_label ?? labelForCode(r.document_type),
+    minWidth: 180,
+    // The glyph says which way the type moves stock and nothing else — see
+    // documentTypeIcon. The CSV keeps the words, which are the data.
+    render: (r) => (
+      <DocumentTypeCell
+        code={r.document_type}
+        label={r.document_type_label ?? labelForCode(r.document_type)}
+      />
+    ),
     csv: (r) => r.document_type_label ?? labelForCode(r.document_type),
   },
   {
@@ -138,7 +152,16 @@ const COLUMNS: ReportColumn<DocumentListRow>[] = serverSortableOnly<DocumentList
     key: 'party_name',
     header: 'Party',
     minWidth: 160,
-    render: (r) => r.party_name ?? (r.party_ref ? `#${r.party_ref}` : DASH),
+    render: (r) =>
+      r.party_name ? (
+        <span className="block truncate" title={r.party_name}>
+          {r.party_name}
+        </span>
+      ) : r.party_ref ? (
+        `#${r.party_ref}`
+      ) : (
+        DASH
+      ),
     csv: (r) => r.party_name ?? (r.party_ref ? `#${r.party_ref}` : ''),
   },
   {
@@ -146,7 +169,11 @@ const COLUMNS: ReportColumn<DocumentListRow>[] = serverSortableOnly<DocumentList
     header: 'Status',
     sortKey: 'status',
     render: (r) => (
-      <StatusBadge value={r.status} label={STATUS_LABELS[r.status as DocumentStatus] ?? r.status} />
+      <StatusBadge
+        dot
+        value={r.status}
+        label={STATUS_LABELS[r.status as DocumentStatus] ?? r.status}
+      />
     ),
     csv: (r) => STATUS_LABELS[r.status as DocumentStatus] ?? r.status,
   },
@@ -187,7 +214,9 @@ const COLUMNS: ReportColumn<DocumentListRow>[] = serverSortableOnly<DocumentList
       r.source_app === 'inventory' ? (
         <span className="text-gray-400">Inventory</span>
       ) : (
-        sourceText(r)
+        <span className="block truncate" title={sourceText(r)}>
+          {sourceText(r)}
+        </span>
       ),
     csv: sourceText,
   },
@@ -213,7 +242,24 @@ const COLUMNS: ReportColumn<DocumentListRow>[] = serverSortableOnly<DocumentList
  * failure a reader cannot see.
  */
 const FILTERS: ReportFilter[] = [
-  { key: 'q', kind: 'text', label: 'Search', placeholder: 'Number, party or source…', grow: true },
+  {
+    key: 'q',
+    kind: 'text',
+    label: 'Search',
+    /*
+     * What the server actually searches, and no more.
+     *
+     * DocumentsController::index matches `q` against d.document_no,
+     * d.party_name and d.source_document_no — the number, the party and the
+     * reference to the voucher the document came from. It does NOT search item
+     * names: an item is a property of the LINES, and the register has a
+     * dedicated Item filter beside this box that narrows by item_id through a
+     * subquery. A placeholder promising "item" here would send a reader to type
+     * a product name into a box that can only answer with nothing.
+     */
+    placeholder: 'Number, party or reference…',
+    grow: true,
+  },
   { key: 'document_type', kind: 'document_type', label: 'Type' },
   {
     key: 'status',
@@ -236,7 +282,39 @@ const FILTERS: ReportFilter[] = [
     ],
     placeholder: 'Any source',
   },
+  /*
+   * Behind "More filters" — both are read by DocumentsController::index today
+   * and neither had a control.
+   *
+   * `warehouse_id` above matches a document that touches a warehouse at ALL
+   * (either header end, or any line posting to or from it), which is the right
+   * default question. `from_warehouse_id` is the narrower one a stores manager
+   * asks about a transfer: what left THIS warehouse.
+   *
+   * `all_fy` drops the financial-year scope. It is behind the popover because
+   * it widens what the register covers, and `scopePeriodFor` below makes the
+   * scope line — the one thing a printed sheet carries about what was asked —
+   * say so when it is on.
+   */
+  {
+    key: 'from_warehouse_id',
+    kind: 'warehouse',
+    label: 'Source warehouse',
+    placeholder: 'Any source warehouse',
+  },
+  { key: 'all_fy', kind: 'toggle', label: 'Include every financial year' },
 ]
+
+/** The seven filters that get a cell in the grid; the rest go in the popover. */
+const PANEL_PRIMARY = [
+  'q',
+  'document_type',
+  'status',
+  'from',
+  'warehouse_id',
+  'item_id',
+  'source_app',
+] as const
 
 const totalsColumnsFor = (columns: readonly ReportColumn<DocumentListRow>[]) =>
   columns.map((c) => ({ key: c.key, align: c.align }))
@@ -304,7 +382,7 @@ function BulkPrintButton({
   )
 }
 
-const SELECTION: RegisterSelection<DocumentListRow, PageSummary> = {
+const SELECTION: RegisterSelection<DocumentListRow, DocumentsSummary> = {
   idOf: (row) => row.document_id,
   label: 'Select document',
   actions: (selected, clear) => <BulkPrintButton rows={selected} onDone={clear} />,
@@ -329,7 +407,7 @@ function filenameFor(documentType: string | null): string {
  */
 export function documentsRegister(
   documentType: string | null,
-): RegisterConfig<DocumentListRow, PageSummary> {
+): RegisterConfig<DocumentListRow, DocumentsSummary> {
   const spec = documentType ? specForCode(documentType) : null
   const typeLabel = documentType ? (spec?.label ?? labelForCode(documentType)) : null
   // A type whose lines are never valued shows no Valuation column, no Valuation
@@ -339,7 +417,7 @@ export function documentsRegister(
   const totalsColumns = totalsColumnsFor(columns)
   const sumKeys: readonly string[] = valued ? SUM_KEYS : UNVALUED_SUM_KEYS
 
-  return defineRegister<DocumentListRow, PageSummary>({
+  return defineRegister<DocumentListRow, DocumentsSummary>({
     slug: 'documents',
     path: 'documents',
     permission: P.documentsRead,
@@ -349,6 +427,15 @@ export function documentsRegister(
         ? `Every ${typeLabel.toLowerCase()} in the selected company, financial year and branch — status, lines and what the stock cost`
         : `Every ${typeLabel.toLowerCase()} in the selected company, financial year and branch — status and lines. This type carries no valuation: it moves no stock value, and the amount agreed with the party belongs to the Books voucher.`
       : 'Every stock document in the selected company, financial year and branch — what it moved, what it cost and which product entered it',
+    /*
+     * The subtitle under the heading. The full `description` above is what the
+     * export and the printed sheet carry, caveat and all; repeating that caveat
+     * here would print it twice on a screen that already states it in its own
+     * callout over the table (see `extra`).
+     */
+    shortDescription: typeLabel
+      ? `Every ${typeLabel.toLowerCase()} in the selected company, financial year and branch`
+      : 'Create, view and manage all your inventory transactions',
     // The register header is the breadcrumb trail (BreadcrumbHeader in compact
     // mode prints the trail, not a second <h1>), so the type has to be named
     // there or a reader following the Books hand-off cannot tell which register
@@ -359,14 +446,51 @@ export function documentsRegister(
     // No parent screen: the documents register is a top-level destination, not
     // a register reached from /registers.
     backTo: null,
+    /*
+     * `all_fy=1` drops the year from the server's WHERE clause, so the scope
+     * line has to drop it too. "FY 2026-27" over rows drawn from every year is
+     * a false claim, and on a printed sheet it is the only claim there is.
+     */
+    scopePeriodFor: (values) =>
+      values.all_fy === '1' ? 'All financial years' : undefined,
     // The register is where a reader already is when they need to raise one, so
     // the entry point stays on it — alongside, not instead of, the nav's hub.
     headerActions: <NewDocumentMenu />,
+    /*
+     * The page treatment, not the compact one.
+     *
+     * `/documents` is a top-level destination with eight filters that people
+     * work in all day, not a register glanced at from the hub. It gets a proper
+     * heading with its description, the filters as a labelled grid instead of
+     * one wrapping row, and four wide KPI cards. The compact header put the
+     * title, the keyboard hints and five controls on a single line, which is
+     * where the screen ran out of room.
+     */
+    layout: 'panel',
+    filterPanel: {
+      title: 'Filters',
+      description: 'Find the documents you’re looking for',
+      // "All documents" is this register's name for no period at all, which is
+      // its default — see the note on FILTERS above.
+      quickRanges: ['all', 'this_month', 'last_90', 'fy'],
+      allRangeLabel: typeLabel ? `All ${typeLabel.toLowerCase()}s` : 'All documents',
+      primaryKeys: PANEL_PRIMARY,
+    },
+    headerAside: (
+      <span className="flex items-center gap-2 text-xs text-gray-400">
+        <BarChart3 className="h-4 w-4 text-primary/40" aria-hidden />
+        Stock moves business forward
+      </span>
+    ),
+    rowActions: (row) => <DocumentRowActions row={row} />,
     icon: FileText,
     defaultSort: 'document_date',
     defaultOrder: 'desc',
     defaultLimit: 50,
-    minWidth: 1200,
+    // Ten columns plus a checkbox and a row menu. Below this the table squeezes
+    // its own cells instead of scrolling, which is how a date ends up on three
+    // lines; above it the body scrolls sideways, which is what a register does.
+    minWidth: 1320,
     rowNoun: 'document',
     filenameBase: filenameFor(documentType),
     // One preference set for the register and every per-type view of it: a
@@ -377,24 +501,36 @@ export function documentsRegister(
     rowKey: (r) => r.document_id,
     drillTo: (r) => `/documents/${r.document_id}`,
     selectable: SELECTION,
-    fetch: async ({ query, signal }) =>
-      withPageSummary(await documentsApi.list(query, signal), 'documents', sumKeys),
-    // `/v1/inventory-documents` sends rows and a count and no aggregate, so the
-    // sums are of the served page and every figure says so. An export walks
-    // every page, and summaryForRows re-totals over what it wrote — at which
-    // point the caveat stops being true and disappears by itself.
-    summaryForRows: (summary, rows) => summaryOverRows(summary, rows, sumKeys),
     /*
-     * The pinned footer says whose rows it totals, exactly as the movement and
-     * reservation registers do (configs/stockRegisters.tsx, configs/opsRegisters.tsx).
+     * `summary=1` on the screen's own read, never on the export's page walk.
      *
-     * `/v1/inventory-documents` sends no aggregate, so `s.sums` is over the
-     * served page alone. A footer under a table of 50 rows reading "Total" with
-     * a currency figure beside it is read as the register's total — and quoted,
-     * and printed — while the KPI strip two inches above says 4,182. It is the
-     * figure a reader trusts most, so it is the one that must carry the caveat.
-     * On an export the caveat removes itself: the sheet is re-totalled over
-     * every row it wrote, and `pageHint` then reads "all rows".
+     * The aggregate covers the whole filtered set, so one is all the screen
+     * needs; asking again on each of seventeen export pages would re-run two
+     * reads per page for figures the caller already holds. `forExportedRows`
+     * re-totals the sheet from the summary it already has.
+     */
+    fetch: async ({ query, signal, purpose }) =>
+      withDocumentsSummary(
+        await documentsApi.list(purpose === 'export' ? query : { ...query, summary: 1 }, signal),
+        sumKeys,
+      ),
+    // An export walks every page, so its sheet is re-totalled over what it
+    // actually wrote: identical to the server's aggregate when the walk was
+    // complete, and honestly narrower when the pager capped it.
+    summaryForRows: (summary, rows) => documentsSummaryOverRows(summary, rows, sumKeys),
+    /*
+     * The pinned footer says whose rows it totals.
+     *
+     * With `summary=1` the sums ARE the register's totals over every matching
+     * document, so the footer counts `s.total` and carries no caveat — which is
+     * what a reader has always taken a footer under a table to mean.
+     *
+     * Without it (an older API, or an aggregate read that failed) the figures
+     * fall back to the served page, and the caveat comes back word for word:
+     * a footer under 50 rows reading "Total" beside a currency figure is read
+     * as the register's total — and quoted, and printed — while the cards two
+     * inches above say 4,182. It is the figure a reader trusts most, so it is
+     * the one that must say what it covers.
      */
     totals: (s) =>
       buildTotalsRow(
@@ -406,7 +542,9 @@ export function documentsRegister(
             }
           : { line_count: formatInt(s.sums.line_count) },
         {
-          label: `${totalsLabel(s.pageRows, 'document')} — ${pageHint(s)}`,
+          label: s.fromServer
+            ? totalsLabel(s.total, 'document')
+            : `${totalsLabel(s.pageRows, 'document')} — ${pageHint(s)}`,
           labelKey: 'document_no',
         },
       ),
@@ -435,7 +573,7 @@ export function documentsRegister(
         key: 'lines',
         label: 'Lines',
         value: formatInt(s.sums.line_count),
-        hint: pageHint(s),
+        hint: s.fromServer ? 'Total document lines' : pageHint(s),
         icon: Layers,
         tone: 'info',
       },
@@ -445,20 +583,57 @@ export function documentsRegister(
               key: 'valuation',
               label: 'Valuation',
               value: formatMoney(s.sums.valuation_total),
-              hint: `${pageHint(s)} · what the stock cost`,
+              hint: s.fromServer
+                ? 'Total stock value (cost)'
+                : `${pageHint(s)} · what the stock cost`,
               icon: Coins,
-              tone: 'success' as const,
+              tone: 'violet' as const,
               current: s.sums.valuation_total,
               emphasizeNegative: true,
+            },
+          ]
+        : []),
+      /*
+       * Only when the server counted them.
+       *
+       * A warehouse count cannot be derived from the rows on screen: a document
+       * row carries no warehouse, its LINES do, and `from_warehouse_id` /
+       * `to_warehouse_id` are set on transfers alone. A card that counted those
+       * two header columns would read "2 warehouses impacted" on a page of
+       * fifty receipts that touched nine. So the card exists exactly when
+       * `summary=1` answered, and is absent otherwise — never a guess.
+       */
+      ...(s.warehousesImpacted !== null
+        ? [
+            {
+              key: 'warehouses',
+              label: 'Warehouses impacted',
+              value: formatInt(s.warehousesImpacted),
+              hint: 'Across these documents',
+              icon: Warehouse,
+              tone: 'warning' as const,
             },
           ]
         : []),
     ],
     summary: (s) => [
       { label: 'Documents', value: formatInt(s.total) },
-      { label: 'Lines', value: formatInt(s.sums.line_count), hint: pageHint(s) },
+      {
+        label: 'Lines',
+        value: formatInt(s.sums.line_count),
+        hint: s.fromServer ? undefined : pageHint(s),
+      },
       ...(valued
-        ? [{ label: 'Valuation', value: formatMoney(s.sums.valuation_total), hint: pageHint(s) }]
+        ? [
+            {
+              label: 'Valuation',
+              value: formatMoney(s.sums.valuation_total),
+              hint: s.fromServer ? undefined : pageHint(s),
+            },
+          ]
+        : []),
+      ...(s.warehousesImpacted !== null
+        ? [{ label: 'Warehouses impacted', value: formatInt(s.warehousesImpacted) }]
         : []),
     ],
     /*
@@ -481,6 +656,27 @@ export function documentsRegister(
           </div>
         ),
     emptyMessage: 'No document matches these filters. Widen the period or clear a filter.',
+    /*
+     * Empty with nothing filtered is a different screen.
+     *
+     * A company in its first week has no documents and no filters set, and
+     * "widen the period or clear a filter" sends that reader looking for a
+     * filter that is not there. The CTA is `NewDocumentMenu`, so it offers the
+     * types this profile may actually raise and says so when that is none of
+     * them — the permission check is the menu's, not a guess made here.
+     */
+    emptyUnfiltered: (
+      <EmptyState
+        icon={FileText}
+        title={typeLabel ? `No ${typeLabel.toLowerCase()} yet` : 'No inventory documents yet'}
+        description={
+          typeLabel
+            ? `Nothing of this type has been entered for the selected company, financial year and branch.`
+            : 'Create your first inventory document to start tracking stock movements.'
+        }
+        action={<NewDocumentMenu />}
+      />
+    ),
   })
 }
 

@@ -141,6 +141,30 @@ describe('accent surfaces in dark mode', () => {
     }
   })
 
+  /**
+   * A gradient stop is not a background colour.
+   *
+   * `dark-overrides.css` works by out-specifying utilities like `.bg-white`,
+   * but `from-white` sets `--tw-gradient-from` and nothing in that sheet can
+   * reach it. A KPI strip built with `bg-gradient-to-b from-white` therefore
+   * stayed white-on-black in dark mode while every surface around it turned,
+   * and no test above could see it: the scanner looks for accent ramps, and
+   * white is not one.
+   */
+  it('never paints a surface with a hardcoded white or grey gradient stop', () => {
+    const offenders: string[] = []
+    const PATTERN = /\b(?:from|via|to)-(?:white|gray-(?:50|100|200)|slate-(?:50|100|200))\b/g
+    for (const file of sourceFiles(SRC)) {
+      for (const match of readFileSync(file, 'utf8').matchAll(PATTERN)) {
+        offenders.push(`${file.replace(SRC, 'src')}: ${match[0]}`)
+      }
+    }
+    expect(
+      offenders,
+      `these gradient stops cannot be remapped for dark mode — use a token-backed surface instead:\n${offenders.join('\n')}`,
+    ).toEqual([])
+  })
+
   it('leaves the light theme alone', async () => {
     mount((await utilitiesFor(['bg-red-50'])) + DARK_SHEET)
     document.documentElement.classList.remove('dark')

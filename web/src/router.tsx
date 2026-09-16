@@ -18,6 +18,8 @@ import { PostingStatusPage } from './pages/reconciliation/PostingStatusPage'
 import { ReconciliationLayout } from './pages/reconciliation/ReconciliationLayout'
 import { ReconciliationRunPage } from './pages/reconciliation/ReconciliationRunPage'
 import { ReconciliationRunsPage } from './pages/reconciliation/ReconciliationRunsPage'
+import { ReconciliationVariancePage } from './pages/reconciliation/ReconciliationVariancePage'
+import { ReconciliationInsightsPage } from './pages/reconciliation/ReconciliationInsightsPage'
 import { LegacyRedirect } from './registers/LegacyRedirect'
 import { RegisterRoutePage } from './registers/RegisterRoutePage'
 import { RegistersHubPage } from './registers/RegistersHubPage'
@@ -90,6 +92,8 @@ export function AppRoutes() {
         <Route path="reconciliation" element={<ReconciliationLayout />}>
           <Route index element={<ReconciliationRunsPage />} />
           <Route path="posting-status" element={<PostingStatusPage />} />
+          <Route path="variance" element={<ReconciliationVariancePage />} />
+          <Route path="insights" element={<ReconciliationInsightsPage />} />
           <Route path=":id" element={<ReconciliationRunPage />} />
         </Route>
         <Route path="integration/outbox" element={<OutboxPage />} />

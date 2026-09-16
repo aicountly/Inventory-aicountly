@@ -290,16 +290,27 @@ body {
 }
 
 @layer components {
+  /*
+   * The keyboard cursor, not a tick-box selection.
+   *
+   * useListKeyboardNav puts this on the row the arrow keys would act on, and
+   * `autoSelectFirst` means that is row 1 from the moment a register paints.
+   * Filling that row with solid green and ringing it read as "this row is
+   * special" on every list in the product, when all it meant was "start here"
+   * — the first thing a reader asked about the stock register was why Dimmy
+   * was highlighted. A tint and a left accent mark the cursor just as clearly
+   * and claim nothing about the row.
+   */
   .table-row-selected {
-    background-color: rgb(var(--color-primary-light) / 0.75);
-    box-shadow: inset 0 0 0 2px rgb(var(--color-primary) / 0.35);
+    background-color: rgb(var(--color-primary-light) / 0.4);
+    box-shadow: inset 3px 0 0 0 rgb(var(--color-primary));
     transition: background-color 120ms ease, box-shadow 120ms ease;
   }
   .table-row-hover {
     transition: background-color 120ms ease;
   }
   .table-row-hover:hover {
-    background-color: rgb(var(--color-primary-light) / 0.45);
+    background-color: rgb(var(--color-primary-light) / 0.22);
   }
   .kbd {
     display: inline-flex;

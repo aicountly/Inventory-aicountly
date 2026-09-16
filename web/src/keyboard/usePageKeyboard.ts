@@ -3,17 +3,24 @@ import type { RefObject } from 'react'
 import { useKeyboardScope } from './useKeyboardScope'
 import { openCommandPalette } from './shortcutRegistry'
 
-function focusPageSearch(
-  searchInputRef: RefObject<HTMLInputElement | null> | undefined,
-  e: KeyboardEvent,
+/**
+ * What "search this page" means: the page's own search box when it has one,
+ * the command palette when it does not.
+ *
+ * Exported because the register toolbar has a visible Search button beside the
+ * `/` hint, and two implementations of the same promise drift — the button was
+ * a no-op on every register whose search box is the item typeahead.
+ */
+export function focusPageSearch(
+  searchInputRef?: RefObject<HTMLInputElement | null>,
 ): void {
-  e.preventDefault()
-  if (searchInputRef?.current) {
-    searchInputRef.current.focus()
-    searchInputRef.current.select?.()
-  } else {
-    openCommandPalette()
+  const el = searchInputRef?.current
+  if (el) {
+    el.focus()
+    el.select?.()
+    return
   }
+  openCommandPalette()
 }
 
 export interface PageKeyboardOptions {
@@ -40,11 +47,13 @@ export function usePageKeyboard({
     () => ({
       'ctrl+f': (e: KeyboardEvent) => {
         if (!enabled) return
-        focusPageSearch(searchInputRef, e)
+        e.preventDefault()
+        focusPageSearch(searchInputRef)
       },
       '/': (e: KeyboardEvent) => {
         if (!enabled) return
-        focusPageSearch(searchInputRef, e)
+        e.preventDefault()
+        focusPageSearch(searchInputRef)
       },
       'ctrl+r': (e: KeyboardEvent) => {
         if (!enabled || !onRefresh) return

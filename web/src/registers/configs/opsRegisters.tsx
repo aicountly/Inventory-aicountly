@@ -3,14 +3,11 @@ import {
   Boxes,
   Clock,
   Coins,
-  Layers,
   Package,
   Scale,
-  ScrollText,
   Warehouse,
 } from 'lucide-react'
-import { Link, useSearchParams } from 'react-router-dom'
-import { useAccess } from '../../access/AccessContext'
+import { Link } from 'react-router-dom'
 import { P } from '../../services/access'
 import { reconciliationApi } from '../../services/reconciliationApi'
 import type { ReconciliationRun } from '../../services/reconciliationApi'
@@ -35,13 +32,12 @@ import {
   textColumn,
   warehouseFilter,
 } from '../../reports/configs/common'
-import { RowActionsMenu } from '../../ui/RowActionsMenu'
-import type { RowAction } from '../../ui/RowActionsMenu'
 import { buildTotalsRow, totalsLabel } from '../registerTotals'
 import { defineRegister } from '../RegisterConfig'
 import type { ReportColumn } from '../RegisterConfig'
 import { ValuationAnalytics } from '../valuation/ValuationAnalytics'
 import { ValuationHeaderActions } from '../valuation/ValuationHeaderActions'
+import { ValuationRowActions } from '../valuation/ValuationRowActions'
 import { ValuationSelectionActions } from '../valuation/ValuationSelectionActions'
 import { ValuationTableToolbar } from '../valuation/ValuationTableToolbar'
 import { WarehouseScopeHint, WarehouseScopeValue } from '../valuation/WarehouseScopeValue'
@@ -131,17 +127,22 @@ export const valuationRegister = defineRegister<ValuationSnapshotRow, ValuationS
   title: 'Valuation register',
   description:
     'Item-wise stock valuation as at the selected date, under the valuation method you choose',
-  shortDescription: 'Closing value per item, any method, any date',
+  shortDescription: 'Item-wise stock valuation as at a date, under your chosen method',
   group: 'valuation',
   icon: Coins,
   defaultSort: 'item_name',
   minWidth: 1080,
   rowNoun: 'item',
   filenameBase: 'valuation',
-  // Read as a workspace, not as a list: the header names it, the filters are
-  // the question rather than a refinement of it, and the analytics band answers
-  // what no single row can. See RegisterConfig.layout.
-  layout: 'workspace',
+  // The panel layout main established: page header, carded filter grid, metric
+  // KPI row. It suits this register for the reason it suits stock balances —
+  // the filters here ARE the question, since a date and a costing method decide
+  // every figure on the screen.
+  layout: 'panel',
+  filterPanel: {
+    description: 'Value stock on hand at a date, under a costing method',
+  },
+  tableTitle: 'Item-wise valuation',
   defaultLimit: 50,
   headerActions: <ValuationHeaderActions />,
   // The snapshot endpoint already answers a real summary; it just does not
@@ -314,59 +315,6 @@ export const valuationRegister = defineRegister<ValuationSnapshotRow, ValuationS
   emptyMessage:
     'No stock valuation is available for the selected date and filters. Widen the date or clear a filter and try again.',
 })
-
-/**
- * The row menu: the four places a valuation figure can be taken apart.
- *
- * Every entry is a screen that exists and a filter the destination actually
- * reads — the warehouse breakup is the warehouse-stock register narrowed to
- * this item at this date, not a view invented for the menu. Each is gated on
- * the permission its destination is gated on, so the menu never offers a door
- * that answers 403.
- */
-function ValuationRowActions({ row }: { row: ValuationSnapshotRow }) {
-  const { can } = useAccess()
-  const asOf = useSearchParams()[0].get('as_of') ?? ''
-  const name = row.item_name ?? `Item #${row.item_id}`
-  const dated = (key: string) => (asOf ? `&${key}=${asOf}` : '')
-
-  const actions: RowAction[] = []
-  if (can(P.report('valuation'))) {
-    actions.push({
-      key: 'layers',
-      label: 'View cost layers',
-      icon: Layers,
-      to: `/valuation/cost-layers?item_id=${row.item_id}`,
-    })
-  }
-  if (can(P.report('stock_ledger'))) {
-    actions.push({
-      key: 'ledger',
-      label: 'Movement history',
-      icon: ScrollText,
-      to: `/registers/stock-ledger?item_id=${row.item_id}${dated('to')}`,
-    })
-  }
-  if (can(P.report('warehouse_stock'))) {
-    actions.push({
-      key: 'warehouses',
-      label: 'Warehouse breakup',
-      icon: Warehouse,
-      to: `/registers/warehouse-stock?item_id=${row.item_id}${dated('to')}`,
-    })
-  }
-  if (can(P.masters('items', 'read'))) {
-    actions.push({
-      key: 'item',
-      label: 'Open item',
-      icon: Package,
-      to: `/items/${row.item_id}`,
-    })
-  }
-
-  if (actions.length === 0) return null
-  return <RowActionsMenu actions={actions} label={`Actions for ${name}`} />
-}
 
 /* -------------------------------------------------- reservation register */
 

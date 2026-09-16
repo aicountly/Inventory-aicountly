@@ -13,6 +13,8 @@ export interface BreadcrumbHeaderProps {
   icon?: LucideIcon
   badge?: ReactNode
   meta?: ReactNode
+  /** Full mode only: decoration between the title and the actions. */
+  aside?: ReactNode
   actions?: ReactNode
   /** Compact mode only: filters / segmented controls beside the breadcrumbs. */
   toolbar?: ReactNode
@@ -35,6 +37,7 @@ export function BreadcrumbHeader({
   icon,
   badge,
   meta,
+  aside,
   actions,
   toolbar,
   backTo,
@@ -89,6 +92,7 @@ export function BreadcrumbHeader({
         icon={icon}
         badge={badge}
         meta={meta}
+        aside={aside}
         actions={actions}
         backTo={backTo}
         backLabel={backLabel}

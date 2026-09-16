@@ -160,7 +160,8 @@ describe('valuation register', () => {
   it('names itself with a masthead, not just a breadcrumb', async () => {
     renderRegister()
     expect(await screen.findByRole('heading', { level: 1, name: 'Valuation register' })).toBeTruthy()
-    expect(screen.getByText(/Item-wise stock valuation as at the selected date/)).toBeTruthy()
+    // The panel header carries `shortDescription`, not the long one.
+    expect(screen.getByText(/Item-wise stock valuation as at a date/)).toBeTruthy()
   })
 
   it('offers exactly the four methods the API accepts', async () => {

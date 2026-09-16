@@ -74,7 +74,6 @@ function QuickGuideDrawer({ open, onClose }: { open: boolean; onClose: () => voi
       onClose={onClose}
       title="Quick guide"
       description="What this register reports, and how to read it."
-      icon={<BookOpen className="h-5 w-5 text-primary" aria-hidden />}
     >
       <dl className="m-0">
         <Term term="Valuation register">
@@ -161,7 +160,6 @@ function MethodSettingsDrawer({ open, onClose }: { open: boolean; onClose: () =>
       onClose={onClose}
       title="Method settings"
       description="The costing policy this register is computed under."
-      icon={<SlidersHorizontal className="h-5 w-5 text-primary" aria-hidden />}
       footer={
         <>
           <Button variant="secondary" onClick={onClose}>

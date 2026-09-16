@@ -36,6 +36,29 @@ export const SUMMARY_CARD_GRID =
 
 export const SUMMARY_CARD = 'rounded-xl border border-gray-200 bg-white px-3 py-2.5'
 
+/**
+ * Four wide metric cards over a table — the register panel layout.
+ *
+ * Deliberately not the six-up strip above: a register that shows four figures
+ * wants each of them readable at a glance from across a desk, and six columns
+ * on a 1280px screen leaves 190px a card for a label, a figure and a caption.
+ */
+export const METRIC_CARD_GRID =
+  'grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 shrink-0 print:hidden'
+
+/**
+ * The register's KPI strip.
+ *
+ * Separate from SUMMARY_CARD_GRID because registers carry three to six cards
+ * and want them equal and side by side on a wide screen; `auto-fit` sizes the
+ * track to whatever the register declares instead of leaving a sixth column
+ * empty under a five-card register. The fixed steps below `xl` are there so a
+ * narrow window degrades to whole rows rather than to one very wide card and
+ * one very narrow one.
+ */
+export const REGISTER_KPI_GRID =
+  'grid shrink-0 gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] print:hidden'
+
 export const TABLE_HEADER =
   'text-label-sm font-semibold uppercase tracking-wide text-gray-500'
 
@@ -80,23 +103,6 @@ export const DASHBOARD_TABLE_PROPS = {
   scrollBody: true,
   density: 'compact',
   className: 'max-h-72',
-} as const
-
-/**
- * A register that scrolls with its page (RegisterConfig.scrollPage).
- *
- * `fillAvailable` is off because the table is no longer the page's only flex
- * child — there is a KPI strip and a chart band above it — and a bounded scroll
- * box keeps the sticky header and the pinned totals row where they can be read
- * without scrolling the whole page back up.
- */
-export const SCROLL_PAGE_TABLE_PROPS = {
-  stickyHeader: true,
-  scrollBody: true,
-  fillAvailable: false,
-  density: 'compact',
-  totalsTone: 'primary',
-  className: 'max-h-[min(34rem,58vh)]',
 } as const
 
 /**

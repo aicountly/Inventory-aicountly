@@ -60,9 +60,13 @@ Manage through the API's read-only relay (`/api/manage/...`).
 - **Reports** — stock summary, warehouse stock, batch stock, serial numbers,
   stock ageing, movement analysis, near expiry and replenishment, each with
   URL-persisted filters and CSV export (`src/reports/configs`).
-- **Reconciliation** — runs against the Books Stock-in-Hand ledger with the
-  bucket breakdown, the per-voucher posting status, and the outbox events
-  with replay.
+- **Reconciliation** — Inventory's closing valuation against the Books
+  Stock-in-Hand ledger: the headline figures for the latest completed run, the
+  run history with its trend, the bucket breakdown that explains a gap
+  (item-wise variance), the per-voucher posting status (pending adjustments),
+  the outbox events with replay (audit trail) and deterministic insights over
+  the runs on record. Both sides stay in their own database and compare over
+  live APIs.
 - **Settings** — company costing defaults, period locks, access profiles and
   members, the document-type catalogue. **Audit** — append-only log with
   before / after snapshots.
