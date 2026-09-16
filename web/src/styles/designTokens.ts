@@ -37,6 +37,16 @@ export const SUMMARY_CARD_GRID =
 export const SUMMARY_CARD = 'rounded-xl border border-gray-200 bg-white px-3 py-2.5'
 
 /**
+ * Four wide metric cards over a table — the register panel layout.
+ *
+ * Deliberately not the six-up strip above: a register that shows four figures
+ * wants each of them readable at a glance from across a desk, and six columns
+ * on a 1280px screen leaves 190px a card for a label, a figure and a caption.
+ */
+export const METRIC_CARD_GRID =
+  'grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 shrink-0 print:hidden'
+
+/**
  * The register's KPI strip.
  *
  * Separate from SUMMARY_CARD_GRID because registers carry three to six cards

@@ -13,7 +13,7 @@ export interface BatchFilterProps {
   itemId: number | null
   warehouseId: number | null
   onChange: (batchId: string) => void
-  /** Stack the label over the control (RegisterFilterCard's layout). */
+  /** Label above the control, control filling its cell — the filter panel. */
   stacked?: boolean
 }
 
@@ -58,14 +58,13 @@ export function BatchFilter({ label, value, itemId, warehouseId, onChange, stack
   }, [itemId, value, onChange])
 
   return (
-    <FilterField label={label} stacked={stacked}>
+    <FilterField label={label} stacked={stacked} className={stacked ? 'min-w-0 w-full' : undefined}>
       <Select
-        size={stacked ? 'md' : 'sm'}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         aria-label={label}
         disabled={!itemId}
-        className={stacked ? 'w-full min-w-[9rem]' : 'w-auto min-w-[9rem]'}
+        className={stacked ? 'w-full' : 'w-auto min-w-[9rem]'}
         title={itemId ? undefined : 'Pick an item first — batches belong to one item'}
       >
         <option value="">{itemId ? 'All batches' : 'Pick an item first'}</option>

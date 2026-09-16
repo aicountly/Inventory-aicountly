@@ -133,6 +133,15 @@ export interface SmartTableProps<T> {
   stickyHeader?: boolean
   scrollBody?: boolean
   fillAvailable?: boolean
+  /**
+   * Which viewport lock `fillAvailable` follows.
+   *
+   * ReportCompactShell pins the page at `tall:` in its compact layout and at
+   * `taller:` in the panel one. The table has to fill against the same
+   * breakpoint: gated on the other, it resolves a height against a parent that
+   * never got one and the scroll area collapses to about a row.
+   */
+  fillAt?: 'tall' | 'taller'
   minWidth?: number
   className?: string
   cardPadding?: CardPadding
@@ -210,6 +219,7 @@ export function SmartTable<T>({
   stickyHeader = false,
   scrollBody = false,
   fillAvailable = false,
+  fillAt = 'tall',
   minWidth = 600,
   className,
   cardPadding = 'none',
@@ -462,6 +472,9 @@ export function SmartTable<T>({
               className={cx(
                 padCls,
                 textCls,
+                // "Total (1,284 documents)" broken over three lines doubles the
+                // height of the one row a reader looks at last and trusts most.
+                'whitespace-nowrap',
                 alignCls(col.align),
                 col.align === 'right' && AMOUNT_CELL_CLASS,
                 scrollBody &&
@@ -493,7 +506,10 @@ export function SmartTable<T>({
          * Gated, the short-viewport case renders the table at its natural
          * height and lets the page scroll, which is what was meant all along.
          */
-        fillAvailable && 'tall:flex tall:flex-col tall:min-h-0 tall:h-full tall:overflow-hidden',
+        fillAvailable &&
+          (fillAt === 'taller'
+            ? 'taller:flex taller:flex-col taller:min-h-0 taller:h-full taller:overflow-hidden'
+            : 'tall:flex tall:flex-col tall:min-h-0 tall:h-full tall:overflow-hidden'),
         scrollBody && !fillAvailable && 'flex flex-col overflow-hidden',
         className,
       )}
@@ -521,7 +537,9 @@ export function SmartTable<T>({
             ? fillAvailable
               // Sideways always; up and down only once the card has a height to
               // scroll within.
-              ? 'overflow-x-auto tall:overflow-auto tall:flex-1 tall:min-h-0'
+              ? fillAt === 'taller'
+                ? 'overflow-x-auto taller:overflow-auto taller:flex-1 taller:min-h-0'
+                : 'overflow-x-auto tall:overflow-auto tall:flex-1 tall:min-h-0'
               : 'overflow-auto flex-1 min-h-0'
             : 'overflow-x-auto',
         )}

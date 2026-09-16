@@ -1,18 +1,15 @@
 import { Outlet } from 'react-router-dom'
-import { SubNav } from '../../components/SubNav'
-import { P } from '../../services/access'
 
-const ITEMS = [
-  { to: '/reconciliation', label: 'Runs', end: true, permission: P.reconciliationRead },
-  { to: '/reconciliation/posting-status', label: 'Posting status', permission: P.reconciliationRead },
-  { to: '/integration/outbox', label: 'Outbox events', permission: P.integrationRead },
-] as const
-
+/**
+ * The reconciliation module's route shell.
+ *
+ * It deliberately holds no navigation of its own. The five tabs sit UNDER the
+ * headline figures on each screen (`ReconciliationTabs`), where the figures
+ * they belong to can be read first — a bar rendered here would always land
+ * above the page title instead.
+ */
 export function ReconciliationLayout() {
-  return (
-    <div className="page">
-      <SubNav items={ITEMS} label="Reconciliation" />
-      <Outlet />
-    </div>
-  )
+  return <Outlet />
 }
+
+export default ReconciliationLayout

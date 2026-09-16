@@ -13,13 +13,21 @@ import type { StatCardSpec } from './RegisterConfig'
  * Inventing a percentage here would put a number on a manager's screen that no
  * server ever computed.
  */
-export function RegisterKpis({ cards }: { cards: readonly StatCardSpec[] }) {
+export function RegisterKpis({
+  cards,
+  layout = 'stacked',
+}: {
+  cards: readonly StatCardSpec[]
+  /** `metric` is the wide four-up row the panel layout uses. */
+  layout?: 'stacked' | 'metric'
+}) {
   if (!cards.length) return null
   return (
     <>
       {cards.map((card) => (
         <StatCard
           key={card.key}
+          layout={layout}
           label={card.label}
           value={card.value}
           hint={card.hint}
@@ -29,7 +37,6 @@ export function RegisterKpis({ cards }: { cards: readonly StatCardSpec[] }) {
           to={card.to}
           current={card.current}
           emphasizeNegative={card.emphasizeNegative}
-          size="lg"
         />
       ))}
     </>
@@ -45,11 +52,17 @@ export function RegisterKpis({ cards }: { cards: readonly StatCardSpec[] }) {
  * replacing a number a reader is looking at with a grey bar is a worse answer
  * than a number that is one second old.
  */
-export function RegisterKpisSkeleton({ count = 5 }: { count?: number }) {
+export function RegisterKpisSkeleton({
+  count = 5,
+  layout = 'stacked',
+}: {
+  count?: number
+  layout?: 'stacked' | 'metric'
+}) {
   return (
     <>
       {Array.from({ length: count }).map((_, i) => (
-        <StatCardSkeleton key={i} size="lg" />
+        <StatCardSkeleton key={i} layout={layout} />
       ))}
     </>
   )

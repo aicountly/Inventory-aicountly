@@ -1,17 +1,11 @@
-import { useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
 import type { ReactNode, RefObject } from 'react'
 import type { LucideIcon } from 'lucide-react'
-import { ArrowLeft, Search } from 'lucide-react'
-import { BreadcrumbBar } from './BreadcrumbBar'
+import { BreadcrumbHeader } from './BreadcrumbHeader'
 import type { Crumb } from './BreadcrumbBar'
 import { PageShell } from './PageShell'
-import { RegisterHero } from './RegisterHero'
-import { Button } from '../Button'
-import { focusPageSearch, usePageKeyboard } from '../../keyboard/usePageKeyboard'
-import { usePageBackKeyboard } from '../../keyboard/usePageBackKeyboard'
-import { resolveBackTarget } from '../../keyboard/resolveBackTarget'
-import { AIC, cx } from '../cx'
+import { KeyboardShortcutHint } from '../Kbd'
+import { usePageKeyboard } from '../../keyboard/usePageKeyboard'
+import { cx } from '../cx'
 
 export interface ReportCompactShellProps {
   breadcrumbs?: readonly Crumb[]
@@ -19,14 +13,26 @@ export interface ReportCompactShellProps {
   description?: ReactNode
   icon?: LucideIcon
   headerActions?: ReactNode
+  /**
+   * `compact` (the default) prints the breadcrumb trail, the toolbar and the
+   * actions on one row — right for a register reached from the hub, where the
+   * trail is how the reader knows where they are.
+   *
+   * `page` gives the screen a proper heading: title, description and actions,
+   * with the breadcrumbs above. A top-level destination people work in all day
+   * earns the two lines; `/documents` is one.
+   */
+  headerVariant?: 'compact' | 'page'
+  /** `page` only: decoration beside the title, shown only at ≥1536px. */
+  headerAside?: ReactNode
   toolbar?: ReactNode
+  shortcutKeys?: readonly string[]
+  shortcutLabel?: string
   backTo?: string
   className?: string
   searchInputRef?: RefObject<HTMLInputElement | null>
   onRefresh?: () => void
   onPrint?: () => void
-  /** Right-hand slot in the hero row — the live-data badge on a register. */
-  heroAside?: ReactNode
   children?: ReactNode
 }
 
@@ -34,12 +40,6 @@ export interface ReportCompactShellProps {
  * Viewport-bound report layout — header and filters pinned, the table flexing
  * to fill what is left. Port of
  * books-react-app/web/src/modules/reports/shared/ReportCompactShell.jsx.
- *
- * The header is two rows, not one: the trail and the page's actions above, the
- * register's own identity below. The single-row version put a 16px heading in
- * the same line as six buttons, so the name of the screen read as one more
- * control; a reader arriving from a Books hand-off could not tell at a glance
- * which register they had landed on.
  *
  * Replication checklist for a new register or list page:
  *  1. Wrap in ReportCompactShell, or ReportListShell for the filters + KPI slots.
@@ -59,81 +59,71 @@ export function ReportCompactShell({
   description,
   icon,
   headerActions,
+  headerVariant = 'compact',
+  headerAside,
   toolbar,
+  shortcutKeys,
+  shortcutLabel,
   backTo,
   className,
   searchInputRef,
   onRefresh,
   onPrint,
-  heroAside,
   children,
 }: ReportCompactShellProps) {
-  const navigate = useNavigate()
   usePageKeyboard({ searchInputRef, onRefresh, onPrint })
-  // Esc → back. It used to be wired by BreadcrumbHeader, which this shell no
-  // longer renders; losing it would have broken the one shortcut every
-  // register shares with every form in the product.
-  usePageBackKeyboard({ backTo, breadcrumbs })
 
-  // Where Esc would go, so the visible Back button and the key agree. A button
-  // that went somewhere else than the shortcut beside it is worse than none.
-  const backTarget = resolveBackTarget({ backTo, breadcrumbs })
+  // Only advertise what is wired. A chip promising Ctrl+P on a page with no
+  // print handler sends the reader to the browser's own dialog, which prints
+  // the app's DOM instead of the sheet.
+  const hintKeys = shortcutKeys ?? ['/', 'Ctrl+R', ...(onPrint ? ['Ctrl+P'] : []), 'Esc']
+  const hintLabel = shortcutLabel ?? `Search · Refresh${onPrint ? ' · Print' : ''} · Back`
 
-  // Same policy as `/`, from the same function, so the two cannot disagree.
-  const focusSearch = useCallback(() => focusPageSearch(searchInputRef), [searchInputRef])
+  const showHint = Boolean(onRefresh || onPrint || searchInputRef)
+  const hint = showHint ? (
+    <KeyboardShortcutHint keys={hintKeys} label={hintLabel} className="hidden xl:inline-flex" />
+  ) : null
+
+  // In `page` mode the hint drops under the title instead of competing with the
+  // buttons. It is a reminder, not a control, and the action row is where the
+  // reader's eye goes for something to press.
+  const page = headerVariant === 'page'
 
   return (
     <PageShell
       compact
       paddingBottom={false}
-      className={cx('flex flex-col tall:h-[calc(100dvh-7rem)] tall:overflow-hidden', className)}
+      className={cx(
+        'flex flex-col',
+        page
+          ? 'taller:h-[calc(100dvh-7rem)] taller:overflow-hidden'
+          : 'tall:h-[calc(100dvh-7rem)] tall:overflow-hidden',
+        className,
+      )}
     >
-      <div className={cx(AIC, 'flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 print:hidden')}>
-        <div className="min-w-0 shrink-0">
-          {breadcrumbs?.length ? (
-            <BreadcrumbBar items={breadcrumbs} homeTo="/dashboard" />
-          ) : null}
-        </div>
-        {toolbar ? (
-          <div className="flex min-w-[12rem] flex-1 flex-wrap items-center gap-2">{toolbar}</div>
-        ) : null}
-        <div className="ml-auto flex flex-wrap items-center gap-1.5">
-          {backTarget ? (
-            <Button
-              variant="secondary"
-              size="sm"
-              icon={ArrowLeft}
-              onClick={() => navigate(backTarget)}
-              kbd="Esc"
-              title="Back"
-            >
-              Back
-            </Button>
-          ) : null}
-          {searchInputRef ? (
-            <Button
-              variant="secondary"
-              size="sm"
-              icon={Search}
-              onClick={focusSearch}
-              kbd="/"
-              title="Search this register"
-            >
-              Search
-            </Button>
-          ) : null}
-          {headerActions}
-        </div>
-      </div>
-
-      <RegisterHero
-        icon={icon}
+      <BreadcrumbHeader
+        breadcrumbs={breadcrumbs}
         title={title}
         description={description}
-        aside={heroAside}
+        icon={icon}
+        meta={page ? hint : undefined}
+        aside={page ? headerAside : undefined}
+        actions={
+          page ? (
+            headerActions
+          ) : (
+            <>
+              {hint}
+              {headerActions}
+            </>
+          )
+        }
+        toolbar={page ? undefined : toolbar}
+        backTo={backTo}
+        compact={!page}
+        className="shrink-0 print:hidden"
       />
-
-      <div className="flex min-h-0 flex-1 flex-col gap-2">{children}</div>
+      <div className="flex flex-col flex-1 min-h-0 gap-2">{children}</div>
     </PageShell>
   )
 }

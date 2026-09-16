@@ -2,14 +2,12 @@ import {
   ArrowLeftRight,
   Boxes,
   BookOpen,
-  ExternalLink,
   CircleCheck,
   ListChecks,
   Lock,
   Package,
   RefreshCw,
   Scale,
-  ScrollText,
   TriangleAlert,
   Warehouse,
 } from 'lucide-react'
@@ -38,6 +36,7 @@ import {
   textColumn,
   warehouseFilter,
 } from '../../reports/configs/common'
+import { StockBalanceRowActions } from '../StockBalanceRowActions'
 import { buildTotalsRow, totalsLabel } from '../registerTotals'
 import { defineRegister } from '../RegisterConfig'
 import { pageHint, summaryOverRows, withPageSummary } from './pageSummary'
@@ -594,30 +593,7 @@ export const stockBalanceRegister = defineRegister<StockBalanceGridRow, PageSumm
   rowKey: (r) => r.balance_id,
   drillTo: (r) =>
     `/registers/stock-ledger?item_id=${r.item_id}${r.warehouse_id ? `&warehouse_id=${r.warehouse_id}` : ''}`,
-  /*
-   * The two screens this row already leads to, and no others.
-   *
-   * Opening the ledger is what a click on the row does; it is listed here
-   * because nothing on screen told a reader with a mouse that the row was
-   * clickable at all. The engine drops either entry for a member without the
-   * permission beside it.
-   */
-  rowActions: (r) => [
-    {
-      key: 'ledger',
-      label: 'View stock ledger',
-      icon: ScrollText,
-      to: `/registers/stock-ledger?item_id=${r.item_id}${r.warehouse_id ? `&warehouse_id=${r.warehouse_id}` : ''}`,
-      permission: P.report('stock_ledger'),
-    },
-    {
-      key: 'item',
-      label: 'Open item',
-      icon: ExternalLink,
-      to: `/items/${r.item_id}`,
-      permission: P.masters('items', 'read'),
-    },
-  ],
+  rowActions: (r) => <StockBalanceRowActions row={r} />,
   groupBy: [
     {
       key: 'warehouse',
@@ -692,7 +668,11 @@ export const stockBalanceRegister = defineRegister<StockBalanceGridRow, PageSumm
     { label: 'Available', value: formatQty(s.sums.available_qty), hint: pageHint(s), tone: 'good' },
   ],
   emptyMessage: 'Try changing your item, warehouse, batch or stock filters.',
-  filtersHint: 'Refine your view of stock balances',
+  filterPanel: {
+    description: 'Refine your view of stock balances',
+    // Six controls, all of them worth a column on this register — nothing is
+    // pushed behind "More filters".
+  },
   tableTitle: 'Stock balances',
   tableHint: 'Showing live stock position for your items',
 

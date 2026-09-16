@@ -147,6 +147,53 @@
   color: rgb(186 230 253);
 }
 
+/* --- Registers hub ---------------------------------------------------------
+   Two tinted surfaces the utilities cannot express: a wash needs a gradient,
+   and a gradient needs a colour stop. Both are mixed from `--color-primary`
+   over `--color-surface`, so they follow the accent picker AND the light /
+   dark toggle from one definition — a pale-green literal would read as a
+   bright block on the dark canvas and would ignore a company that chose blue.
+   The alphas are low on purpose: this is a page background, not a banner. */
+.register-hero-wash {
+  background-color: rgb(var(--color-surface));
+  background-image:
+    radial-gradient(circle at 78% 6%, rgb(var(--color-primary) / 0.1), transparent 30%),
+    linear-gradient(
+      110deg,
+      rgb(var(--color-surface)) 0%,
+      rgb(var(--color-surface)) 54%,
+      rgb(var(--color-primary) / 0.07) 100%
+    );
+}
+
+.register-insight-wash {
+  background-color: rgb(var(--color-surface));
+  background-image: linear-gradient(
+    120deg,
+    rgb(var(--color-primary) / 0.05),
+    rgb(var(--color-primary) / 0.13)
+  );
+}
+
+/* The registers strip goes six-up only when six cells can each hold a date
+   without cutting it. Written here because Tailwind's scale ends at `xl`
+   (1280px) in this build and neither `2xl:` nor an arbitrary `min-[...]:`
+   variant is emitted — a class for this step would compile to nothing. */
+@media (min-width: 1600px) {
+  .register-kpi-strip {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+
+/* Paper is not a canvas: a tint that reads as "quiet" on screen is a band of
+   toner on a printed hub, and the hub prints as a contents page. */
+@media print {
+  .register-hero-wash,
+  .register-insight-wash {
+    background-image: none;
+  }
+}
+
 /* --- Sub-navigation --------------------------------------------------------
    `.sub-nav` used to live in layout/layout.css, which the new shell replaced.
    Two screens (masters/MasterPage.tsx, pages/masters/MastersLayout.tsx) still
@@ -188,4 +235,16 @@
   .sub-nav {
     display: none;
   }
+}
+
+
+/*
+ * SearchBox draws its own clear button. WebKit adds a second one inside
+ * `input[type=search]`, so every search field in the app shows two × glyphs
+ * side by side — and the native one is not keyboard reachable or labelled.
+ */
+.aic input[type='search']::-webkit-search-cancel-button,
+.aic input[type='search']::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
 }

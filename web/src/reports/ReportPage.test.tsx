@@ -2,7 +2,10 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { ReportPage } from './ReportPage'
+import { MoreVertical } from 'lucide-react'
 import { defineRegister } from '../registers/RegisterConfig'
+import { MenuButton } from '../ui/MenuButton'
+import { useAccess } from '../access/AccessContext'
 import { buildTotalsRow, totalsLabel } from '../registers/registerTotals'
 import type { ReportResponse } from '../services/reportsApi'
 
@@ -151,10 +154,6 @@ describe('the register engine renders a config', () => {
     renderRegister()
     expect(await screen.findByText('GRN-001')).toBeTruthy()
     expect(screen.getByRole('link', { name: 'Registers' })).toBeTruthy()
-    // The name is deliberately in two places now — as the last crumb of the
-    // trail, and as the page's own heading in the hero beneath it — so this
-    // asks for the heading rather than for "some element with this text".
-    expect(screen.getByRole('heading', { level: 1, name: 'Demo register' })).toBeTruthy()
     const trail = screen.getByRole('navigation', { name: 'Breadcrumb' })
     expect(within(trail).getByText('Demo register')).toBeTruthy()
   })
@@ -329,12 +328,20 @@ describe('a register that needs a filter before it means anything', () => {
  * it never leaks into a file.
  */
 describe('row actions', () => {
+  function RowMenu() {
+    const access = useAccess()
+    const actions = [
+      { key: 'open', label: 'Open document', onSelect: () => {} },
+      ...(access.can('reports.stock_ledger.read')
+        ? [{ key: 'ledger', label: 'View ledger', onSelect: () => {} }]
+        : []),
+    ]
+    return <MenuButton actions={actions} label="Row actions" icon={MoreVertical} />
+  }
+
   const withActions = defineRegister<Row, Summary>({
     ...demoRegister,
-    rowActions: (r) => [
-      { key: 'open', label: 'Open document', to: `/documents/${r.document_id}`, permission: 'documents.read' },
-      { key: 'ledger', label: 'View ledger', to: '/registers/stock-ledger', permission: 'reports.stock_ledger.read' },
-    ],
+    rowActions: () => <RowMenu />,
   })
 
   function renderWithActions() {
@@ -376,7 +383,7 @@ describe('row actions', () => {
     renderWithActions()
     await screen.findByText('GRN-001')
     const headers = screen.getAllByRole('columnheader').map((th) => th.textContent)
-    expect(headers).toContain('Row actions')
+    expect(headers).toContain('Actions')
     // Configure Columns lists what the file can carry; the kebab is not a column.
     fireEvent.click(screen.getByRole('button', { name: /^Columns/ }))
     expect(screen.queryByRole('checkbox', { name: 'Row actions' })).toBeNull()

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { CalendarRange } from 'lucide-react'
 import { Input } from '../ui/Input'
 import { Select } from '../ui/Select'
@@ -19,8 +20,14 @@ export interface DateRangeFilterProps {
   label?: string
   /** Offer "All dates". Off for registers that must always be bounded. */
   allowAllDates?: boolean
-  /** Match the taller controls RegisterFilterCard uses. */
-  size?: 'sm' | 'md'
+  /**
+   * Label above the control rather than beside it — the filter panel's grid.
+   *
+   * The panel's own cell prints the label, so the inline icon and caption are
+   * dropped here instead of being repeated, and the preset select takes the
+   * full cell with the two dates on the line beneath it.
+   */
+  stacked?: boolean
   className?: string
   id?: string
 }
@@ -32,6 +39,17 @@ const GROUP_LABELS: Record<string, string> = {
   half: 'Half years',
   year: 'Financial year',
   special: '',
+}
+
+/**
+ * The two date boxes: a row of their own under the preset when the control is
+ * stacked in a grid cell, and nothing at all when it is inline — the toolbar's
+ * own flex row already spaces them, and an extra wrapper there would break the
+ * wrapping the bar has always had.
+ */
+function Dates({ stacked, children }: { stacked: boolean; children: ReactNode }) {
+  if (!stacked) return <>{children}</>
+  return <div className="flex w-full min-w-0 items-center gap-1.5">{children}</div>
 }
 
 /**
@@ -49,7 +67,7 @@ export function DateRangeFilter({
   onChange,
   label = 'Period',
   allowAllDates = true,
-  size = 'sm',
+  stacked = false,
   className,
   id,
 }: DateRangeFilterProps) {
@@ -72,29 +90,35 @@ export function DateRangeFilter({
     if (range) onChange(range)
   }
 
-  /*
-   * `!w-auto` / `!w-[…]` are deliberate.
-   *
-   * Input and Select carry `block w-full` from FIELD_BASE. This group used to
-   * sit in a row whose children were all content-sized, so `w-full` resolved to
-   * the content width and nobody noticed. Beside a flex sibling that can grow
-   * (RegisterFilterCard's stacked layout) the same `w-full` let the preset box
-   * and both date boxes stretch across the card and stack into three rows. The
-   * period picker is a compound control of a fixed shape, so it says so.
-   */
   return (
-    <div className={cx('flex shrink-0 flex-wrap items-center gap-1.5', className)}>
-      <CalendarRange className="w-3.5 h-3.5 shrink-0 text-gray-400" aria-hidden />
-      <span className="text-label-xs font-semibold uppercase tracking-wide text-gray-400">
-        {label}
-      </span>
+    <div
+      className={cx(
+        stacked ? 'flex w-full min-w-0 flex-col gap-1' : 'flex flex-wrap items-center gap-1.5',
+        className,
+      )}
+    >
+      {stacked ? (
+        <label
+          htmlFor={id}
+          className="flex items-center gap-1 text-xs font-medium uppercase tracking-wide text-gray-500"
+        >
+          <CalendarRange className="w-3.5 h-3.5 shrink-0 text-gray-400" aria-hidden />
+          {label}
+        </label>
+      ) : (
+        <>
+          <CalendarRange className="w-3.5 h-3.5 shrink-0 text-gray-400" aria-hidden />
+          <span className="text-label-xs font-semibold uppercase tracking-wide text-gray-400">
+            {label}
+          </span>
+        </>
+      )}
       <Select
         id={id}
         value={presetId}
         onChange={(e) => applyPreset(e.target.value)}
-        size={size}
         aria-label={`${label} preset`}
-        className="!w-auto min-w-[8.5rem]"
+        className={stacked ? 'w-full' : 'w-auto min-w-[8.5rem]'}
       >
         {groups.map((group, idx) =>
           group.label ? (
@@ -115,27 +139,25 @@ export function DateRangeFilter({
         )}
       </Select>
       {presetId === ALL_DATES_PRESET_ID ? null : (
-        <>
+        <Dates stacked={stacked}>
           <Input
-            size={size}
             type="date"
             value={from}
             max={to || undefined}
             onChange={(e) => onChange({ from: e.target.value, to })}
             aria-label={`${label} from`}
-            className="!w-[8.5rem]"
+            className={stacked ? 'w-full min-w-0' : 'w-[8.5rem]'}
           />
           <span className="text-xs text-gray-400">to</span>
           <Input
-            size={size}
             type="date"
             value={to}
             min={from || undefined}
             onChange={(e) => onChange({ from, to: e.target.value })}
             aria-label={`${label} to`}
-            className="!w-[8.5rem]"
+            className={stacked ? 'w-full min-w-0' : 'w-[8.5rem]'}
           />
-        </>
+        </Dates>
       )}
       {presetId === CUSTOM_PRESET_ID ? (
         <span className="text-[11px] text-gray-400">custom</span>
