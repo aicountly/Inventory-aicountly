@@ -11,6 +11,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Run it on demand too. A merge that was verified locally can carry
+  # [skip ci] without leaving main with no way to get a recorded run.
+  workflow_dispatch:
 
 jobs:
   php:

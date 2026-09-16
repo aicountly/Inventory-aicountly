@@ -1,25 +1,19 @@
-import { NavLink, Outlet } from 'react-router-dom'
-import { useAccess } from '../../access/AccessContext'
-import { MASTER_NAV } from '../../layout/navigation'
-import { P } from '../../services/access'
+import { Outlet, useMatch } from 'react-router-dom'
+import { MastersTabs } from './MastersTabs'
 
-/** Sub-navigation across the master screens plus the routed screen. */
+/**
+ * Sub-navigation across the master screens plus the routed screen.
+ *
+ * The tab row is rendered here for every `/masters/*` child, but NOT for the
+ * index: the landing page places the same `MastersTabs` below its summary
+ * cards, and drawing it in both would give that screen two identical rows.
+ */
 export function MastersLayout() {
-  const { can, loading } = useAccess()
-  const items = loading ? MASTER_NAV : MASTER_NAV.filter((m) => can(P.masters(m.permissionSlug, 'read')))
+  const onIndex = useMatch({ path: '/masters', end: true }) !== null
 
   return (
     <div className="page">
-      <nav className="sub-nav" aria-label="Masters">
-        <NavLink to="/masters" end className={({ isActive }) => `sub-nav-link${isActive ? ' active' : ''}`}>
-          Overview
-        </NavLink>
-        {items.map((m) => (
-          <NavLink key={m.slug} to={`/masters/${m.slug}`} className={({ isActive }) => `sub-nav-link${isActive ? ' active' : ''}`}>
-            {m.label}
-          </NavLink>
-        ))}
-      </nav>
+      {onIndex ? null : <MastersTabs className="mb-3" />}
       <Outlet />
     </div>
   )
