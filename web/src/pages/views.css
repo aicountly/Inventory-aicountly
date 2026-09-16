@@ -418,25 +418,9 @@
 }
 
 /* ---- stock / valuation / reports / reconciliation / settings / audit views ---- */
-.tile-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 12px;
-}
-.tile {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 14px 16px;
-  border: 1px solid var(--border, #e5e7eb);
-  border-radius: 10px;
-  background: var(--surface, #fff);
-  color: inherit;
-  text-decoration: none;
-}
-.tile:hover {
-  border-color: var(--accent, #1e8f03);
-}
+/* `.tile-grid` / `.tile` lived here for the old Reports index. That screen is
+   the report directory now (src/reports/directory), built from the shared UI
+   primitives, and nothing else in the app ever used these two rules. */
 .table tr.row-warning td {
   background: rgba(245, 158, 11, 0.08);
 }
