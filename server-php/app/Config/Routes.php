@@ -155,6 +155,11 @@ $routes->group('', ['namespace' => 'App\Controllers\Api', 'filter' => 'cors'], s
         $routes->get('reports/replenishment', 'ReportsController::replenishment');
         $routes->get('replenishment', 'ReportsController::replenishment');
 
+        // Registers hub. Only the counters above the list: the register
+        // catalogue itself is the client's, and every register in it is
+        // already served by the report / list route it reads.
+        $routes->get('registers/summary', 'RegistersController::summary');
+
         // Reconciliation with Books
         $routes->get('reconciliation', 'ReconciliationController::index');
         $routes->post('reconciliation/run', 'ReconciliationController::run');

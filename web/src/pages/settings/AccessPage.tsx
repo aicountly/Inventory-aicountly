@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { ShieldCheck, UserPlus, Users } from 'lucide-react'
 import { useCan } from '../../access/AccessContext'
 import { useCompany } from '../../company/CompanyContext'
 import { ConfirmDialog } from '../../components/ConfirmDialog'
@@ -6,7 +7,6 @@ import { DataTable } from '../../components/DataTable'
 import type { Column } from '../../components/DataTable'
 import { FormField } from '../../components/FormField'
 import { Modal } from '../../components/Modal'
-import { PageHeader } from '../../components/PageHeader'
 import { RequirePermission } from '../../components/RequirePermission'
 import { StatusBadge } from '../../components/StatusBadge'
 import { useQuery } from '../../hooks/useQuery'
@@ -14,8 +14,12 @@ import { P } from '../../services/access'
 import { accessAdminApi } from '../../services/accessAdminApi'
 import type { AccessProfileRow, MemberRow } from '../../services/accessAdminApi'
 import { ApiError } from '../../services/api'
+import { Button } from '../../ui/Button'
+import { SearchBox } from '../../ui/SearchBox'
+import { FormSectionCard } from '../../ui/shell/FormSectionCard'
 import { useToast } from '../../ui/ToastContext'
 import { formatDateTime, formatInt, isOn } from '../../utils/format'
+import { SettingsHeaderActions } from './SettingsChrome'
 import '../views.css'
 
 const MEMBER_TONE: Record<string, 'good' | 'info' | 'critical'> = { active: 'good', invited: 'info', revoked: 'critical' }
@@ -25,13 +29,29 @@ export function AccessPage() {
   const toast = useToast()
   const canProfiles = useCan(P.accessManage)
   const canMembers = useCan([P.accessManage, P.accessMembersManage])
-  const catalog = useQuery((signal) => accessAdminApi.catalog(signal), [scope?.cmp_id], { enabled: scope !== null })
-  const profiles = useQuery((signal) => accessAdminApi.profiles(signal), [scope?.cmp_id], { enabled: scope !== null })
-  const members = useQuery((signal) => accessAdminApi.members(signal), [scope?.cmp_id], { enabled: scope !== null })
+  const catalog = useQuery((signal) => accessAdminApi.catalog(signal), [scope?.cmp_id], { enabled: scope !== null, resetKey: scope?.cmp_id ?? null })
+  const profiles = useQuery((signal) => accessAdminApi.profiles(signal), [scope?.cmp_id], { enabled: scope !== null, resetKey: scope?.cmp_id ?? null })
+  const members = useQuery((signal) => accessAdminApi.members(signal), [scope?.cmp_id], { enabled: scope !== null, resetKey: scope?.cmp_id ?? null })
   const [editing, setEditing] = useState<AccessProfileRow | 'new' | null>(null)
   const [memberForm, setMemberForm] = useState<{ open: boolean; uuid: string; profile_id: string; display_name: string; email: string }>({ open: false, uuid: '', profile_id: '', display_name: '', email: '' })
   const [removing, setRemoving] = useState<MemberRow | null>(null)
   const [busy, setBusy] = useState(false)
+  const [profileSearch, setProfileSearch] = useState('')
+  const [memberSearch, setMemberSearch] = useState('')
+
+  const profileRows = useMemo(() => {
+    const all = profiles.data ?? []
+    const q = profileSearch.trim().toLowerCase()
+    if (!q) return all
+    return all.filter((r) => `${r.profile_name} ${r.description ?? ''} ${r.template_key ?? ''}`.toLowerCase().includes(q))
+  }, [profiles.data, profileSearch])
+
+  const memberRows = useMemo(() => {
+    const all = members.data ?? []
+    const q = memberSearch.trim().toLowerCase()
+    if (!q) return all
+    return all.filter((r) => `${r.display_name ?? ''} ${r.email ?? ''} ${r.uuid} ${r.profile_name ?? ''} ${r.status}`.toLowerCase().includes(q))
+  }, [members.data, memberSearch])
 
   const profileColumns = useMemo<Column<AccessProfileRow>[]>(
     () => [
@@ -87,25 +107,73 @@ export function AccessPage() {
 
   return (
     <>
-      <PageHeader title="Access" subtitle="Profiles bundle permissions; members of this company get one profile each and, optionally, a warehouse restriction. The portal owner always has full access." actions={<>{canProfiles ? <button type="button" className="btn" onClick={() => setEditing('new')}>New profile</button> : null}{canMembers ? <button type="button" className="btn btn-primary" onClick={() => setMemberForm({ ...memberForm, open: true })}>Add member</button> : null}</>} />
+      <SettingsHeaderActions>
+        {canProfiles ? (
+          <Button variant="secondary" size="lg" icon={ShieldCheck} onClick={() => setEditing('new')}>
+            New profile
+          </Button>
+        ) : null}
+        {canMembers ? (
+          <Button size="lg" icon={UserPlus} onClick={() => setMemberForm({ ...memberForm, open: true })}>
+            Add member
+          </Button>
+        ) : null}
+      </SettingsHeaderActions>
       <RequirePermission permission={[P.accessManage, P.accessMembersManage, P.settingsRead]} what="access settings">
-        <section className="card">
-          <div className="card-body">
-            <h2 className="card-title">Profiles</h2>
-            <DataTable columns={profileColumns} rows={profiles.data ?? []} rowKey={(r) => r.profile_id} loading={profiles.loading} error={profiles.error} rowActions={(r) => (canProfiles ? <button type="button" className="btn btn-sm" onClick={() => setEditing(r)}>Edit</button> : null)} />
-          </div>
-        </section>
-        <section className="card">
-          <div className="card-body">
-            <h2 className="card-title">Members</h2>
-            <DataTable columns={memberColumns} rows={members.data ?? []} rowKey={(r) => r.id} loading={members.loading} error={members.error} emptyMessage="No members yet — the portal owner can still sign in." rowActions={(r) => (canMembers && r.status !== 'revoked' ? <button type="button" className="btn btn-sm btn-danger" onClick={() => setRemoving(r)}>Remove</button> : null)} />
-          </div>
-        </section>
+        <div className="flex flex-col gap-4">
+          <FormSectionCard
+            icon={ShieldCheck}
+            title="Profiles"
+            description="A profile bundles the permissions a role needs. Members get one profile each; the portal owner always has full access whatever the profiles say."
+            action={
+              <div className="flex items-center gap-3">
+                <span className="hidden whitespace-nowrap text-xs font-medium text-gray-500 sm:inline">
+                  {formatInt(profileRows.length)} {profileRows.length === 1 ? 'profile' : 'profiles'}
+                </span>
+                <SearchBox value={profileSearch} onChange={setProfileSearch} placeholder="Search profiles…" aria-label="Search profiles" className="w-40 sm:w-52" />
+              </div>
+            }
+          >
+            <DataTable
+              columns={profileColumns}
+              rows={profileRows}
+              rowKey={(r) => r.profile_id}
+              loading={profiles.loading}
+              error={profiles.error}
+              emptyMessage={profileSearch ? `No profile matches \u201c${profileSearch}\u201d.` : 'No profiles yet.'}
+              rowActions={(r) => (canProfiles ? <Button variant="secondary" size="xs" onClick={() => setEditing(r)}>Edit</Button> : null)}
+            />
+          </FormSectionCard>
+
+          <FormSectionCard
+            icon={Users}
+            title="Members"
+            description="Who may open this company's inventory, on which profile, and — where it is restricted — which warehouses they may see."
+            action={
+              <div className="flex items-center gap-3">
+                <span className="hidden whitespace-nowrap text-xs font-medium text-gray-500 sm:inline">
+                  {formatInt(memberRows.length)} {memberRows.length === 1 ? 'member' : 'members'}
+                </span>
+                <SearchBox value={memberSearch} onChange={setMemberSearch} placeholder="Search members…" aria-label="Search members" className="w-40 sm:w-52" />
+              </div>
+            }
+          >
+            <DataTable
+              columns={memberColumns}
+              rows={memberRows}
+              rowKey={(r) => r.id}
+              loading={members.loading}
+              error={members.error}
+              emptyMessage={memberSearch ? `No member matches \u201c${memberSearch}\u201d.` : 'No members yet \u2014 the portal owner can still sign in.'}
+              rowActions={(r) => (canMembers && r.status !== 'revoked' ? <Button variant="danger" size="xs" onClick={() => setRemoving(r)}>Remove</Button> : null)}
+            />
+          </FormSectionCard>
+        </div>
       </RequirePermission>
 
       {editing ? <ProfileEditor profile={editing === 'new' ? null : editing} groups={catalog.data?.groups ?? []} templates={catalog.data?.templates ?? []} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); profiles.reload() }} /> : null}
 
-      <Modal open={memberForm.open} title="Add member" onClose={() => setMemberForm({ ...memberForm, open: false })} busy={busy} footer={<><button type="button" className="btn" onClick={() => setMemberForm({ ...memberForm, open: false })}>Cancel</button><button type="button" className="btn btn-primary" disabled={busy || !memberForm.uuid.trim() || !memberForm.profile_id} onClick={provision}>Add</button></>}>
+      <Modal open={memberForm.open} title="Add member" onClose={() => setMemberForm({ ...memberForm, open: false })} busy={busy} footer={<><Button variant="secondary" onClick={() => setMemberForm({ ...memberForm, open: false })} disabled={busy}>Cancel</Button><Button disabled={!memberForm.uuid.trim() || !memberForm.profile_id} loading={busy} onClick={provision}>Add</Button></>}>
         <div className="form-grid">
           <FormField label="Portal user uuid" htmlFor="m-uuid" required help="The AICOUNTLY account uuid (my.aicountly.com) of the person; they must already belong to this company in Manage." className="span-2">
             <input id="m-uuid" className="input" value={memberForm.uuid} onChange={(e) => setMemberForm({ ...memberForm, uuid: e.target.value })} />
@@ -163,7 +231,7 @@ function ProfileEditor({ profile, groups, templates, onClose, onSaved }: { profi
   }
 
   return (
-    <Modal open title={profile ? `Edit profile — ${profile.profile_name}` : 'New profile'} onClose={onClose} size="xl" busy={busy} footer={<><button type="button" className="btn" onClick={onClose}>Cancel</button><button type="button" className="btn btn-primary" disabled={busy || !name.trim()} onClick={save}>Save</button></>}>
+    <Modal open title={profile ? `Edit profile — ${profile.profile_name}` : 'New profile'} onClose={onClose} size="xl" busy={busy} footer={<><Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button><Button disabled={!name.trim()} loading={busy} onClick={save}>Save</Button></>}>
       <div className="form-grid">
         <FormField label="Name" htmlFor="p-name" required>
           <input id="p-name" className="input" value={name} onChange={(e) => setName(e.target.value)} />
