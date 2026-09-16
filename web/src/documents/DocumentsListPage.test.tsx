@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import type { ListResponse } from '../services/api'
-import type { DocumentListRow } from './types'
+import type { DocumentListResponse } from '../services/documentsApi'
+import type { DocumentListRow, DocumentListSummary } from './types'
 
 /*
  * `/documents` is where Books hands a register over
@@ -13,7 +13,7 @@ import type { DocumentListRow } from './types'
  */
 
 const can = vi.fn<(key: string | readonly string[]) => boolean>(() => true)
-const list = vi.fn<(query: Record<string, unknown>) => Promise<ListResponse<DocumentListRow>>>()
+const list = vi.fn<(query: Record<string, unknown>) => Promise<DocumentListResponse>>()
 const bulkPrintDocuments = vi.fn(async (_ids: readonly number[]) => ({
   printed: _ids.length,
   failures: [] as { documentId: number; reason: string }[],
@@ -132,8 +132,25 @@ const ROWS = [
   row({ document_id: 102, document_no: 'ST-0102', line_count: 2, valuation_total: 500 }),
 ]
 
-function listResponse(rows = ROWS, total = rows.length): ListResponse<DocumentListRow> {
+function listResponse(rows = ROWS, total = rows.length): DocumentListResponse {
   return { data: rows, meta: { total, limit: 50, offset: 0 } }
+}
+
+/** The same list, with the aggregate DocumentsController::summarise answers. */
+function withSummary(
+  response: DocumentListResponse,
+  over: Partial<DocumentListSummary> = {},
+): DocumentListResponse {
+  return {
+    ...response,
+    summary: {
+      documents: response.meta.total,
+      line_count: 9_431,
+      valuation_total: 812_450.5,
+      warehouses_impacted: 7,
+      ...over,
+    },
+  }
 }
 
 function renderPage(url = '/documents') {
@@ -354,9 +371,16 @@ describe('the hand-off URL Books links to', () => {
   it('keeps the general heading for a multi-code filter it cannot name', async () => {
     renderPage('/documents?document_type=PRODUCTION,ASSEMBLY')
     await screen.findByText('ST-0101')
-    const breadcrumb = screen.getByRole('navigation', { name: 'Breadcrumb' })
-    expect(within(breadcrumb).getByText('Inventory documents')).toBeTruthy()
-    expect(within(breadcrumb).queryByText(/register$/)).toBeNull()
+    /*
+     * The all-types register is a top-level destination, so its heading is the
+     * <h1> and there is no trail above it — a one-crumb trail would be the same
+     * words twice. A register narrowed to ONE type keeps its trail, because
+     * "Documents › Stock Transfer register" is where the reader came from; that
+     * is the test above this one.
+     */
+    expect(screen.getByRole('heading', { level: 1, name: 'Inventory documents' })).toBeTruthy()
+    expect(screen.queryByText(/register$/)).toBeNull()
+    expect(screen.queryByRole('navigation', { name: 'Breadcrumb' })).toBeNull()
   })
 
   it('shows no Valuation column or card on a type whose lines are never valued', async () => {
@@ -423,5 +447,230 @@ describe('bulk print', () => {
     renderPage()
     await screen.findByText('ST-0101')
     expect(screen.queryByRole('button', { name: /Print \d+ document/ })).toBeNull()
+  })
+})
+
+
+/*
+ * The aggregate over the whole filtered set.
+ *
+ * `/v1/inventory-documents?summary=1` answers the line count, the valuation and
+ * the number of warehouses touched for EVERY matching document. Before it
+ * existed the register could only total the fifty rows it was served and had to
+ * label every figure "this page only" — honest, and useless on a register of
+ * four thousand documents.
+ */
+describe('figures for the whole filtered set, not the page', () => {
+  it('asks for the aggregate on the screen’s own read', async () => {
+    renderPage()
+    await screen.findByText('ST-0101')
+    expect(list.mock.calls[0][0].summary).toBe(1)
+  })
+
+  it('never asks for it again on each page of an export', async () => {
+    const PAGE_ONE = Array.from({ length: 500 }, (_, i) =>
+      row({ document_id: 3000 + i, document_no: `WALK-${i}` }),
+    )
+    list.mockImplementation(async (query: Record<string, unknown>) => {
+      if (query.limit !== 500) return withSummary(listResponse(ROWS, 501))
+      return query.page === 1
+        ? listResponse(PAGE_ONE, 501)
+        : listResponse([row({ document_id: 3999, document_no: 'WALK-LAST' })], 501)
+    })
+
+    renderPage()
+    await screen.findByText('ST-0101')
+    list.mockClear()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export' }))
+    fireEvent.click(await screen.findByText('CSV (.csv)'))
+    await waitFor(() => expect(downloadCsv).toHaveBeenCalled())
+
+    // Two pages walked, and neither re-ran an aggregate the screen already had.
+    expect(list.mock.calls.map((c) => c[0].page)).toEqual([1, 2])
+    for (const [query] of list.mock.calls) expect(query.summary).toBeUndefined()
+  })
+
+  it('totals every matching document in the footer, with no page caveat', async () => {
+    list.mockResolvedValue(withSummary(listResponse(ROWS, 4182)))
+    const { container } = renderPage()
+    await screen.findByText('ST-0101')
+
+    const tfoot = container.querySelector('tfoot') as HTMLElement
+    expect(within(tfoot).getByText(/Total \(4,182 documents\)/)).toBeTruthy()
+    expect(within(tfoot).queryByText(/this page only/)).toBeNull()
+    // The server's sums, not 1500 + 500 over the two rows on screen.
+    expect(within(tfoot).getByText('9,431')).toBeTruthy()
+    // en-IN grouping, as formatMoney writes it everywhere else in the app.
+    expect(within(tfoot).getByText('8,12,450.50')).toBeTruthy()
+  })
+
+  it('shows Warehouses impacted only when the server counted them', async () => {
+    list.mockResolvedValue(withSummary(listResponse(ROWS, 4182)))
+    const { unmount } = renderPage()
+    await screen.findByText('ST-0101')
+    expect(screen.getByText(/Warehouses impacted/i)).toBeTruthy()
+    expect(screen.getByText('7')).toBeTruthy()
+    unmount()
+
+    /*
+     * A document row carries no warehouse — its LINES do — so with no aggregate
+     * there is no honest figure to show and the card is absent rather than
+     * guessed at from the two header columns that only transfers set.
+     */
+    list.mockResolvedValue(listResponse(ROWS, 4182))
+    renderPage()
+    await screen.findByText('ST-0101')
+    expect(screen.queryByText(/Warehouses impacted/i)).toBeNull()
+  })
+
+  it('falls back to the served page, caveat and all, when no aggregate arrives', async () => {
+    list.mockResolvedValue(listResponse(ROWS, 4182))
+    const { container } = renderPage()
+    await screen.findByText('ST-0101')
+    const tfoot = container.querySelector('tfoot') as HTMLElement
+    expect(within(tfoot).getByText(/this page only/)).toBeTruthy()
+  })
+})
+
+describe('the filter panel', () => {
+  it('names itself and offers the quick periods', async () => {
+    renderPage()
+    await screen.findByText('ST-0101')
+
+    expect(screen.getByRole('heading', { name: 'Filters' })).toBeTruthy()
+    for (const chip of ['All documents', 'This Month', 'Last 90 Days', 'This FY']) {
+      expect(screen.getByRole('button', { name: chip })).toBeTruthy()
+    }
+    // No period is this register's default, so "All documents" is the one on.
+    expect(screen.getByRole('button', { name: 'All documents' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    )
+  })
+
+  it('writes both ends of the period from one chip', async () => {
+    renderPage()
+    await screen.findByText('ST-0101')
+    list.mockClear()
+
+    fireEvent.click(screen.getByRole('button', { name: 'This FY' }))
+
+    await waitFor(() => expect(list).toHaveBeenCalled())
+    const query = list.mock.calls[list.mock.calls.length - 1][0]
+    expect(query.from).toBe('2026-04-01')
+    expect(query.to).toBe('2027-03-31')
+  })
+
+  it('keeps the filters the API supports but the grid has no room for', async () => {
+    renderPage()
+    await screen.findByText('ST-0101')
+
+    const more = screen.getByRole('button', { name: /More filters/ })
+    expect(screen.queryByLabelText(/Include every financial year/)).toBeNull()
+    fireEvent.click(more)
+
+    // Both are read by DocumentsController::index and neither had a control.
+    expect(await screen.findByText('Source warehouse')).toBeTruthy()
+    expect(screen.getByLabelText(/Include every financial year/)).toBeTruthy()
+  })
+
+  it('says on the scope line when the year has been dropped', async () => {
+    renderPage('/documents?all_fy=1')
+    await screen.findByText('ST-0101')
+    // The scope line is the only record a printed sheet carries of what was
+    // asked for, so it must not claim a year the query never applied.
+    expect(list.mock.calls[0][0].all_fy).toBe('1')
+    expect(screen.getByRole('button', { name: /More filters \(1\)/ })).toBeTruthy()
+  })
+
+  it('clears every filter from one button', async () => {
+    renderPage('/documents?status=POSTED')
+    await screen.findByText('ST-0101')
+
+    const clear = screen.getByRole('button', { name: 'Clear all' })
+    expect(clear.hasAttribute('disabled')).toBe(false)
+    list.mockClear()
+    fireEvent.click(clear)
+
+    await waitFor(() => expect(list).toHaveBeenCalled())
+    expect(list.mock.calls[list.mock.calls.length - 1][0].status).toBeUndefined()
+  })
+})
+
+describe('the row action menu', () => {
+  it('offers only what this user can actually do', async () => {
+    renderPage()
+    await screen.findByText('ST-0101')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for ST-0101' }))
+    const menu = await screen.findByRole('menu', { name: 'Actions for ST-0101' })
+    expect(within(menu).getByRole('menuitem', { name: 'Open document' })).toBeTruthy()
+    expect(within(menu).getByRole('menuitem', { name: 'Print document' })).toBeTruthy()
+    expect(within(menu).getByRole('menuitem', { name: 'Copy number' })).toBeTruthy()
+    // POSTED is not an editable status, whatever the permission says.
+    expect(within(menu).queryByRole('menuitem', { name: 'Edit document' })).toBeNull()
+  })
+
+  it('offers Edit on a draft the user may edit, and not otherwise', async () => {
+    list.mockResolvedValue(listResponse([row({ status: 'DRAFT' })], 1))
+    const { unmount } = renderPage()
+    await screen.findByText('ST-0101')
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for ST-0101' }))
+    expect(
+      within(await screen.findByRole('menu', { name: /Actions for/ })).getByRole('menuitem', {
+        name: 'Edit document',
+      }),
+    ).toBeTruthy()
+    unmount()
+
+    can.mockImplementation((key) => {
+      const keys = Array.isArray(key) ? key : [key]
+      return !keys.some((k) => k === 'documents.edit' || k === 'documents.create')
+    })
+    renderPage()
+    await screen.findByText('ST-0101')
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for ST-0101' }))
+    expect(
+      within(await screen.findByRole('menu', { name: /Actions for/ })).queryByRole('menuitem', {
+        name: 'Edit document',
+      }),
+    ).toBeNull()
+  })
+
+  it('does not open the document when the menu is used', async () => {
+    renderPage()
+    await screen.findByText('ST-0101')
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for ST-0101' }))
+    expect(screen.queryByText('Document screen')).toBeNull()
+  })
+})
+
+
+describe('an empty register says which kind of empty it is', () => {
+  it('offers a way out when the filters are what emptied it', async () => {
+    list.mockResolvedValue(listResponse([], 0))
+    renderPage('/documents?status=CANCELLED')
+    await screen.findByText(/No rows match these filters/)
+
+    const clear = await screen.findByRole('button', { name: 'Clear filters' })
+    list.mockClear()
+    fireEvent.click(clear)
+    await waitFor(() => expect(list).toHaveBeenCalled())
+    expect(list.mock.calls[list.mock.calls.length - 1][0].status).toBeUndefined()
+  })
+
+  it('does not blame a filter when none is set', async () => {
+    /*
+     * A company in its first week has no documents and no filters. Telling that
+     * reader to widen the period sends them hunting for a control that is not
+     * the problem.
+     */
+    list.mockResolvedValue(listResponse([], 0))
+    renderPage()
+    expect(await screen.findByText('No inventory documents yet')).toBeTruthy()
+    expect(screen.queryByText(/Widen the period/)).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Clear filters' })).toBeNull()
+    // The CTA is the permission-aware menu, not a link that 403s on the click.
+    expect(screen.getAllByRole('button', { name: /New document/ }).length).toBeGreaterThan(1)
   })
 })

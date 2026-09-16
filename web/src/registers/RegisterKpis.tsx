@@ -13,13 +13,21 @@ import type { StatCardSpec } from './RegisterConfig'
  * Inventing a percentage here would put a number on a manager's screen that no
  * server ever computed.
  */
-export function RegisterKpis({ cards }: { cards: readonly StatCardSpec[] }) {
+export function RegisterKpis({
+  cards,
+  layout = 'stacked',
+}: {
+  cards: readonly StatCardSpec[]
+  /** `metric` is the wide four-up row the panel layout uses. */
+  layout?: 'stacked' | 'metric'
+}) {
   if (!cards.length) return null
   return (
     <>
       {cards.map((card) => (
         <StatCard
           key={card.key}
+          layout={layout}
           label={card.label}
           value={card.value}
           hint={card.hint}

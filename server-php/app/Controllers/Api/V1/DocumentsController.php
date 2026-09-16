@@ -77,6 +77,12 @@ class DocumentsController extends BaseController
                 ->groupEnd();
         }
         $total = (clone $b)->countAllResults(false);
+        // Aggregate over the WHOLE filtered set, not the page. Opt-in, because a
+        // caller walking every page for an export would otherwise re-run it once
+        // per page for figures it already has.
+        $summary = ((int) ($this->request->getGet('summary') ?? 0) === 1)
+            ? self::summarise($b, $total)
+            : null;
         $sort = in_array($p['sort'], ['document_date', 'document_no', 'document_type', 'status', 'created_at', 'document_id'], true) ? $p['sort'] : 'document_date';
         $rows = $b->select('d.document_id, d.document_uuid, d.document_type, d.document_no, d.document_date, d.status, d.source_app, d.source_document_type, d.source_document_id, d.source_document_uuid, d.source_document_no, d.party_ref, d.party_name, d.from_warehouse_id, d.to_warehouse_id, d.narration, d.posted_at, d.created_at, d.fy_id, d.bo_id, (SELECT COUNT(*) FROM inv_document_lines l WHERE l.document_id = d.document_id) AS line_count, (SELECT COALESCE(SUM(l.valuation_amount),0) FROM inv_document_lines l WHERE l.document_id = d.document_id) AS valuation_total', false)
             ->orderBy('d.' . $sort, $p['order'])->orderBy('d.document_id', 'DESC')
@@ -92,7 +98,81 @@ class DocumentsController extends BaseController
             $r['document_type_label'] = DocumentTypeRegistry::get($r['document_type'])['label'] ?? $r['document_type'];
         }
 
-        return $this->respondList($rows, $total, $p['limit'], $p['offset']);
+        return $this->respondList($rows, $total, $p['limit'], $p['offset'], $summary === null ? [] : ['summary' => $summary]);
+    }
+
+    /**
+     * The register's figures for every matching document, not the page on screen.
+     *
+     * `index()` already answers rows and a count, and the screen used to total
+     * the fifty rows it was served and label every figure "this page only" —
+     * honest, but useless on a register of four thousand documents, and no
+     * answer at all for "how many warehouses did this touch".
+     *
+     * Two reads, both over the same filtered builder, neither of them per-row:
+     *
+     *  1. documents joined to their lines once — the line count and the
+     *     valuation (SUM of inv_document_lines.valuation_amount: what the stock
+     *     COST, never the commercial amount agreed with the party, which is the
+     *     Books voucher's and is deliberately not here).
+     *  2. the distinct (warehouse, destination warehouse) pairs those lines
+     *     name, folded into a set here. Distinct pairs are bounded by the
+     *     company's warehouse count squared — tens of rows, not millions — so
+     *     the exact answer costs one small result set rather than a
+     *     COUNT(DISTINCT) that cannot union two columns.
+     *
+     * Stock moves at the LINE, so the line warehouses are the whole truth: a
+     * transfer header's from / to are copied down into its lines. A document
+     * with no lines impacts no warehouse and contributes nothing, which is
+     * correct rather than a gap.
+     *
+     * DBDebug is FALSE in production, so a failed ->get() returns FALSE rather
+     * than throwing. The summary is an enrichment: if either read fails the
+     * register still gets its rows and falls back to totalling the page it was
+     * served, which it already labels as such. Losing the list over a KPI would
+     * be the worse trade.
+     *
+     * Public and static for the same reason ValuationController::sortSnapshotRows
+     * is: the SQL IS the behaviour here, and the only way to hold it is to run it
+     * against a real PostgreSQL (DocumentsSummaryTest).
+     *
+     * @param \CodeIgniter\Database\BaseBuilder $b filtered documents, unpaged
+     * @return array<string, float|int>|null
+     */
+    public static function summarise($b, int $total): ?array
+    {
+        $agg = (clone $b)
+            ->join('inv_document_lines l', 'l.document_id = d.document_id', 'left')
+            ->select('COUNT(l.line_id) AS line_count, COALESCE(SUM(l.valuation_amount),0) AS valuation_total', false)
+            ->get();
+        if ($agg === false) {
+            return null;
+        }
+        $agg = $agg->getRowArray() ?: [];
+
+        $pairs = (clone $b)
+            ->join('inv_document_lines l', 'l.document_id = d.document_id', 'inner')
+            ->select('l.warehouse_id, l.dest_warehouse_id')
+            ->distinct()
+            ->get();
+        if ($pairs === false) {
+            return null;
+        }
+        $warehouses = [];
+        foreach ($pairs->getResultArray() as $pair) {
+            foreach (['warehouse_id', 'dest_warehouse_id'] as $k) {
+                if ($pair[$k] !== null && $pair[$k] !== '') {
+                    $warehouses[(int) $pair[$k]] = true;
+                }
+            }
+        }
+
+        return [
+            'documents'           => $total,
+            'line_count'          => (int) ($agg['line_count'] ?? 0),
+            'valuation_total'     => round((float) ($agg['valuation_total'] ?? 0), 4),
+            'warehouses_impacted' => count($warehouses),
+        ];
     }
 
     public function show($id = null)

@@ -92,6 +92,8 @@ export interface StatusBadgeProps {
   tone?: Tone
   label?: string
   size?: BadgeSize
+  /** Lead the badge with a dot in its own colour — see Badge. */
+  dot?: boolean
   className?: string
 }
 
@@ -111,14 +113,14 @@ export function statusBadgeLabel(value: string | null | undefined): string {
   return preset?.label ?? humanize(value) ?? String(value)
 }
 
-export function StatusBadge({ value, status, tone, label, size = 'sm', className }: StatusBadgeProps) {
+export function StatusBadge({ value, status, tone, label, size = 'sm', dot = false, className }: StatusBadgeProps) {
   const raw = value ?? status
   const key = raw ? String(raw).toLowerCase() : null
   const preset = key ? STATUS_MAP[key] : undefined
   const finalTone = toBadgeTone(tone ?? preset?.tone ?? 'neutral')
   const finalLabel = label ?? preset?.label ?? humanize(raw) ?? 'Unknown'
   return (
-    <Badge tone={finalTone} size={size} className={cx('normal-case', className)}>
+    <Badge tone={finalTone} size={size} dot={dot} className={cx('normal-case', className)}>
       {finalLabel}
     </Badge>
   )
