@@ -125,7 +125,8 @@ function renderPage(url = '/reconciliation/posting-status?limit=25') {
 describe('PostingStatusPage', () => {
   it('explains, on the screen, what it reconciles and what a difference means', async () => {
     renderPage()
-    await waitFor(() => expect(screen.getByText(/What posting status shows/)).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('button', { name: /How pending adjustments work/ })).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: /How pending adjustments work/ }))
     const text = document.body.textContent ?? ''
     expect(text).toContain('document by document')
     expect(text).toContain('posting is not one transaction')
