@@ -172,7 +172,8 @@
   background-color: rgb(120 53 15 / 0.22);
 }
 .dark .bg-red-50,
-.dark .hover\:bg-red-50:hover {
+.dark .hover\:bg-red-50:hover,
+.dark .focus\:bg-red-50:focus {
   background-color: rgb(127 29 29 / 0.22);
 }
 .dark .bg-sky-50 {
@@ -186,6 +187,9 @@
 }
 .dark .bg-teal-50 {
   background-color: rgb(19 78 74 / 0.22);
+}
+.dark .bg-indigo-50 {
+  background-color: rgb(49 46 129 / 0.22);
 }
 
 /* An opacity modifier asks for a weaker wash, so scale the dark one by the same
@@ -225,6 +229,12 @@
 .dark .border-violet-200 {
   border-color: rgb(91 33 182 / 0.5);
 }
+.dark .border-teal-200 {
+  border-color: rgb(17 94 89 / 0.5);
+}
+.dark .border-indigo-200 {
+  border-color: rgb(67 56 202 / 0.5);
+}
 
 .dark .text-emerald-600,
 .dark .text-emerald-700,
@@ -257,6 +267,11 @@
 .dark .text-rose-600 {
   color: rgb(253 164 175);
 }
-.dark .text-teal-600 {
+.dark .text-teal-600,
+.dark .text-teal-700 {
   color: rgb(94 234 212);
+}
+.dark .text-indigo-600,
+.dark .text-indigo-700 {
+  color: rgb(165 180 252);
 }

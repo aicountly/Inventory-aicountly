@@ -9,6 +9,9 @@ export type BadgeTone =
   | 'danger'
   | 'info'
   | 'beta'
+  | 'violet'
+  | 'teal'
+  | 'indigo'
 
 export type BadgeSize = 'xs' | 'sm'
 
@@ -20,6 +23,12 @@ const TONE_STYLES: Record<BadgeTone, string> = {
   danger: 'bg-red-50 text-red-700 border-red-200',
   info: 'bg-sky-50 text-sky-700 border-sky-200',
   beta: 'bg-violet-50 text-violet-700 border-violet-200',
+  // `beta` is the same violet under a name that means "this feature is new".
+  // A badge that colours an *event type* needs the colour without the claim,
+  // so the palette tones are spelled out beside it rather than borrowed.
+  violet: 'bg-violet-50 text-violet-700 border-violet-200',
+  teal: 'bg-teal-50 text-teal-700 border-teal-200',
+  indigo: 'bg-indigo-50 text-indigo-700 border-indigo-200',
 }
 
 const SIZE_STYLES: Record<BadgeSize, string> = {
