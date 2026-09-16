@@ -9,6 +9,9 @@ interface SearchInputProps {
   delayMs?: number
   autoFocus?: boolean
   className?: string
+  /** Matches the SearchBox sizes, for rows of `md` controls. */
+  size?: 'sm' | 'md'
+  'aria-label'?: string
 }
 
 /**
@@ -19,7 +22,16 @@ interface SearchInputProps {
  * `usePageKeyboard({ searchInputRef })` and focus it with `/`.
  */
 export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(function SearchInput(
-  { value, onChange, placeholder = 'Search…', delayMs = 350, autoFocus, className },
+  {
+    value,
+    onChange,
+    placeholder = 'Search…',
+    delayMs = 350,
+    autoFocus,
+    className,
+    size = 'sm',
+    'aria-label': ariaLabel,
+  },
   ref,
 ) {
   const [draft, setDraft] = useState(value)
@@ -43,6 +55,8 @@ export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(functi
       placeholder={placeholder}
       autoFocus={autoFocus}
       className={className ?? 'w-full max-w-xs'}
+      size={size}
+      aria-label={ariaLabel}
       kbd="/"
     />
   )
