@@ -79,6 +79,17 @@ export const DOT_FILL: Record<Tone, string> = BAR_FILL
  */
 export const CHART_PALETTE = ['#10b981', '#0ea5e9', '#a78bfa', '#f59e0b', '#f43f5e', '#94a3b8'] as const
 
-export function chartColor(index: number): string {
-  return CHART_PALETTE[index % CHART_PALETTE.length]
+/**
+ * A restrained single-hue ramp, for a donut whose slices are all the same
+ * KIND of thing.
+ *
+ * The multi-hue palette above says "these categories are different". A split of
+ * stock value by item is not that: every slice is rupees of stock, and five
+ * unrelated hues invite a reader to look for a meaning in the colours that is
+ * not there. Ordered darkest first, so the largest slice is also the heaviest.
+ */
+export const CHART_RAMP_PRIMARY = ['#176c05', '#25b003', '#4cc22f', '#72cf5c', '#a2dc93', '#c8e9bd'] as const
+
+export function chartColor(index: number, palette: readonly string[] = CHART_PALETTE): string {
+  return palette[index % palette.length]
 }

@@ -22,6 +22,7 @@ import {
   PackageCheck,
   Repeat,
   Ruler,
+  Scale,
   ScanBarcode,
   ScrollText,
   ShieldCheck,
@@ -517,34 +518,78 @@ export const SIDEBAR_NAV: readonly SidebarNavItem[] = [
     icon: Gauge,
     path: '/registers/valuation',
     permissions: [P.report('valuation')],
+    // Two columns, because Valuation is not one report: the left is what the
+    // stock is worth and how that value is composed, the right is the analysis
+    // and the control trail behind it. Every entry lands on a screen that
+    // already exists — "Warehouse valuation" is the warehouse-stock register
+    // and "Valuation summary" the dashboard's valuation view, rather than two
+    // more half-copies of screens the product already ships.
     megaMenu: [
       {
         label: 'Valuation',
         icon: Gauge,
         items: [
           {
-            label: 'Snapshot',
+            label: 'Valuation register',
             path: '/registers/valuation',
-            description: 'Value of stock on hand by the chosen method.',
+            description: 'Item-wise value of stock on hand by the chosen method.',
             icon: Gauge,
+            permissions: [P.report('valuation')],
           },
           {
-            label: 'Cost layers',
+            label: 'Item valuation',
             path: '/valuation/cost-layers',
-            description: 'The open layers behind the valuation.',
+            description: 'The open cost layers behind one item\u2019s value.',
             icon: Layers,
+            permissions: [P.report('valuation')],
+          },
+          {
+            label: 'Warehouse valuation',
+            path: '/registers/warehouse-stock',
+            description: 'Closing stock and value per item and warehouse.',
+            icon: Warehouse,
+            permissions: [P.report('warehouse_stock')],
+          },
+          {
+            label: 'Method comparison',
+            path: '/valuation/method-comparison',
+            description: 'What the same stock is worth under each method.',
+            icon: Scale,
+            permissions: [P.report('valuation')],
+          },
+        ],
+      },
+      {
+        label: 'Analysis and control',
+        icon: Activity,
+        items: [
+          {
+            label: 'Valuation summary',
+            path: '/dashboard?view=valuation',
+            description: 'Cost, ageing and the capital tied up in stock.',
+            icon: Activity,
+            permissions: [P.report('stock_summary'), P.report('stock_ageing')],
+          },
+          {
+            label: 'Ageing analysis',
+            path: '/registers/stock-ageing',
+            description: 'How long the stock on hand has been sitting there.',
+            icon: Timer,
+            permissions: [P.report('stock_ageing')],
           },
           {
             label: 'Recalculations',
             path: '/valuation/recalculations',
-            description: 'Recalculation runs and their status.',
+            description: 'Back-dated recalculation runs and their status.',
             icon: Repeat,
+            permissions: [P.report('valuation')],
           },
           {
             label: 'Revisions',
             path: '/valuation/revisions',
             description: 'Cost revisions sent to Books and their acknowledgement.',
             icon: History,
+            permissions: [P.report('valuation')],
           },
         ],
       },

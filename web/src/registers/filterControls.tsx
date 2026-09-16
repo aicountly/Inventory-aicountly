@@ -263,8 +263,13 @@ export function FilterControl(props: FilterControlProps) {
             className={selectWidth(layout, 'min-w-[8rem]')}
           >
             {/* A select with no declared default needs an "any" row, or the
-                first option silently becomes a filter nobody chose. */}
-            {f.options?.some((o) => o.value === '') ? null : (
+                first option silently becomes a filter nobody chose. One WITH a
+                default must not have it: `resolveFilterValues` reads '' as "use
+                the default", so picking the row snaps straight back to the
+                option above it — and on a valuation method it would read as
+                "value the stock every way at once", which is not a question the
+                endpoint answers. */}
+            {f.defaultValue || f.options?.some((o) => o.value === '') ? null : (
               <option value="">{f.placeholder ?? `All ${f.label.toLowerCase()}`}</option>
             )}
             {(f.options ?? []).map((o) => (

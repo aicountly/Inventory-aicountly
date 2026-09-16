@@ -229,6 +229,16 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
     return config.insights(summary, result.data)
   }, [config, result.data, summary])
 
+  // ---- the analytics band --------------------------------------------------
+  // Handed the server's summary and this page's rows under the same filters the
+  // table was fetched with, so a chart can never answer a different question
+  // from the register it sits on. Anything more it fetches itself.
+  const analytics = config.analytics
+  const analyticsBand = useMemo(() => {
+    if (!analytics || summary === undefined) return null
+    return analytics({ summary, rows, values, query: apiFilters, loading: result.loading })
+  }, [analytics, summary, rows, values, apiFilters, result.loading])
+
   // The same Configure Columns dialog is offered from the toolbar and from over
   // the table, so the open flag lives here rather than inside either trigger.
   const [columnsOpen, setColumnsOpen] = useState(false)
@@ -596,6 +606,9 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
       description={headerDescription}
       icon={config.icon ?? FileSearch}
       headerVariant={panel ? 'page' : 'compact'}
+      // A chart band and a viewport-locked table cannot share one flex column:
+      // the band takes its height and the table's `flex-1` resolves to nothing.
+      fill={!analyticsBand}
       headerAside={
         config.headerAside ?? (
           <LiveDataBadge
@@ -656,7 +669,7 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
             <span className="font-semibold text-gray-800">
               {selectedRows.length} selected
             </span>
-            {selectable.actions(selectedRows, clearSelection)}
+            {summary !== undefined ? selectable.actions(selectedRows, clearSelection, summary) : null}
             <button
               type="button"
               className="ml-auto rounded-full bg-white px-2 py-1 text-gray-600 hover:text-red-600"
@@ -681,12 +694,19 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
         ) : undefined
       }
       insights={
-        config.insights ? (
-          result.loading && !result.data ? (
-            <RegisterInsightStripSkeleton />
-          ) : insights && insights.items.length ? (
-            <RegisterInsightStrip items={insights.items} note={insights.note} />
-          ) : undefined
+        config.insights || analyticsBand ? (
+          <>
+            {config.insights ? (
+              result.loading && !result.data ? (
+                <RegisterInsightStripSkeleton />
+              ) : insights && insights.items.length ? (
+                <RegisterInsightStrip items={insights.items} note={insights.note} />
+              ) : null
+            ) : null}
+            {/* Under the strip: the strip says what the rows are, the band shows
+                the shape of the set they came from. */}
+            {analyticsBand}
+          </>
         ) : undefined
       }
     >
@@ -704,6 +724,8 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
         ) : (
           <SmartTable
             {...REPORT_TABLE_PROPS}
+            fillAvailable={!analyticsBand}
+            className={analyticsBand ? 'max-h-[min(34rem,58vh)]' : undefined}
             columns={tableColumns}
             rows={tableRows}
             rowKey={config.rowKey}
@@ -714,17 +736,21 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
             title={config.tableTitle ?? config.title}
             description={config.tableHint}
             headerAction={
-              // The same dialog the toolbar's Columns button opens — one flag,
-              // two doors, so the choice cannot be made twice over itself.
-              <Button
-                variant="secondary"
-                size="xs"
-                icon={Columns3}
-                onClick={() => setColumnsOpen(true)}
-                disabled={!columnsReady}
-              >
-                Customize columns
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                {config.tableActions}
+                {/* The same dialog the toolbar's Columns button opens — one
+                    flag, two doors, so the choice cannot be made twice over
+                    itself. */}
+                <Button
+                  variant="secondary"
+                  size="xs"
+                  icon={Columns3}
+                  onClick={() => setColumnsOpen(true)}
+                  disabled={!columnsReady}
+                >
+                  Customize columns
+                </Button>
+              </div>
             }
             // The shell locks the page to the viewport at `taller:` in the panel
             // layout and at `tall:` otherwise; the table has to fill against the

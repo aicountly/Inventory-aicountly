@@ -23,6 +23,16 @@ export interface ReportCompactShellProps {
    * earns the two lines; `/documents` is one.
    */
   headerVariant?: 'compact' | 'page'
+  /**
+   * Lock the page to the viewport and give the table what is left.
+   *
+   * True for a screen that IS a table. A screen carrying a chart band as well
+   * has more than a viewport to give away: the band is a fixed-height sibling
+   * of the table in the same flex column, so the table's `flex-1` resolves
+   * against whatever is left and collapses to about a row. Such a page scrolls
+   * as a whole instead, and the table takes a bounded scroll box of its own.
+   */
+  fill?: boolean
   /** `page` only: decoration beside the title, shown only at ≥1536px. */
   headerAside?: ReactNode
   toolbar?: ReactNode
@@ -60,6 +70,7 @@ export function ReportCompactShell({
   icon,
   headerActions,
   headerVariant = 'compact',
+  fill = true,
   headerAside,
   toolbar,
   shortcutKeys,
@@ -95,9 +106,10 @@ export function ReportCompactShell({
       paddingBottom={false}
       className={cx(
         'flex flex-col',
-        page
-          ? 'taller:h-[calc(100dvh-7rem)] taller:overflow-hidden'
-          : 'tall:h-[calc(100dvh-7rem)] tall:overflow-hidden',
+        fill &&
+            (page
+              ? 'taller:h-[calc(100dvh-7rem)] taller:overflow-hidden'
+              : 'tall:h-[calc(100dvh-7rem)] tall:overflow-hidden'),
         className,
       )}
     >

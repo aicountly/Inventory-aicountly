@@ -382,7 +382,7 @@ function BulkPrintButton({
   )
 }
 
-const SELECTION: RegisterSelection<DocumentListRow> = {
+const SELECTION: RegisterSelection<DocumentListRow, DocumentsSummary> = {
   idOf: (row) => row.document_id,
   label: 'Select document',
   actions: (selected, clear) => <BulkPrintButton rows={selected} onDone={clear} />,

@@ -69,15 +69,22 @@ export interface RegisterGrouping<T> {
  * `columns` on purpose — the checkbox is a control, not data, and a register
  * whose CSV carried an empty first column would be exporting its own chrome.
  */
-export interface RegisterSelection<T> {
+export interface RegisterSelection<T, S> {
   /** Stable identity for a row, unique across pages. */
   idOf: (row: T) => string | number
   /** Column header text for screen readers. Defaults to "Select". */
   label?: string
   /** Why this row cannot be picked, or null when it can. */
   disabledReason?: (row: T) => string | null
-  /** Rendered in the toolbar while at least one row is selected. */
-  actions: (selected: readonly T[], clear: () => void) => ReactNode
+  /**
+   * Rendered in the toolbar while at least one row is selected.
+   *
+   * `summary` is the server's aggregate over the whole filtered set, so a
+   * selection can say what share of it has been ticked — "62% of stock value"
+   * is the reason to tick rows on a valuation register at all, and it cannot
+   * be worked out from the selected rows alone.
+   */
+  actions: (selected: readonly T[], clear: () => void, summary: S) => ReactNode
 }
 
 export interface RegisterFetchArgs {
@@ -121,6 +128,20 @@ export interface RegisterFilterPanelSpec {
    * Omit and every filter is in the grid.
    */
   primaryKeys?: readonly string[]
+}
+
+/** What an analytics band is handed. See `RegisterConfig.analytics`. */
+export interface AnalyticsArgs<T, S> {
+  /** The server's aggregate over the whole filtered set. */
+  summary: S
+  /** The rows on this page — never the basis of a figure about the whole set. */
+  rows: readonly T[]
+  /** Effective filter values, defaults resolved: what the register was asked. */
+  values: Record<string, string>
+  /** The filters as the API received them. */
+  query: ListQuery
+  /** True while the register itself is refetching. */
+  loading: boolean
 }
 
 export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
@@ -188,7 +209,7 @@ export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
   scopePeriodFor?: (values: Record<string, string>) => string | undefined
 
   /** Row selection and the bulk actions it enables. */
-  selectable?: RegisterSelection<T>
+  selectable?: RegisterSelection<T, S>
 
   /**
    * A per-row control pinned to the right of the table — the "⋮" menu.
@@ -245,6 +266,23 @@ export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
   kpis?: (summary: S, response: ReportResponse<T, S>) => StatCardSpec[]
 
   /**
+   * An analytics band under the KPI cards.
+   *
+   * Distinct from `insights`, which states facts about the rows in words. This
+   * is for a register whose question is about the SHAPE of the set — "where is
+   * my stock value, and how has it moved" is not answerable by any one row, nor
+   * by a sentence about them.
+   *
+   * Opt-in, because most registers are read as a list and a chart strip over
+   * one is noise. It is handed the server's own summary and the page's rows so
+   * it charts what the register reports rather than a second, differently
+   * filtered answer; anything more it must fetch itself, from the same
+   * endpoints under the same filters. Screen only — the printed sheet carries
+   * the figures, not the pictures.
+   */
+  analytics?: (args: AnalyticsArgs<T, S>) => ReactNode
+
+  /**
    * The operational strip under the KPI cards — what the rows on screen say
    * about the state of things, rather than what they sum to.
    *
@@ -261,6 +299,15 @@ export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
   tableTitle?: string
   /** One line under that heading, saying what the rows on screen are. */
   tableHint?: string
+  /**
+   * A register's own control in the table card's header, beside Customize
+   * columns — "Add item" on the valuation register.
+   *
+   * Here rather than in `extra` because `extra` renders ABOVE the card: a
+   * register that put its heading and button there would draw a second heading
+   * over the one the card already has.
+   */
+  tableActions?: ReactNode
 
   /**
    * Groupings the reader can switch between, with per-group subtotals. The
