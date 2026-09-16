@@ -196,10 +196,14 @@
 .dark .bg-red-50\/60 {
   background-color: rgb(127 29 29 / 0.13);
 }
+.dark .bg-sky-50\/60 {
+  background-color: rgb(12 74 110 / 0.13);
+}
 .dark .bg-red-50\/40 {
   background-color: rgb(127 29 29 / 0.09);
 }
 
+.dark .border-emerald-100,
 .dark .border-emerald-200 {
   border-color: rgb(6 95 70 / 0.5);
 }
@@ -214,6 +218,7 @@
 .dark .hover\:border-red-300:hover {
   border-color: rgb(153 27 27 / 0.5);
 }
+.dark .border-sky-100,
 .dark .border-sky-200 {
   border-color: rgb(7 89 133 / 0.5);
 }
@@ -222,7 +227,9 @@
 }
 
 .dark .text-emerald-600,
-.dark .text-emerald-700 {
+.dark .text-emerald-700,
+.dark .text-emerald-800,
+.dark .text-emerald-900 {
   color: rgb(110 231 183);
 }
 .dark .text-amber-600,
