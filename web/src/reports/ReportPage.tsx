@@ -526,7 +526,7 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
             <span className="font-semibold text-gray-800">
               {selectedRows.length} selected
             </span>
-            {selectable.actions(selectedRows, clearSelection)}
+            {summary !== undefined ? selectable.actions(selectedRows, clearSelection, summary) : null}
             <button
               type="button"
               className="ml-auto rounded-full bg-white px-2 py-1 text-gray-600 hover:text-red-600"

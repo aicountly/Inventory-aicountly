@@ -68,15 +68,22 @@ export interface RegisterGrouping<T> {
  * `columns` on purpose — the checkbox is a control, not data, and a register
  * whose CSV carried an empty first column would be exporting its own chrome.
  */
-export interface RegisterSelection<T> {
+export interface RegisterSelection<T, S> {
   /** Stable identity for a row, unique across pages. */
   idOf: (row: T) => string | number
   /** Column header text for screen readers. Defaults to "Select". */
   label?: string
   /** Why this row cannot be picked, or null when it can. */
   disabledReason?: (row: T) => string | null
-  /** Rendered in the toolbar while at least one row is selected. */
-  actions: (selected: readonly T[], clear: () => void) => ReactNode
+  /**
+   * Rendered in the toolbar while at least one row is selected.
+   *
+   * `summary` is the server's aggregate over the whole filtered set, so a
+   * selection can say what share of it has been ticked — "62% of stock value"
+   * is the reason to tick rows on a valuation register at all, and it cannot
+   * be worked out from the selected rows alone.
+   */
+  actions: (selected: readonly T[], clear: () => void, summary: S) => ReactNode
 }
 
 export interface RegisterFetchArgs {
@@ -131,7 +138,7 @@ export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
   headerActions?: ReactNode
 
   /** Row selection and the bulk actions it enables. */
-  selectable?: RegisterSelection<T>
+  selectable?: RegisterSelection<T, S>
 
   /**
    * A per-row menu, pinned as the last column.

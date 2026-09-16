@@ -39,8 +39,11 @@ import { RowActionsMenu } from '../../ui/RowActionsMenu'
 import type { RowAction } from '../../ui/RowActionsMenu'
 import { buildTotalsRow, totalsLabel } from '../registerTotals'
 import { defineRegister } from '../RegisterConfig'
+import type { ReportColumn } from '../RegisterConfig'
 import { ValuationAnalytics } from '../valuation/ValuationAnalytics'
 import { ValuationHeaderActions } from '../valuation/ValuationHeaderActions'
+import { ValuationSelectionActions } from '../valuation/ValuationSelectionActions'
+import { ValuationTableToolbar } from '../valuation/ValuationTableToolbar'
 import { WarehouseScopeHint, WarehouseScopeValue } from '../valuation/WarehouseScopeValue'
 import { pageHint, summaryOverRows, withPageSummary } from './pageSummary'
 import type { PageSummary } from './pageSummary'
@@ -67,6 +70,61 @@ function documentCell(id: number | null | undefined, no: string | null | undefin
  * average or exactly as each item master prescribes, so a reader can see what
  * the choice is worth before it is made.
  */
+/**
+ * The register's columns, named so the selection export can write exactly what
+ * the table shows rather than a second, drifting list of its own.
+ */
+const VALUATION_COLUMNS: ReportColumn<ValuationSnapshotRow>[] = [
+  {
+    key: 'item_sku',
+    header: 'Item code',
+    configureHint: 'The code on the item master.',
+    minWidth: 110,
+    render: (r) =>
+      r.item_sku ? (
+        <span className="font-medium tabular-nums text-gray-600">{r.item_sku}</span>
+      ) : (
+        DASH
+      ),
+    csv: (r) => r.item_sku ?? '',
+  },
+  {
+    key: 'item_name',
+    header: 'Item name',
+    sortKey: 'item_name',
+    alwaysVisible: true,
+    minWidth: 200,
+    render: (r) => (
+      <Link
+        to={`/valuation/cost-layers?item_id=${r.item_id}`}
+        className="text-gray-900 hover:text-primary"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <strong className="font-semibold">{r.item_name ?? `Item #${r.item_id}`}</strong>
+        {r.item_alias ? <span className="text-gray-400"> · {r.item_alias}</span> : null}
+      </Link>
+    ),
+    csv: (r) => r.item_name ?? `Item #${r.item_id}`,
+  },
+  textColumn<ValuationSnapshotRow>('unit_symbol', 'Unit', false),
+  {
+    key: 'valuation_method',
+    header: 'Item method',
+    configureHint: 'What the item master asks for.',
+    render: (r) => r.valuation_method ?? <span className="text-gray-400">company default</span>,
+    csv: (r) => r.valuation_method ?? '',
+  },
+  qtyColumn<ValuationSnapshotRow>('closing_qty', 'Closing qty', { strong: true }),
+  moneyColumn<ValuationSnapshotRow>('unit_cost', 'Unit cost'),
+  moneyColumn<ValuationSnapshotRow>('stock_value', 'Stock value', { strong: true }),
+  {
+    key: 'valuation_method_applied',
+    header: 'Applied',
+    configureHint: 'What was actually used — differs when an item has no layers.',
+    render: (r) => r.valuation_method_applied ?? DASH,
+  },
+]
+
 export const valuationRegister = defineRegister<ValuationSnapshotRow, ValuationSnapshotSummary>({
   slug: 'valuation',
   path: 'valuation',
@@ -106,57 +164,18 @@ export const valuationRegister = defineRegister<ValuationSnapshotRow, ValuationS
     { ...itemFilter, placeholder: 'Search item code or name…' },
     { ...warehouseFilter, placeholder: 'Whole company' },
   ],
-  columns: [
-    {
-      key: 'item_sku',
-      header: 'Item code',
-      configureHint: 'The code on the item master.',
-      minWidth: 110,
-      render: (r) =>
-        r.item_sku ? (
-          <span className="font-medium tabular-nums text-gray-600">{r.item_sku}</span>
-        ) : (
-          DASH
-        ),
-      csv: (r) => r.item_sku ?? '',
-    },
-    {
-      key: 'item_name',
-      header: 'Item name',
-      sortKey: 'item_name',
-      alwaysVisible: true,
-      minWidth: 200,
-      render: (r) => (
-        <Link
-          to={`/valuation/cost-layers?item_id=${r.item_id}`}
-          className="text-gray-900 hover:text-primary"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <strong className="font-semibold">{r.item_name ?? `Item #${r.item_id}`}</strong>
-          {r.item_alias ? <span className="text-gray-400"> · {r.item_alias}</span> : null}
-        </Link>
-      ),
-      csv: (r) => r.item_name ?? `Item #${r.item_id}`,
-    },
-    textColumn<ValuationSnapshotRow>('unit_symbol', 'Unit', false),
-    {
-      key: 'valuation_method',
-      header: 'Item method',
-      configureHint: 'What the item master asks for.',
-      render: (r) => r.valuation_method ?? <span className="text-gray-400">company default</span>,
-      csv: (r) => r.valuation_method ?? '',
-    },
-    qtyColumn<ValuationSnapshotRow>('closing_qty', 'Closing qty', { strong: true }),
-    moneyColumn<ValuationSnapshotRow>('unit_cost', 'Unit cost'),
-    moneyColumn<ValuationSnapshotRow>('stock_value', 'Stock value', { strong: true }),
-    {
-      key: 'valuation_method_applied',
-      header: 'Applied',
-      configureHint: 'What was actually used — differs when an item has no layers.',
-      render: (r) => r.valuation_method_applied ?? DASH,
-    },
-  ],
+  columns: VALUATION_COLUMNS,
   rowKey: (r) => r.item_id,
+  // Ticking rows answers "what are these worth together", which is the one
+  // question a register cannot answer by being read down. Nothing here writes:
+  // the actions are a subtotal and a file.
+  selectable: {
+    idOf: (r) => r.item_id,
+    label: 'Select item',
+    actions: (selected, _clear, summary) => (
+      <ValuationSelectionActions rows={selected} summary={summary} columns={VALUATION_COLUMNS} />
+    ),
+  },
   // A control, not a column — so it never reaches a CSV or a printed sheet.
   rowActions: (r) => <ValuationRowActions row={r} />,
   // The cost layers are the working behind the number, so that is where a
@@ -273,15 +292,7 @@ export const valuationRegister = defineRegister<ValuationSnapshotRow, ValuationS
     },
   ],
   // The table's own heading, in the slot the engine already renders above it.
-  extra: (s) => (
-    <div className="flex flex-wrap items-baseline justify-between gap-2 px-0.5 pt-1">
-      <h2 className="text-sm font-semibold text-gray-900">Item-wise valuation</h2>
-      <p className="text-xs text-gray-500">
-        {formatInt(s.item_count)} {s.item_count === 1 ? 'item' : 'items'} · valued at{' '}
-        {METHOD_LABELS[s.method as ReportMethod] ?? s.method} as at {s.as_of}
-      </p>
-    </div>
-  ),
+  extra: (s) => <ValuationTableToolbar summary={s} />,
   analytics: ({ summary, values, loading }) => (
     <ValuationAnalytics
       summary={summary}

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { ReportPage } from '../../reports/ReportPage'
 import { valuationRegister } from '../configs/opsRegisters'
@@ -191,8 +191,13 @@ describe('valuation register', () => {
   it('renders the item code and the row figures', async () => {
     renderRegister()
     expect(await screen.findByText('TEST-001')).toBeTruthy()
-    expect(screen.getByText('DIM-001')).toBeTruthy()
-    expect(screen.getByText('Test Item')).toBeTruthy()
+    // Scoped to the table: an item name also appears in the donut's legend, so
+    // an unscoped lookup matches twice as soon as the analytics have loaded.
+    const table = within(screen.getByRole('table'))
+    expect(table.getByText('DIM-001')).toBeTruthy()
+    expect(table.getByText('Test Item')).toBeTruthy()
+    expect(table.getByText('523')).toBeTruthy()
+    expect(table.getByText('65.58')).toBeTruthy()
   })
 
   it('totals from the server summary, not from the rows on screen', async () => {
@@ -274,6 +279,55 @@ describe('valuation register', () => {
     await waitFor(() => {
       expect(screen.queryAllByRole('button', { name: /method settings/i })).toHaveLength(1)
     })
+  })
+
+  it('offers Add item only to a member who may maintain items', async () => {
+    renderRegister()
+    expect(await screen.findByRole('link', { name: /add item/i })).toBeTruthy()
+
+    can.mockImplementation((key: string) => key !== 'masters.items.write')
+    renderRegister()
+    await waitFor(() => {
+      // One from the first render, none from the second.
+      expect(screen.queryAllByRole('link', { name: /add item/i })).toHaveLength(1)
+    })
+  })
+
+  it('subtotals the rows a reader ticks, against the server total', async () => {
+    renderRegister()
+    await screen.findByText('Test Item')
+
+    // Both rows: 523 + 442 units, 65.58 + 10.43 of a 76.02 total.
+    for (const box of screen.getAllByRole('checkbox', { name: /^Select item \d+$/ })) {
+      fireEvent.click(box)
+    }
+
+    expect(await screen.findByText('2 selected')).toBeTruthy()
+    const bar = screen.getByText('2 selected').parentElement as HTMLElement
+    expect(within(bar).getByText(/965/)).toBeTruthy()
+    expect(within(bar).getByText('76.01')).toBeTruthy()
+    expect(within(bar).getByText(/100\.0% of stock value/)).toBeTruthy()
+    // The selection gets the shared export menu, so it offers the same formats
+    // the register does rather than a thinner path of its own.
+    expect(within(bar).getByRole('button', { name: /^export$/i })).toBeTruthy()
+  })
+
+  it('states the share of the whole filtered set, not of the page', async () => {
+    renderRegister()
+    await screen.findByText('Test Item')
+    // Dimmy is item 9; the header's "select every row" box is not a row.
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select item 9' }))
+
+    // Dimmy alone is 10.43 of the 76.02 the server reported for every matching
+    // row — not half, which is what a share of the page would have said.
+    const bar = (await screen.findByText('1 selected')).parentElement as HTMLElement
+    expect(within(bar).getByText(/13\.7% of stock value/)).toBeTruthy()
+  })
+
+  it('keeps the checkbox out of the columns the exports write', () => {
+    const keys = valuationRegister.columns.map((c) => c.key)
+    expect(keys).not.toContain('__select')
+    expect(keys).not.toContain('__actions')
   })
 
   it('says so plainly when the date and filters have nothing to value', async () => {
