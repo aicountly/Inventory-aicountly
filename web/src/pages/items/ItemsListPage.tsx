@@ -499,59 +499,63 @@ export function ItemsListPage() {
       </div>
 
       {filtersOpen ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2.5 print:hidden">
-          <Select value={state.filters.item_type ?? ''} onChange={(e) => params.setFilter('item_type', e.target.value)} aria-label="Type">
-            <option value="">All types</option>
-            {ITEM_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {humanize(t)}
-              </option>
-            ))}
-          </Select>
-          <Select value={state.filters.item_grp_id ?? ''} onChange={(e) => params.setFilter('item_grp_id', e.target.value)} aria-label="Group">
-            <option value="">All groups</option>
-            {(formOptions.options?.item_groups ?? []).map((g) => (
-              <option key={g.item_grp_id} value={g.item_grp_id}>
-                {g.grp_name}
-              </option>
-            ))}
-          </Select>
-          <Select value={state.filters.stock_cat_id ?? ''} onChange={(e) => params.setFilter('stock_cat_id', e.target.value)} aria-label="Category">
-            <option value="">All categories</option>
-            {(formOptions.options?.stock_categories ?? []).map((c) => (
-              <option key={c.stock_cat_id} value={c.stock_cat_id}>
-                {c.cat_name}
-              </option>
-            ))}
-          </Select>
-          <Select value={state.filters.brand_id ?? ''} onChange={(e) => params.setFilter('brand_id', e.target.value)} aria-label="Brand">
-            <option value="">All brands</option>
-            {(formOptions.options?.brands ?? []).map((b) => (
-              <option key={b.brand_id} value={b.brand_id}>
-                {b.brand_name}
-              </option>
-            ))}
-          </Select>
-          <Select value={state.filters.unit_id ?? ''} onChange={(e) => params.setFilter('unit_id', e.target.value)} aria-label="Unit">
-            <option value="">All units</option>
-            {(formOptions.options?.units ?? []).map((u) => (
-              <option key={u.unit_id} value={u.unit_id}>
-                {u.unit_name}
-                {u.unit_symbol ? ` (${u.unit_symbol})` : ''}
-              </option>
-            ))}
-          </Select>
+        <div className="rounded-xl border border-gray-200 bg-white px-3 py-2.5 print:hidden">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+            <Select value={state.filters.item_type ?? ''} onChange={(e) => params.setFilter('item_type', e.target.value)} aria-label="Type">
+              <option value="">All types</option>
+              {ITEM_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {humanize(t)}
+                </option>
+              ))}
+            </Select>
+            <Select value={state.filters.item_grp_id ?? ''} onChange={(e) => params.setFilter('item_grp_id', e.target.value)} aria-label="Group">
+              <option value="">All groups</option>
+              {(formOptions.options?.item_groups ?? []).map((g) => (
+                <option key={g.item_grp_id} value={g.item_grp_id}>
+                  {g.grp_name}
+                </option>
+              ))}
+            </Select>
+            <Select value={state.filters.stock_cat_id ?? ''} onChange={(e) => params.setFilter('stock_cat_id', e.target.value)} aria-label="Category">
+              <option value="">All categories</option>
+              {(formOptions.options?.stock_categories ?? []).map((c) => (
+                <option key={c.stock_cat_id} value={c.stock_cat_id}>
+                  {c.cat_name}
+                </option>
+              ))}
+            </Select>
+            <Select value={state.filters.brand_id ?? ''} onChange={(e) => params.setFilter('brand_id', e.target.value)} aria-label="Brand">
+              <option value="">All brands</option>
+              {(formOptions.options?.brands ?? []).map((b) => (
+                <option key={b.brand_id} value={b.brand_id}>
+                  {b.brand_name}
+                </option>
+              ))}
+            </Select>
+            <Select value={state.filters.unit_id ?? ''} onChange={(e) => params.setFilter('unit_id', e.target.value)} aria-label="Unit">
+              <option value="">All units</option>
+              {(formOptions.options?.units ?? []).map((u) => (
+                <option key={u.unit_id} value={u.unit_id}>
+                  {u.unit_name}
+                  {u.unit_symbol ? ` (${u.unit_symbol})` : ''}
+                </option>
+              ))}
+            </Select>
+          </div>
           {activeFilterCount > 0 || reviewingMissingSku ? (
-            <Button
-              variant="ghost"
-              size="xs"
-              onClick={() => {
-                clearDropdownFilters()
-                if (reviewingMissingSku) params.setFilter('missing_sku', '')
-              }}
-            >
-              Clear filters
-            </Button>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-gray-100 pt-2">
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={() => {
+                  clearDropdownFilters()
+                  if (reviewingMissingSku) params.setFilter('missing_sku', '')
+                }}
+              >
+                Clear filters
+              </Button>
+            </div>
           ) : null}
         </div>
       ) : null}
