@@ -1,7 +1,15 @@
 import { MasterPage } from '../../masters/MasterPage'
-import { batchesConfig, brandsConfig, itemGroupsConfig, locationsConfig, stockCategoriesConfig, uomConfig, warehouseGroupsConfig, warehousesConfig } from '../../masters/configs'
+import { brandsConfig, itemGroupsConfig, locationsConfig, stockCategoriesConfig, uomConfig, warehouseGroupsConfig, warehousesConfig } from '../../masters/configs'
 
-/** Master screens that are entirely described by a config. */
+/**
+ * Master screens that are entirely described by a config.
+ *
+ * Batches used to be one of them and no longer is: it has its own workspace at
+ * `pages/masters/batches` (expiry intelligence, a server summary, a detail
+ * drawer, labels, import). `batchesConfig` stays where it is and is still the
+ * single source of truth for the batch FORM and the export columns — the new
+ * screen reads it rather than re-declaring the fields.
+ */
 
 const crumbs = [{ label: 'Masters', to: '/masters' }]
 
@@ -31,8 +39,4 @@ export function WarehousesPage() {
 
 export function LocationsPage() {
   return <MasterPage config={locationsConfig} breadcrumbs={crumbs} />
-}
-
-export function BatchesPage() {
-  return <MasterPage config={batchesConfig} breadcrumbs={crumbs} />
 }

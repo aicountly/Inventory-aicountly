@@ -45,8 +45,13 @@ Manage through the API's read-only relay (`/api/manage/...`).
   stock per warehouse (`/v1/items/{id}/openings`); soft delete.
 - **Masters** — item groups (tree), stock categories, brands, units of measure,
   warehouse groups (tree), warehouses, locations, bills of materials
-  (components, by-products, scrap), batches and serial numbers (single and
-  bulk registration).
+  (components, by-products, scrap) and serial numbers (single and bulk
+  registration). **Batches** has its own workspace: server-counted figures
+  (`/v1/batches/summary`), derived expiry health (expired / expiring / healthy,
+  computed per request and never stored), filters on status, item, warehouse,
+  expiry window, group, category, lot and on-hand — all in the URL — a detail
+  drawer with per-warehouse balances and recent movements, CSV import, Code 39
+  labels, and a bulk status change (`POST /v1/batches/bulk-update`).
 
 - **Documents** — list, detail (lines with valuation, accounting effects,
   approvals, print snapshot) and create / edit forms for every native type;

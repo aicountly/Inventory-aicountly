@@ -252,6 +252,8 @@
 .dark .text-red-600\/80,
 .dark .text-red-600\/90,
 .dark .text-red-700,
+.dark .text-red-800,
+.dark .text-red-900,
 .dark .hover\:text-red-600:hover,
 .dark .hover\:text-red-700:hover {
   color: rgb(252 165 165);

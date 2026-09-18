@@ -134,6 +134,14 @@ export interface StockSummary {
   reserved: number
 }
 
+/** Where a batch is sitting, from the list's grouped balance query. */
+export interface BatchWarehouseStock {
+  warehouse_id: number | null
+  warehouse_name: string | null
+  warehouse_code: string | null
+  on_hand: number
+}
+
 export interface Batch extends AuditFields {
   batch_id: number
   batch_uuid?: string
@@ -147,9 +155,20 @@ export interface Batch extends AuditFields {
   attributes: Record<string, unknown> | null
   item_name: string | null
   item_sku: string | null
+  item_grp_id?: number | null
+  stock_cat_id?: number | null
+  brand_id?: number | null
+  /** The item's group and stock category, joined by the API for the list. */
+  item_group_name?: string | null
+  stock_category_name?: string | null
   unit_id?: number | null
   unit_symbol: string | null
+  /** The unit's precision — what a quantity may be rounded to, never guessed. */
+  decimal_places?: number | null
   stock?: StockSummary
+  /** `with_stock=1` only: the warehouses holding it, biggest first. */
+  warehouses?: BatchWarehouseStock[]
+  warehouse_count?: number
 }
 
 export type SerialStatus = 'expected' | 'in_stock' | 'reserved' | 'issued' | 'in_transit' | 'damaged' | 'returned' | 'scrapped'
