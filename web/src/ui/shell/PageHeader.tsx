@@ -47,7 +47,17 @@ export function PageHeader({
         className,
       )}
     >
-      <div className="min-w-0 flex-1 basis-72 flex items-start gap-3">
+      {/*
+       * `flex-1 basis-72` is gated to `md:` because the container is
+       * `flex-col` below it.
+       *
+       * flex-basis resolves along the MAIN axis, so in the stacked layout
+       * `basis-72` is not a 18rem minimum width, it is a 288px minimum HEIGHT,
+       * and `flex-1` then grows the block to fill it — a title, a subtitle and
+       * a quarter of a phone screen of white space before the first button.
+       * The properties are wanted only where the header is actually a row.
+       */}
+      <div className="min-w-0 md:flex-1 md:basis-72 flex items-start gap-3">
         {backTo ? (
           <Link
             to={backTo}

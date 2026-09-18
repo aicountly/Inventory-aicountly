@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { emptyItemForm, itemPayload, itemToForm, openingValue, openingsPayload, unitLinesPayload, validateItemForm } from './itemForm'
+import { duplicateItemForm, emptyItemForm, itemPayload, itemToForm, openingValue, openingsPayload, unitLinesPayload, validateItemForm } from './itemForm'
 import type { Item } from '../../services/items'
 
 describe('unitLinesPayload', () => {
@@ -147,5 +147,102 @@ describe('itemToForm', () => {
     expect(f.unitLines[0]).toMatchObject({ unit_id: '2', conversion_factor: '100', uom_role: 'purchase' })
     expect(f.openings).toHaveLength(1)
     expect(f.openings[0]).toMatchObject({ warehouse_id: '4', unit_id: '1', opening_qty: '60.0000', opening_valuation_rate: '2.1000' })
+  })
+})
+
+describe('duplicateItemForm', () => {
+  const source = {
+    item_id: 7214,
+    item_name: 'Steel Rod 12mm',
+    item_alias: 'SR12',
+    print_name: 'Steel Rod 12mm',
+    item_type: 'stock',
+    item_sku: 'SR-12',
+    item_upc: '8901234567890',
+    hsn_sac: '7214',
+    mrp: '1234.5000',
+    unit_id: 1,
+    stock_cat_id: 2,
+    item_grp_id: 3,
+    brand_id: 4,
+    valuation_method: 'fifo',
+    track_batch: 1,
+    track_serial: 0,
+    track_expiry: 1,
+    is_active: 0,
+    updated_at: null,
+    created_at: null,
+    unit_symbol: 'Nos',
+    unit_name: 'Numbers',
+    grp_name: 'Raw material',
+    cat_name: 'Metals',
+    brand_name: 'Tata',
+    purchase_unit_id: null,
+    sales_unit_id: null,
+    parent_item_id: null,
+    books_sales_acc_id: null,
+    books_purchase_acc_id: null,
+    books_tax_cat_id: null,
+    shelf_life_days: null,
+    negative_stock_policy: null,
+    min_stock_qty: '10.0000',
+    max_stock_qty: null,
+    reorder_point_qty: '20.0000',
+    reorder_qty: null,
+    safety_stock_qty: null,
+    lead_time_days: null,
+    default_warehouse_id: null,
+    standard_cost: null,
+    itc_eligibility: 'block',
+    attributes: null,
+    variant_attributes: null,
+    unit_lines: [
+      { unit_id: 1, is_default: 1, conversion_factor: 1, uom_role: 'base' },
+      { unit_id: 2, is_default: 0, conversion_factor: 100, uom_role: 'purchase' },
+    ],
+    openings: [],
+  } satisfies Item
+
+  it('keeps everything that makes two items alike', () => {
+    const f = duplicateItemForm(source)
+    expect(f).toMatchObject({
+      item_type: 'stock',
+      hsn_sac: '7214',
+      mrp: '1234.5000',
+      item_grp_id: '3',
+      stock_cat_id: '2',
+      brand_id: '4',
+      unit_id: '1',
+      valuation_method: 'FIFO',
+      track_batch: true,
+      track_expiry: true,
+      itc_eligibility: 'block',
+      min_stock_qty: '10.0000',
+      reorder_point_qty: '20.0000',
+    })
+    expect(f.unitLines).toHaveLength(1)
+  })
+
+  it('drops the identifiers, which belong to exactly one item', () => {
+    // Copying them would either be refused by the API or, worse, accepted —
+    // leaving two items answering the same scan.
+    const f = duplicateItemForm(source)
+    expect(f.item_sku).toBe('')
+    expect(f.item_upc).toBe('')
+  })
+
+  it('never copies opening stock', () => {
+    // Opening quantity is a statement about physical goods on a date. A copied
+    // opening is stock that was never received, and the valuation engine would
+    // faithfully cost it.
+    expect(duplicateItemForm(source).openings).toEqual([])
+  })
+
+  it('renames the copy so it cannot be saved under the original name by accident', () => {
+    expect(duplicateItemForm(source).item_name).toBe('Steel Rod 12mm (copy)')
+  })
+
+  it('starts the copy active even when the original was archived', () => {
+    expect(duplicateItemForm(source).is_active).toBe(true)
   })
 })

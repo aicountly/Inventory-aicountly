@@ -60,6 +60,21 @@ export interface ItemListRow {
   track_batch: number
   track_serial: number
   track_expiry: number
+  /*
+   * The reorder policy travels WITH the list row.
+   *
+   * Stock health ("low stock") is on-hand measured against the item's own
+   * threshold, so a list that had to fetch the threshold per row would be one
+   * request per item — the N+1 the Items screen must never make. The API
+   * carries them in LIST_COLUMNS instead, and the same numbers answer the
+   * amber badge, the KPI card and the server-side `stock_status` filter.
+   */
+  min_stock_qty?: number | string | null
+  max_stock_qty?: number | string | null
+  reorder_point_qty?: number | string | null
+  reorder_qty?: number | string | null
+  negative_stock_policy?: string | null
+  default_warehouse_id?: number | null
   is_active: number
   updated_at: string | null
   created_at: string | null
@@ -183,6 +198,12 @@ export async function fetchItemFormOptions(signal?: AbortSignal): Promise<ItemFo
   }
 }
 
+/** `stock_status` values the API filters on — see ItemsController::stockHealthSql(). */
+export type StockStatusFilter = 'negative' | 'out' | 'low' | 'in_stock' | 'attention'
+
+/** `tracking` values the API filters on. */
+export type TrackingFilter = 'batch' | 'serial' | 'expiry' | 'none'
+
 export interface ItemListQuery extends ListQuery {
   status?: 'active' | 'inactive' | ''
   item_grp_id?: number | ''
@@ -190,8 +211,73 @@ export interface ItemListQuery extends ListQuery {
   brand_id?: number | ''
   unit_id?: number | ''
   item_type?: ItemType | ''
+  valuation_method?: string | ''
+  tracking?: TrackingFilter | ''
+  stock_status?: StockStatusFilter | ''
+  /** 1 = has one, 0 = missing it. Omit for "either". */
+  has_hsn?: 0 | 1 | ''
+  has_barcode?: 0 | 1 | ''
+  has_sku?: 0 | 1 | ''
   with_stock?: boolean
   warehouse_id?: number | ''
+}
+
+/**
+ * `GET /v1/items/summary` — the counters above the list, counted by the database over the whole
+ * filtered catalogue rather than summed from the page on screen.
+ */
+export interface ItemsSummary {
+  total: number
+  active: number
+  inactive: number
+  /** Items whose type actually holds stock; service / non-stock items are excluded. */
+  stock_tracked: number
+  in_stock: number
+  low_stock: number
+  out_of_stock: number
+  negative_stock: number
+  /** negative + out + low, for the "Needs attention" preset. */
+  needs_attention: number
+  missing_hsn: number
+  missing_barcode: number
+  missing_sku: number
+  inactive_with_stock: number
+}
+
+/** `GET /v1/items/{id}/stock` — every bucket, split by warehouse, plus the costed unit rate. */
+export interface ItemStockBuckets {
+  on_hand: number
+  reserved: number
+  committed: number
+  packed: number
+  in_transit: number
+  job_worker: number
+  quality_hold: number
+  damaged: number
+  blocked: number
+  expected: number
+  available: number
+}
+
+export interface ItemStockWarehouseRow extends ItemStockBuckets {
+  item_id: number
+  warehouse_id: number | null
+  batch_id?: number | null
+  projected: number
+}
+
+export interface ItemStockResponse {
+  item_id: number
+  total: ItemStockBuckets
+  by_warehouse: ItemStockWarehouseRow[]
+  /** Backend-calculated. Inventory valuation is never computed in the browser. */
+  unit_cost: number | null
+  valuation_method: string | null
+}
+
+export interface BulkDeleteResult {
+  deleted: number[]
+  skipped: { item_id: number; message: string }[]
 }
 
 /** Fields POST /v1/items/bulk-update accepts. Units and the valuation method are deliberately absent. */
@@ -230,6 +316,18 @@ export const itemsApi = {
   remove: async (id: number) => {
     await api.delete<unknown>(`v1/items/${id}`)
   },
+  /** Counters for the KPI strip. Fails independently of the list — never blocks the rows. */
+  summary: async (query: ItemListQuery = {}, signal?: AbortSignal): Promise<ItemsSummary> =>
+    (await api.get<ItemResponse<ItemsSummary>>('v1/items/summary', { signal, query })).data,
+  /** One item's buckets by warehouse. Backed by inv_stock_balances, not by anything client-side. */
+  stock: async (id: number, signal?: AbortSignal): Promise<ItemStockResponse> =>
+    (await api.get<ItemResponse<ItemStockResponse>>(`v1/items/${id}/stock`, { signal })).data,
+  /** Scanner input: matches the barcode (item_upc) or the SKU, active items only. */
+  byBarcode: async (code: string, signal?: AbortSignal): Promise<ItemListRow> =>
+    (await api.get<ItemResponse<ItemListRow>>(`v1/items/by-barcode/${encodeURIComponent(code)}`, { signal })).data,
+  /** Per-item outcome: the API refuses any item still referenced by a document or a BOM. */
+  bulkDelete: async (itemIds: number[]): Promise<BulkDeleteResult> =>
+    (await api.post<ItemResponse<BulkDeleteResult>>('v1/items/bulk-delete', { item_ids: itemIds })).data,
   search: async (q: string, limit = 20, signal?: AbortSignal): Promise<ItemSearchRow[]> => {
     const res = await api.get<ItemResponse<ItemSearchRow[]>>('v1/items/search', { signal, query: { q, limit } })
     return Array.isArray(res.data) ? res.data : []

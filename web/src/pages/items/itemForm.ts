@@ -293,3 +293,32 @@ export function validateItemForm(f: ItemFormState): Record<string, string> {
   })
   return errors
 }
+
+/**
+ * The form for a NEW item that starts as a copy of an existing one.
+ *
+ * A duplicate keeps everything that makes two items alike — classification,
+ * units and conversions, tax attributes, tracking flags, the reorder policy —
+ * and drops everything that must be unique to one item:
+ *
+ *  - the SKU and the barcode, which are identifiers. Copying them would either
+ *    be refused by the API or, worse, accepted and leave two items answering
+ *    the same scan.
+ *  - the opening stock, because opening quantity is a statement about physical
+ *    goods on a date. A copied opening would invent stock that was never
+ *    received, and the valuation engine would faithfully cost it.
+ *
+ * The name gets a suffix so the copy is never saved under the original's name
+ * by a reader who tabbed straight past the first field.
+ */
+export function duplicateItemForm(item: Item): ItemFormState {
+  const form = itemToForm(item, [], 0)
+  return {
+    ...form,
+    item_name: `${form.item_name} (copy)`,
+    item_sku: '',
+    item_upc: '',
+    openings: [],
+    is_active: true,
+  }
+}

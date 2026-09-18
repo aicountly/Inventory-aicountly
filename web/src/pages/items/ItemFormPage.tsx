@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useAccess } from '../../access/AccessContext'
 import { useCompany } from '../../company/CompanyContext'
 import { ConfirmDialog } from '../../components/ConfirmDialog'
@@ -15,7 +15,7 @@ import { itemsApi, ITC_ELIGIBILITY, ITEM_TYPES, UOM_ROLES } from '../../services
 import type { ItcEligibility, Item, ItemOpeningsResponse } from '../../services/items'
 import { useToast } from '../../ui/ToastContext'
 import { formatQty, humanize } from '../../utils/format'
-import { emptyItemForm, itemPayload, itemToForm, newOpening, newUnitLine, openingValue, openingsPayload, validateItemForm } from './itemForm'
+import { duplicateItemForm, emptyItemForm, itemPayload, itemToForm, newOpening, newUnitLine, openingValue, openingsPayload, validateItemForm } from './itemForm'
 import type { ItemFormState, OpeningDraft, UnitLineDraft } from './itemForm'
 
 const LIST = '/items'
@@ -43,6 +43,15 @@ interface Loaded {
 export function ItemFormPage() {
   const { id } = useParams()
   const itemId = id && /^\d+$/.test(id) ? Number(id) : null
+  /*
+   * `/items/new?from=7214` — Duplicate, from the inspector drawer.
+   *
+   * Read only when creating: on an edit route the id in the path is the record,
+   * and a stray `from` in the query string must not quietly reshape it.
+   */
+  const [searchParams] = useSearchParams()
+  const fromParam = searchParams.get('from')
+  const duplicateOf = itemId === null && fromParam && /^\d+$/.test(fromParam) ? Number(fromParam) : null
   const navigate = useNavigate()
   const toast = useToast()
   const { scope, fy } = useCompany()
@@ -59,6 +68,14 @@ export function ItemFormPage() {
     },
     [itemId, scope?.cmp_id, scope?.fy_id],
     { enabled: !!scope && itemId !== null, keepData: false },
+  )
+
+  // The source of a duplicate. Its openings are deliberately NOT fetched: a
+  // copied opening stock would be stock that was never physically received.
+  const source = useQuery(
+    (signal) => itemsApi.get(duplicateOf as number, signal),
+    [duplicateOf, scope?.cmp_id],
+    { enabled: !!scope && duplicateOf !== null, keepData: false },
   )
 
   const [form, setForm] = useState<ItemFormState>(() => emptyItemForm())
@@ -78,7 +95,17 @@ export function ItemFormPage() {
 
   useEffect(() => {
     if (itemId === null) {
-      if (!initialised && options) {
+      if (initialised) return
+      if (duplicateOf !== null) {
+        // Wait for the source rather than filling a blank form the copy would
+        // then overwrite under the reader's cursor.
+        if (source.data) {
+          setForm(duplicateItemForm(source.data))
+          setInitialised(true)
+        }
+        return
+      }
+      if (options) {
         setForm(emptyItemForm(options.default_valuation_method))
         setInitialised(true)
       }
@@ -88,7 +115,7 @@ export function ItemFormPage() {
       setForm(itemToForm(loaded.data.item, loaded.data.openings.rows, loaded.data.openings.effective_fy_id))
       setInitialised(true)
     }
-  }, [itemId, loaded.data, options, initialised])
+  }, [itemId, loaded.data, options, initialised, duplicateOf, source.data])
 
   const errors = useMemo(() => (touched ? validateItemForm(form) : {}), [form, touched])
   const readOnly = !canWrite
@@ -195,7 +222,13 @@ export function ItemFormPage() {
 
   const unitOpts = units.map((u) => ({ value: u.unit_id, label: `${u.unit_name}${u.unit_symbol ? ` (${u.unit_symbol})` : ''}` }))
   const warehouseOpts = (options?.warehouses ?? []).map((w) => ({ value: w.warehouse_id, label: w.warehouse_name }))
-  const title = itemId ? (loaded.data?.item.item_name ?? 'Item') : 'New item'
+  // A duplicate says so: a reader who lands on "New item" holding a filled-in
+  // form has no way to tell it is a copy rather than a record they are editing.
+  const title = itemId
+    ? (loaded.data?.item.item_name ?? 'Item')
+    : duplicateOf !== null
+      ? `Duplicate of ${source.data?.item_name ?? 'item'}`
+      : 'New item'
 
   return (
     <div className="page">

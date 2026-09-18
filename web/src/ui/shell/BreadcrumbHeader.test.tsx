@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { Badge } from '../Badge'
 import { BreadcrumbHeader } from './BreadcrumbHeader'
+import { PageHeader as ShellPageHeader } from './PageHeader'
 
 function renderHeader(props: Partial<Parameters<typeof BreadcrumbHeader>[0]> = {}) {
   render(
@@ -38,5 +39,31 @@ describe('BreadcrumbHeader', () => {
     expect(text.indexOf('Draft')).toBeGreaterThan(text.indexOf('Stock ledger'))
     expect(text.indexOf('Draft')).toBeLessThan(text.indexOf('Toolbar'))
     expect(text.indexOf('Toolbar')).toBeLessThan(text.indexOf('Actions'))
+  })
+})
+
+describe('PageHeader stacked layout', () => {
+  it('does not reserve a column-axis flex-basis in the stacked layout', () => {
+    /*
+     * `flex-basis` resolves along the MAIN axis. The header is `flex-col` below
+     * `md`, so an ungated `basis-72` there is not an 18rem minimum width — it is
+     * a 288px minimum HEIGHT, and `flex-1` grows the title block to fill it.
+     * On a phone that is a title, a subtitle, and a quarter of the screen of
+     * white space before the first button.
+     */
+    const { container } = render(
+      <MemoryRouter>
+        <ShellPageHeader title="Items" description="Manage your inventory items." />
+      </MemoryRouter>,
+    )
+    // The header's first child: the title column that sits beside the actions.
+    const titleBlock = container.querySelector('h1')?.closest('div.items-start.gap-3')
+    expect(titleBlock).toBeTruthy()
+    const cls = titleBlock?.className ?? ''
+    expect(cls).not.toMatch(/(^|\s)basis-72(\s|$)/)
+    expect(cls).not.toMatch(/(^|\s)flex-1(\s|$)/)
+    // Still a row that shares its width with the actions from `md` up.
+    expect(cls).toContain('md:basis-72')
+    expect(cls).toContain('md:flex-1')
   })
 })
