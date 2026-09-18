@@ -50,7 +50,11 @@ Manage through the API's read-only relay (`/api/manage/...`).
 
 - **Documents** — list, detail (lines with valuation, accounting effects,
   approvals, print snapshot) and create / edit forms for every native type;
-  packing lists, pending quantities and reservations.
+  packing lists, pending quantities and reservations. **Job work** has a
+  workspace of its own (`src/documents/jobwork`): one screen for both
+  directions, with the position still out with job workers, what is late, a
+  settlement panel that turns open dispatch quantities into lines, live
+  availability on a dispatch, and batch / serial allocation per line.
 - **Stock** — balances by item × warehouse × batch with every bucket, the
   stock ledger of an item with running quantity and value, and the movement
   list.

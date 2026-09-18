@@ -54,6 +54,13 @@ class PendingController extends BaseController
                 }
             }
             $r['document_type_label'] = \Config\DocumentTypeRegistry::get((string) ($r['document_type'] ?? ''))['label'] ?? $r['document_type'];
+            // Dates come back from PostgreSQL as timestamps on some drivers; the
+            // clients compare them as plain days, so they leave as plain days.
+            foreach (['document_date', 'expected_return_date'] as $k) {
+                if (!empty($r[$k])) {
+                    $r[$k] = substr((string) $r[$k], 0, 10);
+                }
+            }
         }
         unset($r);
         $summary = ['qty_open' => 0.0, 'rows' => $total];
@@ -101,6 +108,11 @@ class PendingController extends BaseController
             }
         }
         $row['document_type_label'] = \Config\DocumentTypeRegistry::get((string) ($row['document_type'] ?? ''))['label'] ?? $row['document_type'];
+        foreach (['document_date', 'expected_return_date'] as $k) {
+            if (!empty($row[$k])) {
+                $row[$k] = substr((string) $row[$k], 0, 10);
+            }
+        }
 
         $settlements = $db->table('inv_pending_settlements s')
             ->select('s.settlement_id, s.settle_document_id, s.settle_line_id, s.settlement_type, s.qty_settled, s.created_at, d.document_no, d.document_type, d.document_date, d.status AS document_status, d.source_app, d.source_document_no')

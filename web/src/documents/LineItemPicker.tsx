@@ -1,4 +1,5 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useDebounce } from '../hooks/useDebounce'
 import { isAbortError } from '../services/api'
 import { lookupApi } from '../services/lookupApi'
@@ -21,6 +22,13 @@ interface LineItemPickerProps {
 /**
  * Item typeahead for document lines: `GET /v1/items/search?with_stock=1&warehouse_id=` so every
  * suggestion shows what is on hand and available where the line will post.
+ *
+ * The suggestion list is portalled to `document.body` and positioned against
+ * the input, for the reason MenuButton already documents: a line editor lives
+ * inside `.table-wrap`, which scrolls horizontally, and anything positioned
+ * inside that box is clipped by it. A dropdown that opens below a one-row grid
+ * was clipped to a couple of pixels and, on a wide line table, could not be
+ * reached at all.
  */
 export function LineItemPicker({ itemId, itemName, itemSku, warehouseId, onPick, onClear, disabled, autoFocus, invalid }: LineItemPickerProps) {
   const [query, setQuery] = useState('')
@@ -30,7 +38,37 @@ export function LineItemPicker({ itemId, itemName, itemSku, warehouseId, onPick,
   const [loading, setLoading] = useState(false)
   const debounced = useDebounce(query, 250)
   const rootRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const listRef = useRef<HTMLUListElement>(null)
+  const [box, setBox] = useState<{ top: number; left: number; width: number } | null>(null)
   const listId = useId()
+
+  /** Under the input, or above it when the viewport has no room below. */
+  const place = useCallback(() => {
+    const anchor = inputRef.current
+    if (!anchor) return
+    const rect = anchor.getBoundingClientRect()
+    const height = listRef.current?.offsetHeight ?? 0
+    const below = window.innerHeight - rect.bottom
+    const top = height > 0 && below < height + 8 && rect.top > height + 8 ? rect.top - height - 4 : rect.bottom + 4
+    setBox({ top, left: rect.left, width: rect.width })
+  }, [])
+
+  useLayoutEffect(() => {
+    if (open) place()
+  }, [open, place, rows.length, loading])
+
+  useEffect(() => {
+    if (!open) return undefined
+    const onMove = () => place()
+    window.addEventListener('resize', onMove)
+    // Capture: the shell scrolls `main`, and the line table scrolls itself.
+    window.addEventListener('scroll', onMove, true)
+    return () => {
+      window.removeEventListener('resize', onMove)
+      window.removeEventListener('scroll', onMove, true)
+    }
+  }, [open, place])
 
   useEffect(() => {
     if (!open) return undefined
@@ -55,7 +93,9 @@ export function LineItemPicker({ itemId, itemName, itemSku, warehouseId, onPick,
   useEffect(() => {
     if (!open) return undefined
     const onDoc = (e: MouseEvent) => {
-      if (rootRef.current && e.target instanceof Node && !rootRef.current.contains(e.target)) setOpen(false)
+      if (!(e.target instanceof Node)) return
+      if (rootRef.current?.contains(e.target) || listRef.current?.contains(e.target)) return
+      setOpen(false)
     }
     document.addEventListener('mousedown', onDoc)
     return () => document.removeEventListener('mousedown', onDoc)
@@ -86,6 +126,7 @@ export function LineItemPicker({ itemId, itemName, itemSku, warehouseId, onPick,
   return (
     <div className="typeahead" ref={rootRef}>
       <input
+        ref={inputRef}
         type="text"
         className="input"
         value={query}
@@ -119,32 +160,41 @@ export function LineItemPicker({ itemId, itemName, itemSku, warehouseId, onPick,
           }
         }}
       />
-      {open ? (
-        <ul className="typeahead-list" id={listId} role="listbox">
-          {rows.length === 0 ? <li className="typeahead-empty">{loading ? 'Searching…' : 'No matching items'}</li> : null}
-          {rows.map((row, i) => (
-            <li
-              key={row.item_id}
-              role="option"
-              aria-selected={i === active}
-              className={`typeahead-option${i === active ? ' active' : ''}`}
-              onMouseEnter={() => setActive(i)}
-              onMouseDown={(e) => {
-                e.preventDefault()
-                pick(row)
-              }}
+      {open && box
+        ? createPortal(
+            <ul
+              ref={listRef}
+              className="typeahead-list"
+              id={listId}
+              role="listbox"
+              style={{ position: 'fixed', top: box.top, left: box.left, width: box.width, right: 'auto' }}
             >
-              <span>{row.item_name}</span>
-              <span className="meta">
-                {[row.item_sku, row.unit_symbol].filter(Boolean).join(' · ') || '—'}
-                {row.stock ? ` · avail ${formatQty(row.stock.available)} / on hand ${formatQty(row.stock.on_hand)}${warehouseId ? '' : ' (all warehouses)'}` : ''}
-                {row.track_batch ? ' · batch' : ''}
-                {row.track_serial ? ' · serial' : ''}
-              </span>
-            </li>
-          ))}
-        </ul>
-      ) : null}
+              {rows.length === 0 ? <li className="typeahead-empty">{loading ? 'Searching…' : 'No matching items'}</li> : null}
+              {rows.map((row, i) => (
+                <li
+                  key={row.item_id}
+                  role="option"
+                  aria-selected={i === active}
+                  className={`typeahead-option${i === active ? ' active' : ''}`}
+                  onMouseEnter={() => setActive(i)}
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    pick(row)
+                  }}
+                >
+                  <span>{row.item_name}</span>
+                  <span className="meta">
+                    {[row.item_sku, row.unit_symbol].filter(Boolean).join(' · ') || '—'}
+                    {row.stock ? ` · avail ${formatQty(row.stock.available)} / on hand ${formatQty(row.stock.on_hand)}${warehouseId ? '' : ' (all warehouses)'}` : ''}
+                    {row.track_batch ? ' · batch' : ''}
+                    {row.track_serial ? ' · serial' : ''}
+                  </span>
+                </li>
+              ))}
+            </ul>,
+            document.body,
+          )
+        : null}
     </div>
   )
 }

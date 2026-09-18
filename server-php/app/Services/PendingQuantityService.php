@@ -245,7 +245,10 @@ class PendingQuantityService
     {
         $db = \Config\Database::connect();
         $b = $db->table('inv_pending_quantities p')
-            ->select('p.*, d.document_no, d.document_date, d.document_type, i.item_name, u.unit_symbol, w.warehouse_name, (p.qty_original - p.qty_settled) AS qty_open', false)
+            // expected_return_date and party_name come from the document that opened the row:
+            // a pending quantity has neither of its own, and the job-work screens need both to
+            // say who is holding the goods and whether they are late without a read per row.
+            ->select('p.*, d.document_no, d.document_date, d.document_type, d.expected_return_date, d.party_name, i.item_name, i.item_sku, u.unit_symbol, w.warehouse_name, (p.qty_original - p.qty_settled) AS qty_open', false)
             ->join('inv_documents d', 'd.document_id = p.document_id', 'left')
             ->join('inv_items i', 'i.item_id = p.item_id', 'left')
             ->join('inv_uom u', 'u.unit_id = p.unit_id', 'left')

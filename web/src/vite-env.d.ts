@@ -12,6 +12,12 @@ interface ImportMetaEnv {
   readonly VITE_GA4_SAAS_INVENTORY_MEASUREMENT_ID?: string
   /** Generic GA4 measurement ID fallback, checked when the product-specific one is unset. */
   readonly VITE_GA4_MEASUREMENT_ID?: string
+  /* Feature flags — see src/config/features.ts. Unset means on; `0`/`false`/`off` takes it out. */
+  readonly VITE_FEATURE_JOB_WORK_ASSISTANT?: string
+  readonly VITE_FEATURE_JOB_WORK_SMART_WARNINGS?: string
+  readonly VITE_FEATURE_JOB_WORK_TIMELINE?: string
+  readonly VITE_FEATURE_JOB_WORK_IMPORT?: string
+  readonly VITE_FEATURE_JOB_WORK_BARCODE_SCAN?: string
 }
 
 interface ImportMeta {

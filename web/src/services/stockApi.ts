@@ -106,17 +106,22 @@ export interface PendingRow {
   direction: 'in' | 'out'
   item_id: number
   item_name: string | null
+  item_sku: string | null
   unit_id: number | null
   unit_symbol: string | null
   warehouse_id: number | null
   warehouse_name: string | null
   party_ref: number | null
+  /** Snapshot written by the document that opened the row; the ledger is Books'. */
+  party_name: string | null
   qty_original: number
   qty_settled: number
   qty_open: number
   status: 'open' | 'partial'
   document_no: string | null
   document_date: string | null
+  /** From the document that opened the row — a pending quantity has none of its own. */
+  expected_return_date: string | null
   document_type: string
   document_type_label?: string
 }

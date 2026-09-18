@@ -6,11 +6,27 @@ import { useQuery } from '../hooks/useQuery'
 import { errorMessage } from '../services/api'
 import { documentsApi } from '../services/documentsApi'
 import { DocumentForm } from './DocumentForm'
+import { JobWorkPage } from './jobwork/JobWorkPage'
 import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS } from './actions'
 import { draftFromDocument } from './formModel'
 import { specForCode, specForSlug, UNAVAILABLE_TYPES } from './registry'
+import type { FormKind } from './registry'
 import type { DocumentStatus } from './types'
 import './documents.css'
+
+/**
+ * Job work has its own screen.
+ *
+ * The generic editor renders every native type from one spec, which is right
+ * for the twenty types whose entry is "a header and some lines". A job-work
+ * document is not one of those: it is half of a two-document workflow, and what
+ * an operator needs in front of them — what is still with the worker, how late
+ * it is, what this receipt settles — has no place in a form the other twenty
+ * types share. See documents/jobwork/JobWorkPage.
+ */
+function isJobWork(formKind: FormKind): boolean {
+  return formKind === 'job_work_in' || formKind === 'job_work_out'
+}
 
 /** `/documents/new/:slug` and `/documents/:id/edit`. */
 export function DocumentFormPage() {
@@ -93,6 +109,18 @@ export function DocumentFormPage() {
       )
     }
     const initial = draftFromDocument(doc, spec)
+    if (isJobWork(spec.formKind)) {
+      return (
+        <JobWorkPage
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          existing={doc}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
     return (
       <div className="page">
         <PageHeader title={`Edit ${spec.label.toLowerCase()} ${doc.document_no ?? `#${doc.document_id}`}`} subtitle={`Version ${doc.version} · ${STATUS_LABELS[doc.status as DocumentStatus] ?? doc.status}`} breadcrumbs={[...crumbs, { label: doc.document_no ?? `#${doc.document_id}`, to: `/documents/${doc.document_id}` }]} />
@@ -103,6 +131,9 @@ export function DocumentFormPage() {
   }
 
   const s = spec as NonNullable<typeof spec>
+  if (isJobWork(s.formKind)) {
+    return <JobWorkPage key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
   return (
     <div className="page">
       <PageHeader title={`New ${s.label.toLowerCase()}`} breadcrumbs={crumbs} />
