@@ -1,6 +1,6 @@
 import { ActiveBadge, StatusBadge, statusBadgeLabel } from '../components/StatusBadge'
-import { batchesApi, brandsApi, itemGroupsApi, locationsApi, stockCategoriesApi, uomApi, warehouseGroupsApi, warehousesApi, BATCH_STATUSES, LOCATION_TYPES, WAREHOUSE_TYPES } from '../services/masters'
-import type { Batch, Brand, ItemGroup, Location, StockCategory, Uom, Warehouse, WarehouseGroup } from '../services/masters'
+import { batchesApi, brandsApi, itemGroupsApi, locationsApi, uomApi, warehouseGroupsApi, warehousesApi, BATCH_STATUSES, LOCATION_TYPES, WAREHOUSE_TYPES } from '../services/masters'
+import type { Batch, Brand, ItemGroup, Location, Uom, Warehouse, WarehouseGroup } from '../services/masters'
 import { formatDate, formatDateTime, formatInt, formatQty, humanize } from '../utils/format'
 import { isPickedItem } from './formValues'
 import { buildTree, descendantIds } from './tree'
@@ -77,28 +77,12 @@ export const itemGroupsConfig: MasterConfig<ItemGroup> = {
   },
 }
 
-export const stockCategoriesConfig: MasterConfig<StockCategory> = {
-  slug: 'stock-categories',
-  permissionSlug: 'stock_categories',
-  title: 'Stock categories',
-  singular: 'Stock category',
-  idKey: 'stock_cat_id',
-  nameOf: (r) => r.cat_name,
-  api: stockCategoriesApi,
-  defaultSort: 'cat_name',
-  needsFormOptions: false,
-  columns: [
-    { key: 'cat_name', header: 'Category', sortKey: 'cat_name', render: (r) => <strong>{r.cat_name}</strong> },
-    { key: 'cat_alias', header: 'Alias', sortKey: 'cat_alias' },
-    activeColumn<StockCategory>(),
-    updatedAt<StockCategory>(),
-  ],
-  fields: [
-    { name: 'cat_name', label: 'Category name', type: 'text', required: true, maxLength: 255, span: 2 },
-    { name: 'cat_alias', label: 'Alias', type: 'text', maxLength: 64 },
-    { name: 'is_active', label: 'Active', type: 'checkbox' },
-  ],
-}
+/*
+ * Stock categories used to be described here. It now has a screen of its own
+ * (`pages/masters/stockCategories`) whose columns, form and export live with
+ * it — two definitions of one master's form is how a field ends up on the
+ * screen and missing from the sheet.
+ */
 
 export const brandsConfig: MasterConfig<Brand> = {
   slug: 'brands',

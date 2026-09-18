@@ -35,6 +35,8 @@ export interface StockCategory extends AuditFields {
   cat_name: string
   cat_alias: string | null
   is_active: number
+  /** Items pointing at this category — sent by the API, never counted client-side. */
+  item_count?: number
 }
 
 export interface Brand extends AuditFields {

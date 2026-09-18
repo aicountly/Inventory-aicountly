@@ -76,6 +76,11 @@ $routes->group('', ['namespace' => 'App\Controllers\Api', 'filter' => 'cors'], s
             $routes->put($slug . '/(:num)', $ctrl . '::update/$1');
             $routes->delete($slug . '/(:num)', $ctrl . '::delete/$1');
         }
+        // Stock categories: the figures above the list and the list's bulk
+        // status action. Registered after the loop — neither path can be read
+        // as an id by the `(:num)` routes it declared.
+        $routes->get('stock-categories/summary', 'StockCategoriesController::summary');
+        $routes->post('stock-categories/bulk-status', 'StockCategoriesController::bulkStatus');
         $routes->post('serials/bulk', 'SerialsController::bulkCreate');
         $routes->post('bill-of-materials/(:num)/explode', 'BomController::explode/$1');
         $routes->get('items/form-options', 'ItemsController::formOptions');

@@ -12,6 +12,13 @@ interface ImportMetaEnv {
   readonly VITE_GA4_SAAS_INVENTORY_MEASUREMENT_ID?: string
   /** Generic GA4 measurement ID fallback, checked when the product-specific one is unset. */
   readonly VITE_GA4_MEASUREMENT_ID?: string
+  /**
+   * Inventory API path of the Aicountly AI category-analysis endpoint, e.g.
+   * `v1/ai/stock-categories/analyse`. Unset (the default) means no AI service
+   * is connected and the Stock categories panel says so instead of showing
+   * anything that looks like analysis.
+   */
+  readonly VITE_AI_CATEGORY_ANALYSIS_PATH?: string
 }
 
 interface ImportMeta {

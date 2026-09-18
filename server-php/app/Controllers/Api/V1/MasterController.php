@@ -60,8 +60,21 @@ abstract class MasterController extends BaseController
         }
         $this->applyIndexFilters($b);
         $total = (clone $b)->countAllResults(false);
-        $sort = in_array($p['sort'], array_merge([$this->nameColumn, $this->pk, 'created_at', 'updated_at'], $this->columns), true) ? $p['sort'] : $this->nameColumn;
-        $rows = $b->orderBy($sort, $p['order'])->limit($p['limit'], $p['offset'])->get()->getResultArray();
+        /*
+         * A derived column can be sorted on, but only by the subclass that knows
+         * how it is derived. Everything else falls through to the column list, so
+         * `?sort=` still cannot name a column this table does not have.
+         */
+        $expression = $this->sortExpression($cmpId, (string) $p['sort']);
+        if ($expression !== null) {
+            // Two rows with the same derived value must not swap places between
+            // pages, so the name breaks the tie.
+            $b->orderBy($expression . ' ' . $p['order'], '', false)->orderBy($this->nameColumn, 'ASC');
+        } else {
+            $sort = in_array($p['sort'], array_merge([$this->nameColumn, $this->pk, 'created_at', 'updated_at'], $this->columns), true) ? $p['sort'] : $this->nameColumn;
+            $b->orderBy($sort, $p['order']);
+        }
+        $rows = $b->limit($p['limit'], $p['offset'])->get()->getResultArray();
 
         return $this->respondList($this->decorateRows($cmpId, array_map([$this, 'present'], $rows)), $total, $p['limit'], $p['offset']);
     }
@@ -215,6 +228,21 @@ abstract class MasterController extends BaseController
 
     protected function applyIndexFilters($builder): void
     {
+    }
+
+    /**
+     * A raw ORDER BY expression for a sort key this table has no column for —
+     * `item_count` and its like, which `decorateRows()` computes after the page
+     * has already been chosen.
+     *
+     * Sorting such a column on the client would order the page, not the result,
+     * and "most items" that only ranks the fifty rows already fetched is a lie
+     * the footer contradicts. Returning null (the default) leaves the base
+     * column allow-list in charge, so no subclass gains a sort by accident.
+     */
+    protected function sortExpression(int $cmpId, string $sort): ?string
+    {
+        return null;
     }
 
     /** @return array<string, mixed>|null */
