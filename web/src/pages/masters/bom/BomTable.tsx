@@ -36,9 +36,9 @@ import { bomCode, bomHealth, bomStatus, yieldLabel } from './bomPresentation'
  * a row of actions gated on what the profile may do.
  *
  * The table stays deliberately narrow — code, name, finished item, components,
- * yield, status, updated, actions. Cost, wastage, effective dates and version
- * history live in the detail drawer: a reader scanning forty bills is looking
- * for one of them, not reading all forty.
+ * yield, status, updated, actions. Cost, scrap and the full line list live in
+ * the detail drawer: a reader scanning forty bills is looking for one of them,
+ * not reading all forty.
  */
 
 export interface BomRowActions {
