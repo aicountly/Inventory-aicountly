@@ -4,7 +4,10 @@ import { Notice } from '../components/Notice'
 import { errorMessage, isAbortError } from '../services/api'
 import { lookupApi } from '../services/lookupApi'
 import type { SerialRow } from '../services/lookupApi'
+import { Button } from '../ui/Button'
+import { cx } from '../ui/cx'
 import type { LineSerial } from './types'
+import type { WarehouseSelectVariant } from './WarehouseSelect'
 
 interface SerialPickerProps {
   itemId: number
@@ -18,13 +21,15 @@ interface SerialPickerProps {
   /** Base quantity of the line, to show n / required. */
   requiredCount: number
   disabled?: boolean
+  /** `legacy` keeps the hand-styled trigger; `field` draws the Books-language one. */
+  variant?: WarehouseSelectVariant
 }
 
 /**
  * Serial numbers for a line. Issues pick from `in_stock` serials at the warehouse; receipts
  * pick registered `expected` serials or register new ones through `POST /v1/serials/bulk`.
  */
-export function SerialPicker({ itemId, itemName, warehouseId, batchId, direction, value, onChange, requiredCount, disabled }: SerialPickerProps) {
+export function SerialPicker({ itemId, itemName, warehouseId, batchId, direction, value, onChange, requiredCount, disabled, variant = 'legacy' }: SerialPickerProps) {
   const [open, setOpen] = useState(false)
   const [rows, setRows] = useState<SerialRow[]>([])
   const [loading, setLoading] = useState(false)
@@ -97,10 +102,23 @@ export function SerialPicker({ itemId, itemName, warehouseId, batchId, direction
 
   return (
     <>
-      <button type="button" className={`btn btn-sm${mismatch ? ' btn-danger' : ''}`} onClick={() => setOpen(true)} disabled={disabled}>
-        Serials {value.length}
-        {requiredCount > 0 ? ` / ${requiredCount}` : ''}
-      </button>
+      {variant === 'field' ? (
+        <Button
+          size="xs"
+          variant={mismatch ? 'danger' : 'secondary'}
+          onClick={() => setOpen(true)}
+          disabled={disabled}
+          className={cx('w-full justify-center', mismatch && 'font-semibold')}
+        >
+          {value.length}
+          {requiredCount > 0 ? ` / ${requiredCount}` : ''} serial{value.length === 1 ? '' : 's'}
+        </Button>
+      ) : (
+        <button type="button" className={`btn btn-sm${mismatch ? ' btn-danger' : ''}`} onClick={() => setOpen(true)} disabled={disabled}>
+          Serials {value.length}
+          {requiredCount > 0 ? ` / ${requiredCount}` : ''}
+        </button>
+      )}
       <Modal open={open} title={`Serial numbers · ${itemName}`} onClose={() => setOpen(false)} size="lg" busy={registering} footer={
         <>
           <button type="button" className="btn" onClick={() => setOpen(false)}>

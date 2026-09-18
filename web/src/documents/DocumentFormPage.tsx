@@ -5,8 +5,10 @@ import { PageHeader } from '../components/PageHeader'
 import { useQuery } from '../hooks/useQuery'
 import { errorMessage } from '../services/api'
 import { documentsApi } from '../services/documentsApi'
+import { StatusBadge } from '../ui/StatusBadge'
+import { AssemblyPage } from './assembly/AssemblyPage'
 import { DocumentForm } from './DocumentForm'
-import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS } from './actions'
+import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS, statusTone } from './actions'
 import { draftFromDocument } from './formModel'
 import { specForCode, specForSlug, UNAVAILABLE_TYPES } from './registry'
 import type { DocumentStatus } from './types'
@@ -93,6 +95,20 @@ export function DocumentFormPage() {
       )
     }
     const initial = draftFromDocument(doc, spec)
+    // The assembly editor brings its own masthead, breadcrumb and sticky action bar, so it
+    // replaces the generic form rather than being wrapped in it.
+    if (spec.formKind === 'assembly') {
+      return (
+        <AssemblyPage
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          statusBadge={<StatusBadge value={doc.status} tone={statusTone(doc.status)} label={STATUS_LABELS[doc.status as DocumentStatus] ?? doc.status} dot />}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
     return (
       <div className="page">
         <PageHeader title={`Edit ${spec.label.toLowerCase()} ${doc.document_no ?? `#${doc.document_id}`}`} subtitle={`Version ${doc.version} · ${STATUS_LABELS[doc.status as DocumentStatus] ?? doc.status}`} breadcrumbs={[...crumbs, { label: doc.document_no ?? `#${doc.document_id}`, to: `/documents/${doc.document_id}` }]} />
@@ -103,6 +119,9 @@ export function DocumentFormPage() {
   }
 
   const s = spec as NonNullable<typeof spec>
+  if (s.formKind === 'assembly') {
+    return <AssemblyPage key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
   return (
     <div className="page">
       <PageHeader title={`New ${s.label.toLowerCase()}`} breadcrumbs={crumbs} />

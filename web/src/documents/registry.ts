@@ -13,6 +13,7 @@ export type FormKind =
   | 'transfer'
   | 'physical_count'
   | 'production'
+  | 'assembly'
   | 'job_work_out'
   | 'job_work_in'
   | 'packing'
@@ -87,7 +88,12 @@ export const NATIVE_DOCUMENT_TYPES: DocumentTypeSpec[] = [
   spec({ code: 'MATERIAL_ISSUE', label: 'Material Issue', description: 'Issue material out of stores (COGS).', lineMode: 'fixed_out', formKind: 'lines', valuation: true, cogs: true, reason: true }),
   spec({ code: 'MATERIAL_RECEIPT', label: 'Material Receipt', description: 'Receive material into stores at a cost.', lineMode: 'fixed_in', formKind: 'lines', valuation: true, cogs: false, rate: true }),
   spec({ code: 'PRODUCTION', label: 'Production', description: 'Consume components from a bill of materials and receive finished goods.', lineMode: 'by_line', formKind: 'production', valuation: true, cogs: true, valuationRate: true }),
-  spec({ code: 'ASSEMBLY', label: 'Assembly', description: 'Assemble a kit: components out, assembled item in.', lineMode: 'by_line', formKind: 'lines', valuation: true, cogs: false, valuationRate: true }),
+  // formKind 'assembly' rather than 'lines': the type is a by_line document like any other, but
+  // the two halves of it answer different questions — what is consumed, and what is built — and a
+  // single flat line table with an in/out column asks the user to hold that split in their head.
+  // The dedicated editor keeps exactly this spec (by_line, valued, no COGS, valuation rate on the
+  // finished line); only the screen differs. Disassembly deliberately stays on 'lines'.
+  spec({ code: 'ASSEMBLY', label: 'Assembly', description: 'Assemble a kit: consume components and create finished item.', lineMode: 'by_line', formKind: 'assembly', valuation: true, cogs: false, valuationRate: true }),
   spec({ code: 'DISASSEMBLY', label: 'Disassembly', description: 'Break a kit back into its components.', lineMode: 'by_line', formKind: 'lines', valuation: true, cogs: false, valuationRate: true }),
   // rate: the challan value of the goods sent. Not a valuation — the stock never leaves
   // ownership, so nothing is costed here — but Table 4 of ITC-04 declares the value each challan
