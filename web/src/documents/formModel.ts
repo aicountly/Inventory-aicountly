@@ -33,6 +33,11 @@ export interface LineDraft {
   from_warehouse_id: number | null
   batch_id: number | null
   batch_no: string | null
+  /**
+   * Expiry of the selected batch, for the "this batch expired" warning. UI only:
+   * `lineToPayload` never sends it — the server reads the batch itself.
+   */
+  batch_expiry?: string | null
   direction: 'in' | 'out' | null
   qty: string
   rate: string

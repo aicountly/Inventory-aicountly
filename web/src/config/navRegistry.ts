@@ -33,6 +33,10 @@ import {
   Warehouse,
   Workflow,
   Boxes as BoxesIcon,
+  ClipboardCheck,
+  PackageMinus,
+  PackagePlus,
+  Truck,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { MASTER_PERMISSION_SLUGS, P } from '../services/access'
@@ -102,6 +106,40 @@ const REPORT_SLUGS = [
 ] as const
 
 export const REPORT_READ_PERMISSIONS: readonly string[] = REPORT_SLUGS.map((s) => P.report(s))
+
+/**
+ * Document types offered directly in the Documents mega-menu.
+ *
+ * Kept as data beside the rest of the nav rather than derived from
+ * NATIVE_DOCUMENT_TYPES: all twenty-one in one flyout column is a list nobody
+ * scans, and which handful belongs on the rail is an editorial decision, not a
+ * property of the registry. `documents.<slug>.create` is the key the server
+ * checks (PermissionRegistry::documentPermission), with `documents.create` as
+ * the blanket grant.
+ */
+const entryShortcut = (label: string, slug: string, description: string, icon: LucideIcon): NavLeaf => ({
+  label,
+  path: `/documents/new/${slug}`,
+  description,
+  icon,
+  permissions: [`documents.${slug}.create`, 'documents.create'],
+})
+
+const ENTRY_SHORTCUTS: readonly NavLeaf[] = [
+  entryShortcut('Stock Journal', 'stock_journal', 'Adjust, transfer or reclassify stock with full traceability.', ArrowLeftRight),
+  entryShortcut('Material Receipt', 'material_receipt', 'Receive material into stores at a cost.', PackageCheck),
+  entryShortcut('Material Issue', 'material_issue', 'Issue material out of stores.', Package),
+  entryShortcut('Inward Challan / GRN', 'inward_challan', 'Receive goods ahead of, or against, the purchase.', ClipboardList),
+  entryShortcut('Delivery Challan', 'delivery_challan', 'Dispatch goods ahead of the invoice.', Truck),
+  entryShortcut('Stock Write-In / Excess', 'write_in', 'Bring found or excess stock in at a cost.', PackagePlus),
+  entryShortcut('Stock Write-Off', 'write_off', 'Remove damaged, expired or lost stock.', PackageMinus),
+  entryShortcut('Physical Stock Count', 'physical_adjustment', 'Book quantity versus counted quantity.', ClipboardCheck),
+  entryShortcut('Batch Adjustment', 'batch_adjustment', 'Correct batch allocations without changing value.', Layers),
+  entryShortcut('Serial Adjustment', 'serial_adjustment', 'Correct serial numbers without changing value.', Barcode),
+  entryShortcut('Consumption', 'consumption', 'Consume stock internally.', FlaskConical),
+  entryShortcut('Packing List', 'packing', 'Pack goods for a consignee.', BoxesIcon),
+  entryShortcut('Opening Stock', 'opening_stock', 'Bring stock in with its opening value.', Star),
+]
 
 /** Master screens under /masters. Items has its own top-level entry. */
 export interface MasterNavItem extends NavLeaf {
@@ -417,6 +455,14 @@ export const SIDEBAR_NAV: readonly SidebarNavItem[] = [
             description: 'Every type you can raise — receipts, issues, transfers, adjustments, production, job work.',
             icon: FilePlus2,
           },
+          /*
+           * The types entered day in, day out, one click from the rail rather
+           * than two through the hub. The hub still lists all of them (including
+           * the ones this profile cannot raise, with the reason attached); these
+           * are the shortcuts, so each is gated on its own create permission and
+           * simply disappears for a profile that does not hold it.
+           */
+          ...ENTRY_SHORTCUTS,
         ],
       },
       {

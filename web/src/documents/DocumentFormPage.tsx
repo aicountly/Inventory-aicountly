@@ -6,9 +6,11 @@ import { useQuery } from '../hooks/useQuery'
 import { errorMessage } from '../services/api'
 import { documentsApi } from '../services/documentsApi'
 import { DocumentForm } from './DocumentForm'
+import { StockJournalPage } from './stockJournal/StockJournalPage'
 import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS } from './actions'
 import { draftFromDocument } from './formModel'
 import { specForCode, specForSlug, UNAVAILABLE_TYPES } from './registry'
+import { isStockJournal } from './stockJournal/model'
 import type { DocumentStatus } from './types'
 import './documents.css'
 
@@ -93,6 +95,20 @@ export function DocumentFormPage() {
       )
     }
     const initial = draftFromDocument(doc, spec)
+    // A stock journal has its own editor; every other native type stays on the
+    // shared DocumentForm, which is the screen twenty of them were built for.
+    if (isStockJournal(spec)) {
+      return (
+        <StockJournalPage
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          existing={doc}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
     return (
       <div className="page">
         <PageHeader title={`Edit ${spec.label.toLowerCase()} ${doc.document_no ?? `#${doc.document_id}`}`} subtitle={`Version ${doc.version} · ${STATUS_LABELS[doc.status as DocumentStatus] ?? doc.status}`} breadcrumbs={[...crumbs, { label: doc.document_no ?? `#${doc.document_id}`, to: `/documents/${doc.document_id}` }]} />
@@ -103,6 +119,9 @@ export function DocumentFormPage() {
   }
 
   const s = spec as NonNullable<typeof spec>
+  if (isStockJournal(s)) {
+    return <StockJournalPage key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
   return (
     <div className="page">
       <PageHeader title={`New ${s.label.toLowerCase()}`} breadcrumbs={crumbs} />

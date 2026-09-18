@@ -12,6 +12,12 @@ interface ImportMetaEnv {
   readonly VITE_GA4_SAAS_INVENTORY_MEASUREMENT_ID?: string
   /** Generic GA4 measurement ID fallback, checked when the product-specific one is unset. */
   readonly VITE_GA4_MEASUREMENT_ID?: string
+  /**
+   * `1` when the deployment exposes the Stock Journal assistant endpoint.
+   * Unset (the default) keeps the assistant on its deterministic on-device
+   * parser instead of firing a request that would 404.
+   */
+  readonly VITE_STOCK_JOURNAL_ASSIST?: string
 }
 
 interface ImportMeta {
