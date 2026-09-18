@@ -1,55 +1,116 @@
-import { useEffect, useMemo, useState } from 'react'
-import type { ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { ArrowLeft, ArrowRight, Check, Building2, Loader2, Save, Trash2 } from 'lucide-react'
 import { useAccess } from '../../access/AccessContext'
 import { useCompany } from '../../company/CompanyContext'
+import { useScopeLabel } from '../../company/useScopeLabel'
 import { ConfirmDialog } from '../../components/ConfirmDialog'
-import { FormField } from '../../components/FormField'
 import { Notice } from '../../components/Notice'
-import { PageHeader } from '../../components/PageHeader'
+import { useBaseCurrency } from '../../hooks/useBaseCurrency'
+import { useMediaQuery } from '../../hooks/useMediaQuery'
 import { invalidateFormOptions, useFormOptions } from '../../hooks/useFormOptions'
 import { useQuery } from '../../hooks/useQuery'
+import { useUnsavedChanges } from '../../hooks/useUnsavedChanges'
+import { useKeyboardScope } from '../../keyboard/useKeyboardScope'
 import { P } from '../../services/access'
 import { errorMessage, isApiError } from '../../services/api'
-import { itemsApi, ITC_ELIGIBILITY, ITEM_TYPES, UOM_ROLES } from '../../services/items'
-import type { ItcEligibility, Item, ItemOpeningsResponse } from '../../services/items'
+import { itemsApi } from '../../services/items'
+import type { FormOptionUnit, Item, ItemOpeningsResponse } from '../../services/items'
+import { Badge } from '../../ui/Badge'
+import { Button } from '../../ui/Button'
+import { AIC, cx } from '../../ui/cx'
+import { BreadcrumbHeader } from '../../ui/shell/BreadcrumbHeader'
+import { StickyActionBar } from '../../ui/shell/StickyActionBar'
+import { PageShell } from '../../ui/shell/PageShell'
 import { useToast } from '../../ui/ToastContext'
-import { formatQty, humanize } from '../../utils/format'
-import { emptyItemForm, itemPayload, itemToForm, newOpening, newUnitLine, openingValue, openingsPayload, validateItemForm } from './itemForm'
-import type { ItemFormState, OpeningDraft, UnitLineDraft } from './itemForm'
+import { formatQty } from '../../utils/format'
+import {
+  emptyItemForm,
+  itemPayload,
+  itemToForm,
+  openingsPayload,
+  validateItemForm,
+} from './itemForm'
+import type { ItemFormState, OpeningDraft } from './itemForm'
+import { AiAssistDrawer } from './form/AiAssistDrawer'
+import { IntelligenceBanner } from './form/IntelligenceBanner'
+import { ItemClassificationSection } from './form/ItemClassificationSection'
+import { ItemFormStepper } from './form/ItemFormStepper'
+import { ItemIdentitySection } from './form/ItemIdentitySection'
+import { ItemOpeningStockSection } from './form/ItemOpeningStockSection'
+import { ItemUnitsSection } from './form/ItemUnitsSection'
+import { ItemStockLevelsSection, ItemValuationSection } from './form/ItemValuationSection'
+import { ItemCompletenessCard, InventoryIntelligencePanel, ItemPreviewCard } from './form/ItemSidePanels'
+import {
+  ITEM_FORM_STEPS,
+  buildSuggestions,
+  computeCompleteness,
+  deriveInsights,
+  generateSku,
+  stepOfFieldKey,
+  stepsWithErrors,
+} from './form/itemIntelligence'
+import type { StepId, Suggestion } from './form/itemIntelligence'
+import { useDuplicateCheck } from './form/useDuplicateCheck'
 
 const LIST = '/items'
-
-/**
- * What the item-level ITC attribute means, said in the words of the goods rather than of the tax.
- *
- * Inventory stores a FACT ABOUT THE ITEM — this thing is a motor vehicle, this thing is a food and
- * beverage. It makes no tax determination from it, computes no tax consequence and holds no
- * precedence rule. Books reads the attribute and resolves it against the tax category, the purchase
- * ledger and the voucher line; that is where the credit is decided and where the return is filed.
- */
-const ITC_HELP: Record<ItcEligibility, string> = {
-  inherit: 'This item says nothing. Books decides from the tax category and the purchase ledger, exactly as it does today.',
-  block: 'Mark the item as one whose input tax is ordinarily NOT recoverable — a motor vehicle, a food and beverage. Books reads this and decides; Inventory computes no tax.',
-  claim: 'Mark the item as one whose input tax is ordinarily recoverable, whatever its category suggests. Books reads this and decides; Inventory computes no tax.',
-}
 
 interface Loaded {
   item: Item
   openings: ItemOpeningsResponse
 }
 
-/** Create / edit one item: identity, classification, units, tracking, stock levels and opening stock. */
+/**
+ * `smooth`, unless the reader has asked the OS for less movement.
+ *
+ * Every jump on this page is a scroll the user asked for, so it still happens —
+ * it just happens instantly rather than gliding.
+ */
+function scrollBehavior(): ScrollBehavior {
+  if (typeof window === 'undefined' || !window.matchMedia) return 'auto'
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
+}
+
+/** The DOM id a validation key points at, so a failed save can focus the field. */
+function elementIdForError(key: string): string {
+  if (key.startsWith('unitLines.')) return `alt-unit-${key.slice('unitLines.'.length)}`
+  if (key.startsWith('openings.')) return `opening-qty-${key.slice('openings.'.length)}`
+  return key
+}
+
+/**
+ * Create / edit one item.
+ *
+ * One component for both routes, as before: `/items/new` and `/items/:id` differ
+ * by `itemId`, not by a second copy of the form. Everything the old screen
+ * submitted it still submits — identity, classification, units and conversions,
+ * valuation, the three tracking flags, the ITC attribute, stock levels and
+ * opening stock — through the same `itemPayload` / `openingsPayload`
+ * transforms and the same `itemsApi` calls. The redesign is above that line.
+ *
+ * Layout: on a wide screen every section is on the page at once with an
+ * intelligence rail beside it, and the stepper is anchor navigation. Below
+ * 1024px it becomes a wizard — one step at a time with Back / Continue — which
+ * is the only shape that fits a phone without a horizontal scrollbar.
+ */
 export function ItemFormPage() {
   const { id } = useParams()
   const itemId = id && /^\d+$/.test(id) ? Number(id) : null
+  const isEdit = itemId !== null
   const navigate = useNavigate()
   const toast = useToast()
   const { scope, fy } = useCompany()
+  const scopeLabel = useScopeLabel()
   const { can, loading: accessLoading } = useAccess()
   const canWrite = can(P.masters('items', 'write'))
   const canDelete = can(P.masters('items', 'delete'))
-  const { options, loading: optionsLoading, error: optionsError } = useFormOptions()
+  const canManageMasters = can([P.masters('item_groups', 'write'), P.masters('stock_categories', 'write'), P.masters('brands', 'write')])
+  const { options, loading: optionsLoading, error: optionsError, reload: reloadOptions } = useFormOptions()
+  const currencyCode = useBaseCurrency()
+
+  // The wizard threshold. `true` by default so a DOM without matchMedia (the
+  // test environment) renders the whole form rather than one hidden step.
+  const wideLayout = useMediaQuery('(min-width: 1024px)', true)
 
   const loaded = useQuery(
     async (signal): Promise<Loaded | null> => {
@@ -62,88 +123,262 @@ export function ItemFormPage() {
   )
 
   const [form, setForm] = useState<ItemFormState>(() => emptyItemForm())
+  const [baseline, setBaseline] = useState<ItemFormState>(() => emptyItemForm())
   const [initialised, setInitialised] = useState(false)
   const [openingsDirty, setOpeningsDirty] = useState(false)
   const [touched, setTouched] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [serverField, setServerField] = useState<string | null>(null)
   const [recostPrompt, setRecostPrompt] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleteBusy, setDeleteBusy] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [activeStep, setActiveStep] = useState<StepId>('identity')
+  const [visited, setVisited] = useState<ReadonlySet<StepId>>(() => new Set<StepId>(['identity']))
+  const [assistOpen, setAssistOpen] = useState(false)
+  const [highlighted, setHighlighted] = useState<ReadonlySet<string>>(() => new Set<string>())
+  const [duplicatesAcknowledged, setDuplicatesAcknowledged] = useState(false)
+  const [pendingBaseUnit, setPendingBaseUnit] = useState<string | null>(null)
+  const [leaveTo, setLeaveTo] = useState<(() => void) | null>(null)
 
-  // Effective FY for openings: carried-forward year when the close has run into it, else 0 (inception).
+  // A second submit while the first is in flight would create two items. The
+  // `saving` flag drives the button; this ref is what actually refuses.
+  const inFlight = useRef(false)
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   const effectiveFyId = loaded.data?.openings.effective_fy_id ?? 0
 
   useEffect(() => {
     if (itemId === null) {
       if (!initialised && options) {
-        setForm(emptyItemForm(options.default_valuation_method))
+        const next = emptyItemForm(options.default_valuation_method)
+        setForm(next)
+        setBaseline(next)
         setInitialised(true)
       }
       return
     }
     if (loaded.data && !initialised) {
-      setForm(itemToForm(loaded.data.item, loaded.data.openings.rows, loaded.data.openings.effective_fy_id))
+      const next = itemToForm(loaded.data.item, loaded.data.openings.rows, loaded.data.openings.effective_fy_id)
+      setForm(next)
+      setBaseline(next)
       setInitialised(true)
     }
   }, [itemId, loaded.data, options, initialised])
 
+  useEffect(
+    () => () => {
+      if (highlightTimer.current) clearTimeout(highlightTimer.current)
+    },
+    [],
+  )
+
+  // "Continue anyway" answers the duplicates on screen, not every duplicate the
+  // item will ever have: a new name is a new question and has to be asked again.
+  useEffect(() => {
+    setDuplicatesAcknowledged(false)
+  }, [form.item_name, form.item_sku, form.item_upc])
+
   const errors = useMemo(() => (touched ? validateItemForm(form) : {}), [form, touched])
   const readOnly = !canWrite
   const isStock = form.item_type === 'stock'
-  const set = <K extends keyof ItemFormState>(key: K, value: ItemFormState[K]) => setForm((f) => ({ ...f, [key]: value }))
-  const setOpenings = (rows: OpeningDraft[]) => {
-    setOpeningsDirty(true)
-    set('openings', rows)
-  }
+  const dirty = initialised && !saved && JSON.stringify(form) !== JSON.stringify(baseline)
 
-  const units = options?.units ?? []
+  // Held in a ref so `set` stays referentially stable across renders while
+  // still knowing which field the server last blamed.
+  const serverFieldRef = useRef<string | null>(null)
+  serverFieldRef.current = serverField
+
+  const set = useCallback(<K extends keyof ItemFormState>(key: K, value: ItemFormState[K]) => {
+    // "SKU already exists" is about the SKU that was sent, not the one being
+    // typed now — editing the blamed field retires the message with it.
+    if (serverFieldRef.current === key) {
+      setServerField(null)
+      setSaveError(null)
+    }
+    setForm((f) => ({ ...f, [key]: value }))
+  }, [])
+
+  const setOpenings = useCallback((rows: OpeningDraft[]) => {
+    setOpeningsDirty(true)
+    setForm((f) => ({ ...f, openings: rows }))
+  }, [])
+
+  const units = useMemo(() => options?.units ?? [], [options])
   const baseUnit = units.find((u) => String(u.unit_id) === form.unit_id) ?? null
-  const itemUnits = useMemo(() => {
+  const itemUnits = useMemo<FormOptionUnit[]>(() => {
     const ids = new Set<string>([form.unit_id, ...form.unitLines.map((l) => l.unit_id)].filter(Boolean))
     return units.filter((u) => ids.has(String(u.unit_id)))
   }, [units, form.unit_id, form.unitLines])
 
-  const doSave = async (recost: boolean) => {
-    setTouched(true)
-    const found = validateItemForm(form)
-    if (Object.keys(found).length > 0) {
-      setSaveError('Fix the highlighted fields.')
-      return
+  const unitLabel = useCallback(
+    (unitId: string) => {
+      const unit = units.find((u) => String(u.unit_id) === unitId)
+      return unit ? (unit.unit_symbol ?? unit.unit_name) : `unit #${unitId}`
+    },
+    [units],
+  )
+
+  // ---- intelligence -------------------------------------------------------
+
+  const { matches: duplicates, similar } = useDuplicateCheck({ form, excludeItemId: itemId, enabled: !readOnly })
+
+  const completeness = useMemo(() => computeCompleteness(form, errors), [form, errors])
+
+  const insights = useMemo(
+    () =>
+      deriveInsights(form, {
+        itemUnitIds: new Set(itemUnits.map((u) => String(u.unit_id))),
+        defaultValuationMethod: options?.default_valuation_method,
+        unitLabel,
+      }),
+    [form, itemUnits, options?.default_valuation_method, unitLabel],
+  )
+
+  const suggestions = useMemo(() => buildSuggestions(form, { options, similar }), [form, options, similar])
+
+  const hsnFromSimilar = useMemo(() => {
+    const donor = similar.find((row) => (row.hsn_sac ?? '').trim() !== '')
+    return donor ? String(donor.hsn_sac).trim().toUpperCase() : null
+  }, [similar])
+
+  const applySuggestions = useCallback((chosen: Suggestion[]) => {
+    if (chosen.length === 0) return
+    setForm((f) => {
+      const next = { ...f }
+      for (const s of chosen) {
+        // Every suggested field is a string field on the draft; the union is
+        // narrowed here rather than at the call site so the drawer stays dumb.
+        ;(next as unknown as Record<string, string>)[s.field] = s.value
+      }
+      return next
+    })
+    const fields = new Set(chosen.map((s) => s.field as string))
+    setHighlighted(fields)
+    if (highlightTimer.current) clearTimeout(highlightTimer.current)
+    highlightTimer.current = setTimeout(() => setHighlighted(new Set<string>()), 1600)
+  }, [])
+
+  const generateSkuNow = useCallback(() => {
+    setForm((f) => ({ ...f, item_sku: generateSku(f, options) }))
+    setHighlighted(new Set(['item_sku']))
+    if (highlightTimer.current) clearTimeout(highlightTimer.current)
+    highlightTimer.current = setTimeout(() => setHighlighted(new Set<string>()), 1600)
+  }, [options])
+
+  // ---- navigation ---------------------------------------------------------
+
+  const goToStep = useCallback(
+    (step: StepId) => {
+      setActiveStep(step)
+      setVisited((prev) => new Set(prev).add(step))
+      if (!wideLayout) {
+        // The wizard swaps the section out; scrolling to an anchor that has not
+        // rendered yet does nothing, so go back to the top of the form instead.
+        document.querySelector('.app-main')?.scrollTo({ top: 0, behavior: scrollBehavior() })
+        return
+      }
+      const anchor = ITEM_FORM_STEPS.find((s) => s.id === step)?.anchor
+      if (anchor) document.getElementById(anchor)?.scrollIntoView({ behavior: scrollBehavior(), block: 'start' })
+    },
+    [wideLayout],
+  )
+
+  const stepIndex = ITEM_FORM_STEPS.findIndex((s) => s.id === activeStep)
+  const isLastStep = stepIndex === ITEM_FORM_STEPS.length - 1
+
+  const erroredSteps = useMemo(() => stepsWithErrors(errors), [errors])
+  const completedSteps = useMemo(() => {
+    const done = new Set<StepId>()
+    for (const group of completeness.groups) {
+      if (group.state === 'complete') done.add(group.id)
     }
-    setSaving(true)
-    setSaveError(null)
-    setServerField(null)
-    try {
-      const body = itemPayload(form)
-      if (recost) body.valuation_method_recost = true
-      let savedId = itemId
-      if (itemId) {
-        await itemsApi.update(itemId, body)
-      } else {
-        const created = await itemsApi.create(body)
-        savedId = created.item_id
+    // A step the reader has walked past in the wizard reads as done too, as
+    // long as nothing on it is wrong — an optional step is not an unfinished one.
+    if (!wideLayout) {
+      for (const [index, step] of ITEM_FORM_STEPS.entries()) {
+        if (index < stepIndex && visited.has(step.id) && !erroredSteps.has(step.id)) done.add(step.id)
       }
-      if (savedId && isStock && (openingsDirty || itemId === null) && (form.openings.length > 0 || openingsDirty)) {
-        const fyForOpenings = itemId ? effectiveFyId : (await itemsApi.openings(savedId)).effective_fy_id
-        await itemsApi.saveOpenings(savedId, fyForOpenings, openingsPayload(form.openings))
-      }
-      invalidateFormOptions()
-      toast.success(itemId ? 'Item saved' : 'Item created')
-      navigate(LIST)
-    } catch (err) {
-      if (isApiError(err) && err.details?.requires === 'valuation_method_recost') {
-        setRecostPrompt(true)
-      } else {
-        setSaveError(errorMessage(err))
-        setServerField(isApiError(err) ? err.field : null)
-      }
-    } finally {
-      setSaving(false)
     }
-  }
+    return done
+  }, [completeness.groups, erroredSteps, stepIndex, visited, wideLayout])
+
+  // ---- save ---------------------------------------------------------------
+
+  const doSave = useCallback(
+    async (recost: boolean) => {
+      if (inFlight.current || readOnly) return
+      setTouched(true)
+      const found = validateItemForm(form)
+      if (Object.keys(found).length > 0) {
+        const firstKey = Object.keys(found)[0]
+        const step = stepOfFieldKey(firstKey)
+        if (step) {
+          setActiveStep(step)
+          setVisited((prev) => new Set(prev).add(step))
+        }
+        setSaveError('Fix the highlighted fields.')
+        // After the step has rendered, put the cursor on what is wrong.
+        setTimeout(() => {
+          const el = document.getElementById(elementIdForError(firstKey))
+          el?.scrollIntoView({ behavior: scrollBehavior(), block: 'center' })
+          el?.focus({ preventScroll: true })
+        }, 0)
+        return
+      }
+      inFlight.current = true
+      setSaving(true)
+      setSaveError(null)
+      setServerField(null)
+      try {
+        const body = itemPayload(form)
+        if (recost) body.valuation_method_recost = true
+        let savedId = itemId
+        if (itemId) {
+          await itemsApi.update(itemId, body)
+        } else {
+          const created = await itemsApi.create(body)
+          savedId = created.item_id
+        }
+        if (savedId && isStock && (openingsDirty || itemId === null) && (form.openings.length > 0 || openingsDirty)) {
+          const fyForOpenings = itemId ? effectiveFyId : (await itemsApi.openings(savedId)).effective_fy_id
+          await itemsApi.saveOpenings(savedId, fyForOpenings, openingsPayload(form.openings))
+        }
+        invalidateFormOptions()
+        // Set before navigating so the unsaved-changes guard does not fire on
+        // the way out of a form that was just saved.
+        setSaved(true)
+        toast.success(itemId ? 'Item saved' : 'Item created')
+        navigate(LIST)
+      } catch (err) {
+        if (isApiError(err) && err.details?.requires === 'valuation_method_recost') {
+          setRecostPrompt(true)
+        } else {
+          const field = isApiError(err) ? err.field : null
+          setSaveError(errorMessage(err, 'We could not save this item. Please try again.'))
+          setServerField(field)
+          const step = field ? stepOfFieldKey(field) : null
+          if (step) {
+            setActiveStep(step)
+            setVisited((prev) => new Set(prev).add(step))
+          }
+          if (field) {
+            setTimeout(() => {
+              const el = document.getElementById(elementIdForError(field))
+              el?.scrollIntoView({ behavior: scrollBehavior(), block: 'center' })
+              el?.focus({ preventScroll: true })
+            }, 0)
+          }
+        }
+      } finally {
+        inFlight.current = false
+        setSaving(false)
+      }
+    },
+    [effectiveFyId, form, isStock, itemId, navigate, openingsDirty, readOnly, toast],
+  )
 
   const remove = async () => {
     if (!itemId) return
@@ -152,6 +387,7 @@ export function ItemFormPage() {
     try {
       await itemsApi.remove(itemId)
       invalidateFormOptions()
+      setSaved(true)
       toast.success('Item deleted')
       navigate(LIST)
     } catch (err) {
@@ -161,352 +397,354 @@ export function ItemFormPage() {
     }
   }
 
+  const cancel = useCallback(() => {
+    if (dirty) {
+      setLeaveTo(() => () => navigate(LIST))
+      return
+    }
+    navigate(LIST)
+  }, [dirty, navigate])
+
+  useUnsavedChanges({
+    when: dirty,
+    onBlocked: (_to, proceed) => setLeaveTo(() => proceed),
+  })
+
+  // ---- keyboard -----------------------------------------------------------
+
+  const shortcuts = useMemo(
+    () => ({
+      'ctrl+s': (e: KeyboardEvent) => {
+        if (readOnly || saving) return
+        e.preventDefault()
+        void doSave(false)
+      },
+      escape: (e: KeyboardEvent) => {
+        if (saving) return
+        e.preventDefault()
+        cancel()
+      },
+      'alt+1': (e: KeyboardEvent) => {
+        e.preventDefault()
+        goToStep('identity')
+      },
+      'alt+2': (e: KeyboardEvent) => {
+        e.preventDefault()
+        goToStep('classification')
+      },
+      'alt+3': (e: KeyboardEvent) => {
+        e.preventDefault()
+        goToStep('units')
+      },
+      'alt+4': (e: KeyboardEvent) => {
+        e.preventDefault()
+        goToStep('valuation')
+      },
+    }),
+    [cancel, doSave, goToStep, readOnly, saving],
+  )
+
+  useKeyboardScope('form', shortcuts, { allowInInput: true })
+
+  // ---- render -------------------------------------------------------------
+
   if (!accessLoading && !can(P.masters('items', 'read'))) {
     return (
-      <div className="page">
-        <PageHeader title="Item" breadcrumbs={[{ label: 'Items', to: LIST }]} />
+      <PageShell>
+        <BreadcrumbHeader breadcrumbs={[{ label: 'Items', to: LIST }]} title="Item" escBack={false} />
         <Notice kind="warning">You do not have permission to view items in this company.</Notice>
-      </div>
+      </PageShell>
     )
   }
 
   const err = (key: string): string | undefined => errors[key] ?? (serverField === key ? (saveError ?? undefined) : undefined)
   const stock = loaded.data?.item.stock
   const onHand = stock ? Number(stock.on_hand ?? 0) : null
+  const title = isEdit ? (loaded.data?.item.item_name ?? 'Item') : 'New item'
+  const groupLabel = options?.item_groups.find((g) => String(g.item_grp_id) === form.item_grp_id)?.grp_name ?? null
+  const categoryLabel = options?.stock_categories.find((c) => String(c.stock_cat_id) === form.stock_cat_id)?.cat_name ?? null
+  const baseUnitLabel = baseUnit ? (baseUnit.unit_symbol ?? baseUnit.unit_name) : null
+  const loadingRecord = (isEdit && loaded.loading) || (!initialised && optionsLoading)
 
-  const numberField = (key: keyof ItemFormState, label: string, help?: string, step: string | number = 'any'): ReactNode => (
-    <FormField label={label} help={help} error={err(key)}>
-      <input className="input" type="number" min={0} step={step} value={String(form[key] ?? '')} disabled={readOnly} aria-invalid={err(key) ? true : undefined} onChange={(e) => set(key, e.target.value as ItemFormState[typeof key])} />
-    </FormField>
+  const showStep = (step: StepId): boolean => wideLayout || activeStep === step
+
+  const sidePanels = (
+    <>
+      <ItemCompletenessCard completeness={completeness} onSelectStep={goToStep} />
+      <InventoryIntelligencePanel insights={insights} onSelectStep={goToStep} />
+      <ItemPreviewCard
+        form={form}
+        baseUnitLabel={baseUnitLabel}
+        groupLabel={groupLabel}
+        categoryLabel={categoryLabel}
+        currencyCode={currencyCode}
+      />
+    </>
   )
 
-  const selectField = (key: keyof ItemFormState, label: string, opts: { value: string | number; label: string }[], emptyLabel = '— None —', help?: string): ReactNode => (
-    <FormField label={label} help={help} error={err(key)}>
-      <select className="select" value={String(form[key] ?? '')} disabled={readOnly} aria-invalid={err(key) ? true : undefined} onChange={(e) => set(key, e.target.value as ItemFormState[typeof key])}>
-        <option value="">{emptyLabel}</option>
-        {opts.map((o) => (
-          <option key={String(o.value)} value={String(o.value)}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-    </FormField>
-  )
-
-  const unitOpts = units.map((u) => ({ value: u.unit_id, label: `${u.unit_name}${u.unit_symbol ? ` (${u.unit_symbol})` : ''}` }))
-  const warehouseOpts = (options?.warehouses ?? []).map((w) => ({ value: w.warehouse_id, label: w.warehouse_name }))
-  const title = itemId ? (loaded.data?.item.item_name ?? 'Item') : 'New item'
+  // A phone's action bar is the one place this design system's 2rem buttons are
+  // too small to hit reliably, so the sticky bar asks for the 44px target and
+  // the header keeps the standard size.
+  const TAP = 'min-h-11 sm:min-h-0'
+  const primaryAction = (className?: string) =>
+    readOnly ? null : (
+      <Button
+        variant="primary"
+        icon={saving ? undefined : isEdit ? Save : Check}
+        loading={saving}
+        disabled={!initialised}
+        className={className}
+        onClick={() => void doSave(false)}
+      >
+        {saving ? (isEdit ? 'Saving…' : 'Creating item…') : isEdit ? 'Save item' : 'Create item'}
+      </Button>
+    )
 
   return (
-    <div className="page">
-      <PageHeader
+    <PageShell paddingBottom>
+      <BreadcrumbHeader
+        breadcrumbs={[{ label: 'Items', to: LIST }, { label: isEdit ? title : 'New item' }]}
         title={title}
-        breadcrumbs={[{ label: 'Items', to: LIST }]}
-        subtitle={
-          itemId && loaded.data ? (
-            <>
-              #{loaded.data.item.item_id}
-              {loaded.data.item.item_sku ? ` · ${loaded.data.item.item_sku}` : ''}
-              {onHand !== null ? ` · on hand ${formatQty(onHand)}${baseUnit?.unit_symbol ? ` ${baseUnit.unit_symbol}` : ''}` : ''}
-            </>
-          ) : (
-            'Items are shared by every branch of the company.'
-          )
+        escBack={false}
+        description={
+          isEdit
+            ? 'Change this item and everything that uses it follows.'
+            : 'Create an inventory item and make it available across your business.'
+        }
+        meta={
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500">
+            <Building2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            <span>{scopeLabel}</span>
+            <span aria-hidden>·</span>
+            <span>Items are shared by every branch of the company.</span>
+            {isEdit && loaded.data ? (
+              <>
+                <span aria-hidden>·</span>
+                <span>#{loaded.data.item.item_id}</span>
+                {onHand !== null ? (
+                  <>
+                    <span aria-hidden>·</span>
+                    <span>
+                      on hand {formatQty(onHand)}
+                      {baseUnitLabel ? ` ${baseUnitLabel}` : ''}
+                    </span>
+                  </>
+                ) : null}
+              </>
+            ) : null}
+            {readOnly ? <Badge tone="neutral">Read only</Badge> : null}
+          </span>
         }
         actions={
-          <>
-            {itemId && canDelete ? (
-              <button type="button" className="btn btn-danger" onClick={() => setConfirmDelete(true)} disabled={saving}>
+          <div className="hidden items-center gap-2 md:flex">
+            {isEdit && canDelete ? (
+              <Button variant="danger" icon={Trash2} onClick={() => setConfirmDelete(true)} disabled={saving}>
                 Delete
-              </button>
+              </Button>
             ) : null}
-            <button type="button" className="btn" onClick={() => navigate(LIST)} disabled={saving}>
+            <Button variant="secondary" onClick={cancel} disabled={saving}>
               {readOnly ? 'Back' : 'Cancel'}
-            </button>
-            {!readOnly ? (
-              <button type="button" className="btn btn-primary" onClick={() => doSave(false)} disabled={saving || !initialised}>
-                {saving ? 'Saving…' : itemId ? 'Save' : 'Create'}
-              </button>
-            ) : null}
-          </>
+            </Button>
+            {primaryAction()}
+          </div>
         }
       />
 
-      {optionsError ? <Notice kind="warning">{optionsError}</Notice> : null}
+      <ItemFormStepper activeId={activeStep} completed={completedSteps} errored={erroredSteps} onSelect={goToStep} wizard={!wideLayout} />
+
+      {!readOnly ? <IntelligenceBanner onAssist={() => setAssistOpen(true)} count={suggestions.length} /> : null}
+
+      {optionsError ? (
+        <Notice
+          kind="warning"
+          actions={
+            <Button variant="secondary" size="xs" onClick={reloadOptions}>
+              Retry
+            </Button>
+          }
+        >
+          {optionsError}
+        </Notice>
+      ) : null}
       {loaded.error ? <Notice kind="error">{errorMessage(loaded.error)}</Notice> : null}
       {saveError && !serverField ? <Notice kind="error">{saveError}</Notice> : null}
-      {(itemId && loaded.loading) || (!initialised && optionsLoading) ? <p className="muted">Loading…</p> : null}
-
-      <section className="form-section">
-        <h2 className="form-section-title">Identity</h2>
-        <div className="form-grid">
-          <FormField label="Item name" required error={err('item_name')} className="span-2">
-            <input className="input" value={form.item_name} maxLength={255} disabled={readOnly} aria-invalid={err('item_name') ? true : undefined} onChange={(e) => set('item_name', e.target.value)} />
-          </FormField>
-          <FormField label="Alias" error={err('item_alias')}>
-            <input className="input" value={form.item_alias} maxLength={255} disabled={readOnly} onChange={(e) => set('item_alias', e.target.value)} />
-          </FormField>
-          <FormField label="Print name" help="Defaults to the item name." error={err('print_name')}>
-            <input className="input" value={form.print_name} maxLength={255} disabled={readOnly} onChange={(e) => set('print_name', e.target.value)} />
-          </FormField>
-          <FormField label="Type" required error={err('item_type')}>
-            <select className="select" value={form.item_type} disabled={readOnly} onChange={(e) => set('item_type', e.target.value)}>
-              {ITEM_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {humanize(t)}
-                </option>
-              ))}
-            </select>
-          </FormField>
-          <FormField label="SKU" help="Unique within the company." error={err('item_sku')}>
-            <input className="input" value={form.item_sku} maxLength={64} disabled={readOnly} aria-invalid={err('item_sku') ? true : undefined} onChange={(e) => set('item_sku', e.target.value)} />
-          </FormField>
-          <FormField label="Barcode / EAN / UPC" error={err('item_upc')}>
-            <input className="input" value={form.item_upc} maxLength={64} disabled={readOnly} onChange={(e) => set('item_upc', e.target.value)} />
-          </FormField>
-          <FormField label="HSN / SAC" help="4 to 8 characters." error={err('hsn_sac')}>
-            <input className="input" value={form.hsn_sac} maxLength={8} disabled={readOnly} aria-invalid={err('hsn_sac') ? true : undefined} onChange={(e) => set('hsn_sac', e.target.value)} />
-          </FormField>
-          {numberField('mrp', 'MRP')}
-          <div className="field" style={{ justifyContent: 'flex-end' }}>
-            <label className="checkbox">
-              <input type="checkbox" checked={form.is_active} disabled={readOnly} onChange={(e) => set('is_active', e.target.checked)} />
-              Active
-            </label>
-          </div>
-        </div>
-      </section>
-
-      <section className="form-section">
-        <h2 className="form-section-title">Classification</h2>
-        <div className="form-grid">
-          {selectField('item_grp_id', 'Item group', (options?.item_groups ?? []).map((g) => ({ value: g.item_grp_id, label: g.grp_name })))}
-          {selectField('stock_cat_id', 'Stock category', (options?.stock_categories ?? []).map((c) => ({ value: c.stock_cat_id, label: c.cat_name })))}
-          {selectField('brand_id', 'Brand', (options?.brands ?? []).map((b) => ({ value: b.brand_id, label: b.brand_name })))}
-        </div>
-      </section>
-
-      <section className="form-section">
-        <h2 className="form-section-title">Units</h2>
-        <p className="form-section-subtitle">Stock is kept in the base unit. Alternate units convert to it: enter how many base units make one of the alternate (Box = 12 Pcs → 12).</p>
-        <div className="form-grid">
-          <FormField label="Base unit" required error={err('unit_id')}>
-            <select className="select" value={form.unit_id} disabled={readOnly} aria-invalid={err('unit_id') ? true : undefined} onChange={(e) => set('unit_id', e.target.value)}>
-              <option value="">Select…</option>
-              {unitOpts.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </FormField>
-          {selectField('purchase_unit_id', 'Purchase unit', unitOpts, 'Base unit')}
-          {selectField('sales_unit_id', 'Sales unit', unitOpts, 'Base unit')}
-        </div>
-        <div className="table-wrap">
-          <table className="table lines-table">
-            <thead>
-              <tr>
-                <th>Alternate unit</th>
-                <th className="align-right">1 unit =</th>
-                <th>Base unit</th>
-                <th>Role</th>
-                {!readOnly ? <th aria-label="Actions" /> : null}
-              </tr>
-            </thead>
-            <tbody>
-              {form.unitLines.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="table-state">
-                    No alternate units.
-                  </td>
-                </tr>
-              ) : null}
-              {form.unitLines.map((l) => (
-                <UnitLineRow
-                  key={l.key}
-                  line={l}
-                  error={err(`unitLines.${l.key}`)}
-                  baseSymbol={baseUnit?.unit_symbol ?? baseUnit?.unit_name ?? 'base'}
-                  units={unitOpts.filter((o) => String(o.value) !== form.unit_id)}
-                  readOnly={readOnly}
-                  onChange={(patch) => set('unitLines', form.unitLines.map((x) => (x.key === l.key ? { ...x, ...patch } : x)))}
-                  onRemove={() => set('unitLines', form.unitLines.filter((x) => x.key !== l.key))}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {!readOnly ? (
-          <div className="form-actions" style={{ justifyContent: 'flex-start' }}>
-            <button type="button" className="btn btn-sm" onClick={() => set('unitLines', [...form.unitLines, newUnitLine()])} disabled={!form.unit_id}>
-              Add alternate unit
-            </button>
-          </div>
-        ) : null}
-      </section>
-
-      <section className="form-section">
-        <h2 className="form-section-title">Valuation and tracking</h2>
-        <div className="form-grid">
-          <FormField label="Valuation method" help={itemId ? 'Changing it on an item with movements re-costs its history.' : undefined} error={err('valuation_method')}>
-            <select className="select" value={form.valuation_method} disabled={readOnly} onChange={(e) => set('valuation_method', e.target.value)}>
-              {(options?.valuation_methods ?? ['FIFO', 'LIFO', 'WAC']).map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
-          </FormField>
-          {numberField('standard_cost', 'Standard cost')}
-          {selectField('negative_stock_policy', 'Negative stock', (options?.negative_stock_policies ?? ['allow', 'warn', 'block']).map((p) => ({ value: p, label: humanize(p) })), 'Company policy')}
-          <div className="field" style={{ justifyContent: 'flex-end', gap: '0.5rem' }}>
-            <label className="checkbox">
-              <input type="checkbox" checked={form.track_batch} disabled={readOnly} onChange={(e) => set('track_batch', e.target.checked)} />
-              Track batches
-            </label>
-            <label className="checkbox">
-              <input type="checkbox" checked={form.track_serial} disabled={readOnly} onChange={(e) => set('track_serial', e.target.checked)} />
-              Track serial numbers
-            </label>
-            <label className="checkbox">
-              <input type="checkbox" checked={form.track_expiry} disabled={readOnly} onChange={(e) => set('track_expiry', e.target.checked)} />
-              Track expiry
-            </label>
-          </div>
-          {numberField('shelf_life_days', 'Shelf life (days)', 'Fills a batch expiry from its manufacturing date.', 1)}
-        </div>
-      </section>
-
-      <section className="form-section">
-        <h2 className="form-section-title">Tax attribute</h2>
-        <p className="form-section-subtitle">
-          A fact about the goods that travels with the item. Inventory records it and reports it to Smart Books; it makes no tax determination here, computes nothing from it, and
-          has no rule about which setting wins. Books reads it alongside the tax category, the purchase ledger and the voucher line, and decides the credit there.
+      {loadingRecord ? (
+        <p className="flex items-center gap-2 text-sm text-gray-500">
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+          Loading…
         </p>
-        <div className="form-grid">
-          <FormField label="Input tax credit" help={ITC_HELP[form.itc_eligibility]}>
-            <select className="select" value={form.itc_eligibility} disabled={readOnly} onChange={(e) => set('itc_eligibility', e.target.value as ItcEligibility)}>
-              {(options?.itc_eligibility_options ?? ITC_ELIGIBILITY).map((v) => (
-                <option key={v} value={v}>
-                  {v === 'inherit' ? 'Inherit — let Books decide' : v === 'claim' ? 'Claim — ordinarily recoverable' : 'Block — ordinarily not recoverable'}
-                </option>
-              ))}
-            </select>
-          </FormField>
-        </div>
-      </section>
-
-      {isStock ? (
-        <section className="form-section">
-          <h2 className="form-section-title">Stock levels</h2>
-          <div className="form-grid">
-            {numberField('min_stock_qty', 'Minimum')}
-            {numberField('max_stock_qty', 'Maximum')}
-            {numberField('reorder_point_qty', 'Reorder point')}
-            {numberField('reorder_qty', 'Reorder quantity')}
-            {numberField('safety_stock_qty', 'Safety stock')}
-            {numberField('lead_time_days', 'Lead time (days)', undefined, 1)}
-            {selectField('default_warehouse_id', 'Default warehouse', warehouseOpts)}
-          </div>
-        </section>
       ) : null}
 
-      {isStock ? (
-        <section className="form-section">
-          <h2 className="form-section-title">Opening stock</h2>
-          <p className="form-section-subtitle">
-            {effectiveFyId > 0
-              ? `Carried-forward opening for ${fy?.label ?? `FY #${effectiveFyId}`}: the year-end close has run into this year, so it opens only on these rows.`
-              : 'Inception opening: applies to every financial year the year-end close has not run into.'}
-            {' '}One row per warehouse; leave the warehouse empty for a company-level opening.
-          </p>
-          <div className="table-wrap">
-            <table className="table lines-table">
-              <thead>
-                <tr>
-                  <th>Warehouse</th>
-                  <th>Unit</th>
-                  <th className="align-right">Quantity</th>
-                  <th className="align-right">Rate</th>
-                  <th className="align-right">Value</th>
-                  {!readOnly ? <th aria-label="Actions" /> : null}
-                </tr>
-              </thead>
-              <tbody>
-                {form.openings.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="table-state">
-                      No opening stock.
-                    </td>
-                  </tr>
-                ) : null}
-                {form.openings.map((o) => (
-                  <tr key={o.key} style={err(`openings.${o.key}`) ? { background: 'var(--danger-bg)' } : undefined} title={err(`openings.${o.key}`)}>
-                    <td>
-                      <select className="select" value={o.warehouse_id} disabled={readOnly} aria-label="Warehouse" onChange={(e) => setOpenings(form.openings.map((x) => (x.key === o.key ? { ...x, warehouse_id: e.target.value } : x)))}>
-                        <option value="">Company level</option>
-                        {warehouseOpts.map((w) => (
-                          <option key={w.value} value={w.value}>
-                            {w.label}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td>
-                      <select className="select" value={o.unit_id} disabled={readOnly} aria-label="Unit" onChange={(e) => setOpenings(form.openings.map((x) => (x.key === o.key ? { ...x, unit_id: e.target.value } : x)))}>
-                        <option value="">Select…</option>
-                        {itemUnits.map((u) => (
-                          <option key={u.unit_id} value={u.unit_id}>
-                            {u.unit_symbol ?? u.unit_name}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="narrow">
-                      <input className="input text-right" type="number" step="any" value={o.opening_qty} disabled={readOnly} aria-label="Opening quantity" onChange={(e) => setOpenings(form.openings.map((x) => (x.key === o.key ? { ...x, opening_qty: e.target.value } : x)))} />
-                    </td>
-                    <td className="narrow">
-                      <input className="input text-right" type="number" min={0} step="any" value={o.opening_valuation_rate} disabled={readOnly} aria-label="Opening rate" onChange={(e) => setOpenings(form.openings.map((x) => (x.key === o.key ? { ...x, opening_valuation_rate: e.target.value } : x)))} />
-                    </td>
-                    <td className="align-right nowrap">{formatQty(openingValue(o.opening_qty, o.opening_valuation_rate), '0')}</td>
-                    {!readOnly ? (
-                      <td className="action">
-                        <button type="button" className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} onClick={() => setOpenings(form.openings.filter((x) => x.key !== o.key))} aria-label="Remove opening row">
-                          Remove
-                        </button>
-                      </td>
-                    ) : null}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {!readOnly ? (
-            <div className="form-actions" style={{ justifyContent: 'flex-start' }}>
-              <button type="button" className="btn btn-sm" onClick={() => setOpenings([...form.openings, newOpening(form.unit_id)])} disabled={!form.unit_id}>
-                Add opening row
-              </button>
-              {form.openings.length > 0 ? (
-                <span className="muted" style={{ fontSize: '0.8125rem' }}>
-                  Total value {formatQty(form.openings.reduce((sum, o) => sum + openingValue(o.opening_qty, o.opening_valuation_rate), 0), '0')}
-                </span>
-              ) : null}
-            </div>
+      <div className={cx(AIC, 'grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]')}>
+        <div className="flex min-w-0 flex-col gap-4">
+          {showStep('identity') ? (
+            <ItemIdentitySection
+              form={form}
+              set={set}
+              err={err}
+              readOnly={readOnly}
+              highlighted={highlighted}
+              onAssist={() => setAssistOpen(true)}
+              onGenerateSku={generateSkuNow}
+              hsnFromSimilar={hsnFromSimilar}
+              duplicates={duplicates}
+              duplicatesAcknowledged={duplicatesAcknowledged}
+              onAcknowledgeDuplicates={() => setDuplicatesAcknowledged(true)}
+              currencyCode={currencyCode}
+            />
           ) : null}
-        </section>
-      ) : null}
 
-      {!readOnly ? (
-        <div className="form-actions">
-          <button type="button" className="btn" onClick={() => navigate(LIST)} disabled={saving}>
-            Cancel
-          </button>
-          <button type="button" className="btn btn-primary" onClick={() => doSave(false)} disabled={saving || !initialised}>
-            {saving ? 'Saving…' : itemId ? 'Save' : 'Create'}
-          </button>
+          {showStep('classification') ? (
+            <ItemClassificationSection
+              form={form}
+              set={set}
+              err={err}
+              readOnly={readOnly}
+              highlighted={highlighted}
+              options={options}
+              optionsLoading={optionsLoading}
+              optionsError={optionsError}
+              onRetryOptions={reloadOptions}
+              canManageMasters={canManageMasters}
+            />
+          ) : null}
+
+          {showStep('units') ? (
+            <ItemUnitsSection
+              form={form}
+              set={set}
+              err={err}
+              readOnly={readOnly}
+              options={options}
+              optionsLoading={optionsLoading}
+              optionsError={optionsError}
+              onRetryOptions={reloadOptions}
+              onChangeBaseUnit={(next) => {
+                // Conversions are stated against the base unit, and the opening
+                // rows are entered in it. Swapping it under them silently would
+                // change what every one of those numbers means.
+                if (next !== form.unit_id && form.unit_id !== '' && (form.unitLines.length > 0 || form.openings.length > 0)) {
+                  setPendingBaseUnit(next)
+                  return
+                }
+                set('unit_id', next)
+              }}
+            />
+          ) : null}
+
+          {showStep('valuation') ? (
+            <>
+              <ItemValuationSection form={form} set={set} err={err} readOnly={readOnly} options={options} currencyCode={currencyCode} isEdit={isEdit} />
+              {isStock ? (
+                <ItemStockLevelsSection
+                  form={form}
+                  set={set}
+                  err={err}
+                  readOnly={readOnly}
+                  options={options}
+                  optionsLoading={optionsLoading}
+                  optionsError={optionsError}
+                  onRetryOptions={reloadOptions}
+                />
+              ) : null}
+              {isStock ? (
+                <ItemOpeningStockSection
+                  form={form}
+                  err={err}
+                  readOnly={readOnly}
+                  options={options}
+                  itemUnits={itemUnits}
+                  effectiveFyId={effectiveFyId}
+                  fyLabel={fy?.label ?? null}
+                  onChange={setOpenings}
+                  currencyCode={currencyCode}
+                />
+              ) : null}
+            </>
+          ) : null}
         </div>
-      ) : null}
+
+        <aside className={cx(AIC, 'grid grid-cols-1 gap-3 sm:grid-cols-2 xl:sticky xl:top-4 xl:grid-cols-1')}>{sidePanels}</aside>
+      </div>
+
+      <StickyActionBar
+        status={
+          <span className="text-xs text-gray-500">
+            {saving ? 'Saving…' : dirty ? 'Unsaved changes' : readOnly ? 'Read only' : 'No changes yet'}
+          </span>
+        }
+      >
+        {wideLayout ? (
+          <>
+            <Button variant="secondary" className={TAP} onClick={cancel} disabled={saving}>
+              {readOnly ? 'Back' : 'Cancel'}
+            </Button>
+            {primaryAction(TAP)}
+          </>
+        ) : (
+          <>
+            <Button
+              variant="secondary"
+              icon={ArrowLeft}
+              className={TAP}
+              onClick={() => (stepIndex === 0 ? cancel() : goToStep(ITEM_FORM_STEPS[stepIndex - 1].id))}
+              disabled={saving}
+            >
+              {stepIndex === 0 ? 'Cancel' : 'Back'}
+            </Button>
+            {isLastStep ? (
+              primaryAction(TAP)
+            ) : (
+              <Button variant="primary" className={TAP} iconRight={ArrowRight} onClick={() => goToStep(ITEM_FORM_STEPS[stepIndex + 1].id)}>
+                Continue
+              </Button>
+            )}
+          </>
+        )}
+      </StickyActionBar>
+
+      <AiAssistDrawer
+        open={assistOpen}
+        onClose={() => setAssistOpen(false)}
+        suggestions={suggestions}
+        onApply={applySuggestions}
+        disabled={readOnly}
+      />
+
+      <ConfirmDialog
+        open={pendingBaseUnit !== null}
+        title="Change the base unit?"
+        message={
+          <>
+            Every alternate-unit conversion and every opening row on this item is stated in{' '}
+            <strong>{baseUnitLabel ?? 'the current base unit'}</strong>. Changing the base unit does not convert them — check each
+            figure afterwards.
+          </>
+        }
+        confirmLabel="Change base unit"
+        onConfirm={() => {
+          if (pendingBaseUnit !== null) set('unit_id', pendingBaseUnit)
+          setPendingBaseUnit(null)
+        }}
+        onCancel={() => setPendingBaseUnit(null)}
+      />
+
+      <ConfirmDialog
+        open={leaveTo !== null}
+        title="Discard unsaved changes?"
+        message="This item has changes that have not been saved. Leaving now loses them."
+        confirmLabel="Discard changes"
+        danger
+        onConfirm={() => {
+          const proceed = leaveTo
+          setLeaveTo(null)
+          setSaved(true)
+          // After the guard has been told to stand down, or the click listener
+          // catches the replayed navigation again.
+          setTimeout(() => proceed?.(), 0)
+        }}
+        onCancel={() => setLeaveTo(null)}
+      />
 
       <ConfirmDialog
         open={recostPrompt}
@@ -526,7 +764,8 @@ export function ItemFormPage() {
         title="Delete item?"
         message={
           <>
-            <strong>{form.item_name}</strong> will be removed from every list and dropdown. Items used on documents or bills of materials cannot be deleted — deactivate them instead.
+            <strong>{form.item_name}</strong> will be removed from every list and dropdown. Items used on documents or bills of
+            materials cannot be deleted — deactivate them instead.
           </>
         }
         confirmLabel="Delete"
@@ -536,54 +775,8 @@ export function ItemFormPage() {
         onConfirm={remove}
         onCancel={() => !deleteBusy && setConfirmDelete(false)}
       />
-    </div>
+    </PageShell>
   )
 }
 
-interface UnitLineRowProps {
-  line: UnitLineDraft
-  error?: string
-  baseSymbol: string
-  units: { value: string | number; label: string }[]
-  readOnly: boolean
-  onChange: (patch: Partial<UnitLineDraft>) => void
-  onRemove: () => void
-}
-
-function UnitLineRow({ line, error, baseSymbol, units, readOnly, onChange, onRemove }: UnitLineRowProps) {
-  return (
-    <tr style={error ? { background: 'var(--danger-bg)' } : undefined} title={error}>
-      <td>
-        <select className="select" value={line.unit_id} disabled={readOnly} aria-label="Alternate unit" aria-invalid={error ? true : undefined} onChange={(e) => onChange({ unit_id: e.target.value })}>
-          <option value="">Select…</option>
-          {units.map((u) => (
-            <option key={String(u.value)} value={String(u.value)}>
-              {u.label}
-            </option>
-          ))}
-        </select>
-      </td>
-      <td className="narrow">
-        <input className="input text-right" type="number" min={0} step="any" value={line.conversion_factor} disabled={readOnly} aria-label="Conversion factor" onChange={(e) => onChange({ conversion_factor: e.target.value })} />
-      </td>
-      <td>{baseSymbol}</td>
-      <td>
-        <select className="select" value={line.uom_role} disabled={readOnly} aria-label="Unit role" onChange={(e) => onChange({ uom_role: e.target.value })}>
-          <option value="">— None —</option>
-          {UOM_ROLES.filter((r) => r !== 'base').map((r) => (
-            <option key={r} value={r}>
-              {humanize(r)}
-            </option>
-          ))}
-        </select>
-      </td>
-      {!readOnly ? (
-        <td className="action">
-          <button type="button" className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} onClick={onRemove} aria-label="Remove unit line">
-            Remove
-          </button>
-        </td>
-      ) : null}
-    </tr>
-  )
-}
+export default ItemFormPage
