@@ -6,6 +6,7 @@ import { useQuery } from '../hooks/useQuery'
 import { errorMessage } from '../services/api'
 import { documentsApi } from '../services/documentsApi'
 import { DocumentForm } from './DocumentForm'
+import { DisassemblyPage } from './disassembly/DisassemblyPage'
 import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS } from './actions'
 import { draftFromDocument } from './formModel'
 import { specForCode, specForSlug, UNAVAILABLE_TYPES } from './registry'
@@ -93,6 +94,11 @@ export function DocumentFormPage() {
       )
     }
     const initial = draftFromDocument(doc, spec)
+    // Disassembly brings its own page shell (breadcrumbs, context panel, sticky footer), so it
+    // replaces the legacy `page` wrapper rather than sitting inside it.
+    if (spec.formKind === 'disassembly') {
+      return <DisassemblyPage key={doc.document_id} spec={spec} documentId={doc.document_id} initial={initial} document={doc} />
+    }
     return (
       <div className="page">
         <PageHeader title={`Edit ${spec.label.toLowerCase()} ${doc.document_no ?? `#${doc.document_id}`}`} subtitle={`Version ${doc.version} · ${STATUS_LABELS[doc.status as DocumentStatus] ?? doc.status}`} breadcrumbs={[...crumbs, { label: doc.document_no ?? `#${doc.document_id}`, to: `/documents/${doc.document_id}` }]} />
@@ -103,6 +109,7 @@ export function DocumentFormPage() {
   }
 
   const s = spec as NonNullable<typeof spec>
+  if (s.formKind === 'disassembly') return <DisassemblyPage spec={s} />
   return (
     <div className="page">
       <PageHeader title={`New ${s.label.toLowerCase()}`} breadcrumbs={crumbs} />
