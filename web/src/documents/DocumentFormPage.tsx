@@ -6,6 +6,7 @@ import { useQuery } from '../hooks/useQuery'
 import { errorMessage } from '../services/api'
 import { documentsApi } from '../services/documentsApi'
 import { DocumentForm } from './DocumentForm'
+import { JobWorkOutwardForm } from './jobwork/JobWorkOutwardForm'
 import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS } from './actions'
 import { draftFromDocument } from './formModel'
 import { specForCode, specForSlug, UNAVAILABLE_TYPES } from './registry'
@@ -93,6 +94,20 @@ export function DocumentFormPage() {
       )
     }
     const initial = draftFromDocument(doc, spec)
+    if (spec.formKind === 'job_work_out') {
+      return (
+        <div className="page">
+          <JobWorkOutwardForm
+            key={doc.document_id}
+            spec={spec}
+            documentId={doc.document_id}
+            initial={initial}
+            status={doc.status}
+            onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+          />
+        </div>
+      )
+    }
     return (
       <div className="page">
         <PageHeader title={`Edit ${spec.label.toLowerCase()} ${doc.document_no ?? `#${doc.document_id}`}`} subtitle={`Version ${doc.version} · ${STATUS_LABELS[doc.status as DocumentStatus] ?? doc.status}`} breadcrumbs={[...crumbs, { label: doc.document_no ?? `#${doc.document_id}`, to: `/documents/${doc.document_id}` }]} />
@@ -103,6 +118,15 @@ export function DocumentFormPage() {
   }
 
   const s = spec as NonNullable<typeof spec>
+  // Job work outward has its own screen: it renders its own breadcrumb header, sidebar and
+  // sticky action bar, so the shared PageHeader above it would be a second title.
+  if (s.formKind === 'job_work_out') {
+    return (
+      <div className="page">
+        <JobWorkOutwardForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+      </div>
+    )
+  }
   return (
     <div className="page">
       <PageHeader title={`New ${s.label.toLowerCase()}`} breadcrumbs={crumbs} />
