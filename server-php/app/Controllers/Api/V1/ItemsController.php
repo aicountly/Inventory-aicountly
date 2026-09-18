@@ -203,11 +203,37 @@ class ItemsController extends BaseController
         $cmpId = (int) $a['ctx']['cmp_id'];
         $body = $this->request->getJSON(true) ?? [];
         $ids = array_values(array_unique(array_filter(array_map('intval', (array) ($body['item_ids'] ?? [])), static fn ($i) => $i > 0)));
+        $db = \Config\Database::connect();
+        /*
+         * SKUs as well as ids.
+         *
+         * An import resolves the codes a spreadsheet names, and one request per
+         * code is a file of 400 lines turned into 400 round trips. Matched
+         * case-insensitively on the exact code — never as a prefix, because a
+         * bulk resolve that silently picks a different item than the one the
+         * sheet named is the failure mode an importer exists to prevent.
+         */
+        $skus = array_values(array_unique(array_filter(array_map(
+            static fn ($s) => mb_strtolower(trim((string) $s)),
+            (array) ($body['item_skus'] ?? []),
+        ), static fn ($s) => $s !== '')));
+        if ($skus !== []) {
+            foreach (array_chunk($skus, 500) as $chunk) {
+                $list = implode(', ', array_map(static fn ($s) => $db->escape($s), $chunk));
+                $rows = $db->table('inv_items')->select('item_id')
+                    ->where('cmp_id', $cmpId)->where('deleted_at', null)
+                    ->where('LOWER(item_sku) IN (' . $list . ')', null, false)
+                    ->get()->getResultArray();
+                foreach ($rows as $r) {
+                    $ids[] = (int) $r['item_id'];
+                }
+            }
+            $ids = array_values(array_unique($ids));
+        }
         if ($ids === []) {
             return $this->respond(['data' => []]);
         }
         $out = [];
-        $db = \Config\Database::connect();
         foreach (array_chunk($ids, 500) as $chunk) {
             $rows = $db->table('inv_items i')->select(self::LOOKUP_COLUMNS)
                 ->join('inv_uom u', 'u.unit_id = i.unit_id', 'left')->where('i.cmp_id', $cmpId)->whereIn('i.item_id', $chunk)->get()->getResultArray();

@@ -7,7 +7,7 @@ import { ItemFormPage } from './pages/items/ItemFormPage'
 import { ItemsBulkEditPage } from './pages/items/ItemsBulkEditPage'
 import { ItemsListPage } from './pages/items/ItemsListPage'
 import { BomFormPage } from './pages/masters/BomFormPage'
-import { BomListPage } from './pages/masters/BomListPage'
+import { BillOfMaterialsPage } from './pages/masters/bom/BillOfMaterialsPage'
 import { MastersIndex } from './pages/masters/MastersIndex'
 import { MastersLayout } from './pages/masters/MastersLayout'
 import { SerialsPage } from './pages/masters/SerialsPage'
@@ -62,7 +62,7 @@ export function AppRoutes() {
           <Route path="warehouse-groups" element={<WarehouseGroupsPage />} />
           <Route path="warehouses" element={<WarehousesPage />} />
           <Route path="locations" element={<LocationsPage />} />
-          <Route path="bill-of-materials" element={<BomListPage />} />
+          <Route path="bill-of-materials" element={<BillOfMaterialsPage />} />
           <Route path="bill-of-materials/new" element={<BomFormPage />} />
           <Route path="bill-of-materials/:id" element={<BomFormPage />} />
           <Route path="batches" element={<BatchesPage />} />

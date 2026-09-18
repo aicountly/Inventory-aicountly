@@ -121,6 +121,12 @@ export interface ItemSearchRow {
   default_warehouse_id: number | null
   units?: ItemUnitLine[]
   stock?: StockSummary
+  /**
+   * Only `bulk-lookup` sends it — `search` returns live items only, so there is
+   * nothing for it to say there. An importer needs it: a sheet naming a
+   * deactivated component has to be told, not quietly given the row.
+   */
+  is_active?: number
 }
 
 export interface FormOptionGroup {
@@ -232,6 +238,22 @@ export const itemsApi = {
   },
   search: async (q: string, limit = 20, signal?: AbortSignal): Promise<ItemSearchRow[]> => {
     const res = await api.get<ItemResponse<ItemSearchRow[]>>('v1/items/search', { signal, query: { q, limit } })
+    return Array.isArray(res.data) ? res.data : []
+  },
+  /**
+   * Resolve many items at once, by id and / or by SKU.
+   *
+   * The SKU form is what an import uses: a sheet of 400 lines names a few dozen
+   * distinct codes, and `search()` per code would be a few dozen round trips
+   * before a single bill was created. Codes are matched exactly (case aside) —
+   * never as a prefix, because an import that quietly resolved `CH-1` to
+   * `CH-100` would build a recipe from an item the sheet never named.
+   */
+  bulkLookup: async (
+    body: { item_ids?: number[]; item_skus?: string[] },
+    signal?: AbortSignal,
+  ): Promise<ItemSearchRow[]> => {
+    const res = await api.post<ItemResponse<ItemSearchRow[]>>('v1/items/bulk-lookup', body, { signal })
     return Array.isArray(res.data) ? res.data : []
   },
   /** One field across many items, in a single all-or-nothing transaction. */
