@@ -6,11 +6,23 @@ import { useQuery } from '../hooks/useQuery'
 import { errorMessage } from '../services/api'
 import { documentsApi } from '../services/documentsApi'
 import { DocumentForm } from './DocumentForm'
+import { SerialAdjustmentPage } from './serialAdjustment/SerialAdjustmentPage'
+import { draftFromDocument as serialDraftFromDocument } from './serialAdjustment/model'
 import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS } from './actions'
 import { draftFromDocument } from './formModel'
 import { specForCode, specForSlug, UNAVAILABLE_TYPES } from './registry'
 import type { DocumentStatus } from './types'
 import './documents.css'
+
+/**
+ * The one document type with an entry screen of its own.
+ *
+ * A serial adjustment is raised serial-first — the operator has the number on the label and is
+ * asking Inventory which item, warehouse and batch it belongs to — which is the opposite of the
+ * item-first order `DocumentForm` imposes. Everything else about it is unchanged: same route,
+ * same permission keys, same payload, same lifecycle. See serialAdjustment/SerialAdjustmentPage.
+ */
+const SERIAL_ADJUSTMENT = 'SERIAL_ADJUSTMENT'
 
 /** `/documents/new/:slug` and `/documents/:id/edit`. */
 export function DocumentFormPage() {
@@ -92,6 +104,19 @@ export function DocumentFormPage() {
         </div>
       )
     }
+    if (spec.code === SERIAL_ADJUSTMENT) {
+      const serialInitial = serialDraftFromDocument(doc)
+      return (
+        <SerialAdjustmentPage
+          key={doc.document_id}
+          documentId={doc.document_id}
+          initial={serialInitial}
+          status={doc.status}
+          documentNo={doc.document_no}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
     const initial = draftFromDocument(doc, spec)
     return (
       <div className="page">
@@ -103,6 +128,9 @@ export function DocumentFormPage() {
   }
 
   const s = spec as NonNullable<typeof spec>
+  if (s.code === SERIAL_ADJUSTMENT) {
+    return <SerialAdjustmentPage onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
   return (
     <div className="page">
       <PageHeader title={`New ${s.label.toLowerCase()}`} breadcrumbs={crumbs} />

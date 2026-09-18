@@ -47,7 +47,13 @@ export function PageHeader({
         className,
       )}
     >
-      <div className="min-w-0 flex-1 basis-72 flex items-start gap-3">
+      {/*
+        `basis-72` only from `md`, where the header is a ROW and 18rem is the title column's
+        ideal width. Below that the container is `flex-col`, so flex-basis is the title block's
+        HEIGHT — an unconditional `basis-72` reserved 288px of blank space under the heading on
+        every phone-width page using this header.
+      */}
+      <div className="min-w-0 flex-1 basis-auto md:basis-72 flex items-start gap-3">
         {backTo ? (
           <Link
             to={backTo}
