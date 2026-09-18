@@ -6,11 +6,21 @@ import { useQuery } from '../hooks/useQuery'
 import { errorMessage } from '../services/api'
 import { documentsApi } from '../services/documentsApi'
 import { DocumentForm } from './DocumentForm'
+import { BatchAdjustmentPage } from './batch/BatchAdjustmentPage'
 import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS } from './actions'
 import { draftFromDocument } from './formModel'
 import { specForCode, specForSlug, UNAVAILABLE_TYPES } from './registry'
 import type { DocumentStatus } from './types'
 import './documents.css'
+
+/**
+ * Batch Adjustment has its own workspace (`documents/batch`) rather than the generic line editor:
+ * the type reallocates quantity between batches without valuing anything, and the screen is built
+ * around that — where the stock leaves, where it lands, and whether the two balance. Every other
+ * type still renders `DocumentForm`, and the workspace saves and posts through exactly the same
+ * draft model and API calls.
+ */
+const BATCH_ADJUSTMENT = 'BATCH_ADJUSTMENT'
 
 /** `/documents/new/:slug` and `/documents/:id/edit`. */
 export function DocumentFormPage() {
@@ -75,6 +85,21 @@ export function DocumentFormPage() {
       )
     }
     if (!isEditable(doc.status)) {
+      // The batch workspace reads as well as it writes, so a posted adjustment opens in it
+      // read-only instead of on a dead end with a link.
+      if (spec.code === BATCH_ADJUSTMENT) {
+        return (
+          <BatchAdjustmentPage
+            key={doc.document_id}
+            spec={spec}
+            documentId={doc.document_id}
+            documentNo={doc.document_no}
+            initial={draftFromDocument(doc, spec)}
+            readOnly
+            statusLabel={STATUS_LABELS[doc.status as DocumentStatus] ?? doc.status}
+          />
+        )
+      }
       return (
         <div className="page">
           <PageHeader title={`${spec.label} ${doc.document_no ?? `#${doc.document_id}`}`} breadcrumbs={crumbs} />
@@ -93,6 +118,19 @@ export function DocumentFormPage() {
       )
     }
     const initial = draftFromDocument(doc, spec)
+    if (spec.code === BATCH_ADJUSTMENT) {
+      return (
+        <BatchAdjustmentPage
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          documentNo={doc.document_no}
+          initial={initial}
+          statusLabel={STATUS_LABELS[doc.status as DocumentStatus] ?? doc.status}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
     return (
       <div className="page">
         <PageHeader title={`Edit ${spec.label.toLowerCase()} ${doc.document_no ?? `#${doc.document_id}`}`} subtitle={`Version ${doc.version} · ${STATUS_LABELS[doc.status as DocumentStatus] ?? doc.status}`} breadcrumbs={[...crumbs, { label: doc.document_no ?? `#${doc.document_id}`, to: `/documents/${doc.document_id}` }]} />
@@ -103,6 +141,9 @@ export function DocumentFormPage() {
   }
 
   const s = spec as NonNullable<typeof spec>
+  if (s.code === BATCH_ADJUSTMENT) {
+    return <BatchAdjustmentPage key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
   return (
     <div className="page">
       <PageHeader title={`New ${s.label.toLowerCase()}`} breadcrumbs={crumbs} />
