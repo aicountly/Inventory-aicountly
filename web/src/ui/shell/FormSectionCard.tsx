@@ -27,11 +27,14 @@ export function FormSectionCard({
   bodyClassName,
 }: FormSectionCardProps) {
   const hasHeader = Boolean(title || description || action || Icon)
+  // The header row wraps, and the title block claims a minimum width: a card whose action is a pair
+  // of buttons squeezed the heading to a few characters at phone width and wrapped its description
+  // one word per line. Above that width nothing wraps and nothing moves.
   return (
     <Card padding={padding} className={className}>
       {hasHeader ? (
-        <div className="flex items-start justify-between gap-3 mb-3 border-b border-gray-100 pb-3">
-          <div className="flex items-start gap-3 min-w-0">
+        <div className="flex flex-wrap items-start justify-between gap-3 mb-3 border-b border-gray-100 pb-3">
+          <div className="flex items-start gap-3 min-w-0 flex-1 basis-[14rem]">
             {Icon ? (
               <span className="w-9 h-9 rounded-lg bg-primary-light flex items-center justify-center shrink-0">
                 <Icon className="w-4 h-4 text-primary" aria-hidden />

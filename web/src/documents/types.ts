@@ -258,6 +258,9 @@ export interface DocumentMetadata {
   challan_settlements?: ChallanSettlement[]
   linked_source_document_id?: number
   box_marks?: string[]
+  /** LANDED_COST: the receipts the charges are loaded onto. */
+  target_document_ids?: number[]
+  target_document_id?: number
   [key: string]: unknown
 }
 

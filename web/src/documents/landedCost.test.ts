@@ -132,6 +132,27 @@ describe('sharesForCharge', () => {
     ])
   })
 
+  /**
+   * 'equal' is the basis for a per-consignment fee the lines did not earn in proportion to anything
+   * Inventory holds — a documentation charge is the same rupees whether the crate holds one line or
+   * ten. It is a weight of 1 per line rather than a division, so the same rounding and the same
+   * residual placement serve it as every other basis.
+   */
+  it('splits evenly for the equal basis, whatever the lines are worth', () => {
+    expect(sharesForCharge(charge({ amount: '400', allocation_basis: 'equal' }), LINES)).toEqual([
+      { line_id: 11, amount: 200 },
+      { line_id: 12, amount: 200 },
+    ])
+  })
+
+  it('still ties to the charge when equal does not divide cleanly', () => {
+    const three: TargetLine[] = [...LINES, { line_id: 13, label: 'Third', base_qty: 5, valuation_amount: 500 }]
+    const shares = sharesForCharge(charge({ amount: '100', allocation_basis: 'equal' }), three)
+
+    expect(total(shares)).toBe(100)
+    expect(shares.map((s) => s.amount)).toEqual([33.3334, 33.3333, 33.3333])
+  })
+
   it('uses the typed shares for manual and direct', () => {
     expect(sharesForCharge(charge({ amount: '100', allocation_basis: 'manual', lines: { 11: '75', 12: '25' } }), LINES)).toEqual([
       { line_id: 11, amount: 75 },
@@ -246,9 +267,9 @@ describe('the payload and the round trip', () => {
 })
 
 describe('the vocabulary matches the server', () => {
-  it('lists the six cost types and the four bases', () => {
+  it('lists the six cost types and the five bases', () => {
     expect([...LANDED_COST_TYPES]).toEqual(['freight', 'duty', 'insurance', 'handling', 'other', 'non_creditable_tax'])
-    expect([...ALLOCATION_BASES]).toEqual(['value', 'qty', 'manual', 'direct'])
+    expect([...ALLOCATION_BASES]).toEqual(['value', 'qty', 'equal', 'manual', 'direct'])
   })
 
   /**

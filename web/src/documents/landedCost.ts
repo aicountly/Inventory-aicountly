@@ -22,10 +22,16 @@ export type LandedCostType = (typeof LANDED_COST_TYPES)[number]
 
 /**
  * DocumentService::LANDED_COST_BASES. Weight is deliberately absent: there is no item weight master
- * to allocate by, so the control would silently fall back to something else.
+ * to allocate by, so the control would silently fall back to something else. The screen still shows
+ * it, disabled, with that reason — see WEIGHT_BASIS_UNAVAILABLE. A control that is missing looks
+ * like an oversight; one that is present and explains itself is an answer.
  */
-export const ALLOCATION_BASES = ['value', 'qty', 'manual', 'direct'] as const
+export const ALLOCATION_BASES = ['value', 'qty', 'equal', 'manual', 'direct'] as const
 export type AllocationBasis = (typeof ALLOCATION_BASES)[number]
+
+/** Why "by weight" is offered nowhere. Shown against the disabled option, not hidden. */
+export const WEIGHT_BASIS_UNAVAILABLE =
+  'Weight allocation is unavailable: the item master carries no weight, so this basis would silently fall back to another one.'
 
 export const COST_TYPE_LABELS: Record<LandedCostType, string> = {
   freight: 'Freight',
@@ -37,9 +43,10 @@ export const COST_TYPE_LABELS: Record<LandedCostType, string> = {
 }
 
 export const BASIS_LABELS: Record<AllocationBasis, string> = {
-  value: 'Pro-rata by value',
-  qty: 'Pro-rata by quantity',
-  manual: 'Entered per line',
+  value: 'By value',
+  qty: 'By quantity',
+  equal: 'Equal per line',
+  manual: 'Manual',
   direct: 'One line only',
 }
 
@@ -107,6 +114,7 @@ export function defaultBasisFor(costType: LandedCostType): AllocationBasis {
 export const BASIS_HINTS: Record<AllocationBasis, string> = {
   value: 'Split in proportion to what each line is worth.',
   qty: 'Split in proportion to each line’s base quantity.',
+  equal: 'The same share to every line, whatever it is worth or how much of it there is — a per-consignment fee.',
   manual: 'You type each line’s share; they must add up to the charge.',
   direct: 'The whole charge belongs to a single line — a non-creditable tax is the case.',
 }
@@ -121,7 +129,14 @@ export interface TargetLine {
   unit_symbol?: string | null
 }
 
-/** A charge as the form holds it: amounts are text while the user is typing. */
+/**
+ * A charge as the form holds it: amounts are text while the user is typing.
+ *
+ * The four reference fields are Inventory's own annotation of the charge — the carrier's bill
+ * number, its date, who billed it, a note. They ride in metadata.charges[] and round-trip with the
+ * draft. They are NOT a commercial document: the payable, the tax on it and the supplier ledger
+ * stay in Books, and nothing here writes to any of them.
+ */
 export interface ChargeDraft {
   key: string
   cost_type: LandedCostType
@@ -130,6 +145,10 @@ export interface ChargeDraft {
   allocation_basis: AllocationBasis
   /** Per-line overrides, keyed by line id, used by the manual and direct bases. */
   lines: Record<number, string>
+  reference_no?: string
+  reference_date?: string
+  vendor_name?: string
+  notes?: string
 }
 
 /** A charge as the payload carries it (metadata.charges[]). */
@@ -139,6 +158,10 @@ export interface ChargePayload {
   amount: number
   allocation_basis: AllocationBasis
   lines?: { line_id: number; amount: number }[]
+  reference_no?: string
+  reference_date?: string
+  vendor_name?: string
+  notes?: string
 }
 
 export interface Share {
@@ -181,6 +204,17 @@ export function chargeAmount(charge: ChargeDraft): number {
   return toNumber(charge.amount) ?? 0
 }
 
+/**
+ * What one line weighs on a pro-rata basis. Mirrors the match in
+ * DocumentPostingService::allocateChargeOverLines — 'equal' weighs every line the same rather than
+ * dividing here, so one allocator, one rounding rule and one residual placement serve every basis.
+ */
+export function basisWeight(basis: AllocationBasis, line: TargetLine): number {
+  if (basis === 'qty') return line.base_qty
+  if (basis === 'equal') return 1
+  return line.valuation_amount
+}
+
 /** The shares ONE charge takes on the target's lines, on the basis it was given. */
 export function sharesForCharge(charge: ChargeDraft, lines: TargetLine[]): Share[] {
   const amount = chargeAmount(charge)
@@ -199,7 +233,7 @@ export function sharesForCharge(charge: ChargeDraft, lines: TargetLine[]): Share
   }
   return allocateCharge(
     amount,
-    lines.map((l) => ({ line_id: l.line_id, weight: charge.allocation_basis === 'qty' ? l.base_qty : l.valuation_amount })),
+    lines.map((l) => ({ line_id: l.line_id, weight: basisWeight(charge.allocation_basis, l) })),
   )
 }
 
@@ -278,6 +312,12 @@ export function chargesToPayload(charges: ChargeDraft[], lines: TargetLine[]): C
       allocation_basis: charge.allocation_basis,
     }
     if (charge.description.trim()) out.description = charge.description.trim()
+    // Trimmed and only when present: an empty string stored on every charge is noise in the
+    // metadata of every document that never used the field.
+    if (charge.reference_no?.trim()) out.reference_no = charge.reference_no.trim()
+    if (charge.reference_date?.trim()) out.reference_date = charge.reference_date.trim()
+    if (charge.vendor_name?.trim()) out.vendor_name = charge.vendor_name.trim()
+    if (charge.notes?.trim()) out.notes = charge.notes.trim()
     if (charge.allocation_basis === 'manual' || charge.allocation_basis === 'direct') {
       out.lines = lines
         .filter((l) => (charge.lines[l.line_id] ?? '').trim() !== '')
@@ -329,6 +369,10 @@ export function chargesFromMetadata(raw: unknown): ChargeDraft[] {
         description: typeof e.description === 'string' ? e.description : '',
         amount: e.amount === undefined || e.amount === null ? '' : String(e.amount),
         lines,
+        reference_no: typeof e.reference_no === 'string' ? e.reference_no : undefined,
+        reference_date: typeof e.reference_date === 'string' ? e.reference_date : undefined,
+        vendor_name: typeof e.vendor_name === 'string' ? e.vendor_name : undefined,
+        notes: typeof e.notes === 'string' ? e.notes : undefined,
       }),
     )
   }

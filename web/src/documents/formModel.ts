@@ -284,7 +284,11 @@ export function validateDraft(header: HeaderDraft, lines: LineDraft[], spec: Doc
   // quantity. What it must carry is the receipt it loads and the charges to spread over it, and
   // the server refuses a draft without both.
   if (spec.formKind === 'landed_cost') {
-    if (!header.metadata.target_document_id) errors.push('Pick the receipt these landing costs belong to.')
+    // Either metadata shape names the receipts: `target_document_ids` is what a multi-receipt
+    // allocation carries, `target_document_id` is the single-receipt shape every stored draft and
+    // every integration caller already uses. DocumentService::landedCostTargets folds them together.
+    const targets = Array.isArray(header.metadata.target_document_ids) ? header.metadata.target_document_ids : []
+    if (targets.length === 0 && !header.metadata.target_document_id) errors.push('Pick the receipt these landing costs belong to.')
     const charges = Array.isArray(header.metadata.charges) ? (header.metadata.charges as LandedCostChargeLike[]) : []
     if (charges.length === 0) errors.push('Add at least one charge to allocate.')
     charges.forEach((charge, i) => {
