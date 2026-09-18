@@ -93,16 +93,33 @@ export function DocumentFormPage() {
       )
     }
     const initial = draftFromDocument(doc, spec)
+    const approvalNotice =
+      doc.status === 'APPROVED' || doc.status === 'PENDING_APPROVAL' ? (
+        <Notice kind="info">Saving changes returns the document to draft; it will need approval again.</Notice>
+      ) : null
+    // Packing renders its own full-width breadcrumb/title/actions (PackingFormView) —
+    // the legacy PageHeader below would just duplicate it.
+    if (spec.formKind === 'packing') {
+      return (
+        <>
+          {approvalNotice ? <div className="aic mx-auto max-w-screen-2xl">{approvalNotice}</div> : null}
+          <DocumentForm key={doc.document_id} spec={spec} documentId={doc.document_id} initial={initial} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+        </>
+      )
+    }
     return (
       <div className="page">
         <PageHeader title={`Edit ${spec.label.toLowerCase()} ${doc.document_no ?? `#${doc.document_id}`}`} subtitle={`Version ${doc.version} · ${STATUS_LABELS[doc.status as DocumentStatus] ?? doc.status}`} breadcrumbs={[...crumbs, { label: doc.document_no ?? `#${doc.document_id}`, to: `/documents/${doc.document_id}` }]} />
-        {doc.status === 'APPROVED' || doc.status === 'PENDING_APPROVAL' ? <Notice kind="info">Saving changes returns the document to draft; it will need approval again.</Notice> : null}
+        {approvalNotice}
         <DocumentForm key={doc.document_id} spec={spec} documentId={doc.document_id} initial={initial} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
       </div>
     )
   }
 
   const s = spec as NonNullable<typeof spec>
+  if (s.formKind === 'packing') {
+    return <DocumentForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
   return (
     <div className="page">
       <PageHeader title={`New ${s.label.toLowerCase()}`} breadcrumbs={crumbs} />

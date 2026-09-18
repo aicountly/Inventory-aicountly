@@ -16,6 +16,7 @@ import { countDifference, draftTotals, isBlankLine, lineBaseQty, newHeader, newL
 import type { HeaderDraft, LineDraft, LineOrigin } from './formModel'
 import { offendingDraftKeys, parseNegativeStock } from './negativeStock'
 import type { NegativeStockDetail } from './negativeStock'
+import { PackingFormView } from './packing/PackingFormView'
 import { DeferredPurchasePanel } from './panels/DeferredPurchasePanel'
 import { LandedCostPanel } from './panels/LandedCostPanel'
 import { PhysicalCountPanel } from './panels/PhysicalCountPanel'
@@ -51,7 +52,7 @@ function describeError(err: unknown): string {
  * on posting leaves a saved draft (status FAILED) that can be posted with an override.
  */
 export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFormProps) {
-  const { warehouses, defaultWarehouseId, loading: refLoading, error: refError } = useReferenceData()
+  const { warehouses, defaultWarehouseId, warehouseName, unitSymbol, loading: refLoading, error: refError } = useReferenceData()
   const { can } = useAccess()
   const [header, setHeader] = useState<HeaderDraft>(() => initial?.header ?? newHeader(spec, todayIso()))
   const [lines, setLines] = useState<LineDraft[]>(() => initial?.lines ?? (['physical_count', 'production', 'landed_cost'].includes(spec.formKind) ? [] : [newLine(spec)]))
@@ -191,6 +192,41 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
   const isTransfer = spec.lineMode === 'transfer'
   const stockEffectHint = spec.stockEffects.find((s) => s.value === header.stock_effect)?.hint
 
+  // Packing gets its own premium, two-column layout (PackingFormView); every other type keeps
+  // the form below unchanged. All state, validation and submit logic above is shared either way.
+  if (spec.formKind === 'packing') {
+    return (
+      <PackingFormView
+        spec={spec}
+        documentId={documentId}
+        header={header}
+        patchHeader={patchHeader}
+        lines={lines}
+        setLines={setLines}
+        warehouses={warehouses}
+        warehouseName={warehouseName}
+        unitSymbol={unitSymbol}
+        refError={refError}
+        availability={availability}
+        checking={checking}
+        offendingKeys={offending}
+        totals={totals}
+        errors={errors}
+        apiError={apiError}
+        negative={negative}
+        override={override}
+        setOverride={setOverride}
+        canOverride={canOverride}
+        warnings={warnings}
+        savedId={savedId}
+        busy={busy}
+        canSave={canSave}
+        canPost={canPost}
+        submit={(post) => void submit(post)}
+      />
+    )
+  }
+
   return (
     <form
       className="page"
@@ -260,11 +296,6 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
                 <input id="movement_reason" className="input" value={header.movement_reason} disabled={disabled} maxLength={64} onChange={(e) => patchHeader({ movement_reason: e.target.value })} />
               </FormField>
             </>
-          ) : null}
-          {spec.formKind === 'packing' ? (
-            <FormField label="Box marks" htmlFor="box_marks" help="One per line.">
-              <textarea id="box_marks" className="textarea" value={(header.metadata.box_marks ?? []).join('\n')} disabled={disabled} onChange={(e) => patchHeader({ metadata: { ...header.metadata, box_marks: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean) } })} />
-            </FormField>
           ) : null}
           <FormField label="Narration" htmlFor="narration" className="span-all">
             <textarea id="narration" className="textarea" value={header.narration} disabled={disabled} onChange={(e) => patchHeader({ narration: e.target.value })} />
