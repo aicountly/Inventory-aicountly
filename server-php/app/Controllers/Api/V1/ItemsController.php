@@ -25,7 +25,10 @@ class ItemsController extends BaseController
     private const LIST_COLUMNS = 'i.item_id, i.item_uuid, i.item_name, i.item_alias, i.print_name, i.item_type, i.item_sku, i.item_upc, i.hsn_sac, i.mrp, i.unit_id, i.stock_cat_id, i.item_grp_id, i.brand_id, i.valuation_method, i.books_sales_acc_id, i.books_purchase_acc_id, i.books_tax_cat_id, i.itc_eligibility, i.track_batch, i.track_serial, i.track_expiry, i.is_active, i.updated_at, i.created_at, u.unit_symbol, u.unit_name, g.grp_name, c.cat_name, b.brand_name';
 
     /** GET /v1/items/search — the typeahead payload. */
-    private const SEARCH_COLUMNS = 'i.item_id, i.item_name, i.item_alias, i.print_name, i.item_sku, i.item_upc, i.hsn_sac, i.mrp, i.unit_id, u.unit_symbol, i.books_tax_cat_id, i.books_sales_acc_id, i.books_purchase_acc_id, i.itc_eligibility, i.track_batch, i.track_serial, i.valuation_method, i.default_warehouse_id';
+    // grp_name / cat_name ride along because baseQuery() already joins both tables: a document
+    // line's item cell names the group under the item, and without them the typeahead that fills
+    // that cell is the one place in the app that cannot say which group it just picked from.
+    private const SEARCH_COLUMNS = 'i.item_id, i.item_name, i.item_alias, i.print_name, i.item_sku, i.item_upc, i.hsn_sac, i.mrp, i.unit_id, u.unit_symbol, i.books_tax_cat_id, i.books_sales_acc_id, i.books_purchase_acc_id, i.itc_eligibility, i.track_batch, i.track_serial, i.valuation_method, i.default_warehouse_id, g.grp_name, c.cat_name';
 
     /**
      * GET /v1/items/{id}, and the row create/update answer with — the whole item.

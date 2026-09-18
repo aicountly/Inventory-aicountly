@@ -32,6 +32,9 @@ export interface ItemSearchRow {
   track_serial: number | boolean
   valuation_method: string | null
   default_warehouse_id: number | null
+  /** Item group / stock category names (ItemsController::SEARCH_COLUMNS). Absent on older API builds. */
+  grp_name?: string | null
+  cat_name?: string | null
   stock?: { on_hand: number; available: number; reserved: number }
   units: ItemUnitRow[]
 }
