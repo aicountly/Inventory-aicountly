@@ -87,7 +87,7 @@ export function diffBoms(left: Bom, right: Bom): BomDiff {
       fields.push({ label: 'Quantity', left: qtyText(a), right: qtyText(b) })
     }
     if (!sameNumber(a.scrap_percent, b.scrap_percent)) {
-      fields.push({ label: 'Wastage', left: `${num(a.scrap_percent)}%`, right: `${num(b.scrap_percent)}%` })
+      fields.push({ label: 'Scrap %', left: `${num(a.scrap_percent)}%`, right: `${num(b.scrap_percent)}%` })
     }
     return { ...base, kind: fields.length > 0 ? ('changed' as const) : ('unchanged' as const), fields }
   })

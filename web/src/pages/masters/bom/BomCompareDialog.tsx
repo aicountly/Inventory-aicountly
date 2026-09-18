@@ -149,7 +149,7 @@ export function BomCompareDialog({ open, onClose, initial }: BomCompareDialogPro
       onClose={onClose}
       size="xl"
       title="Compare bills of materials"
-      description="Pick two bills to see exactly which components, quantities and wastage differ."
+      description="Pick two bills to see exactly which components, quantities and scrap differ."
       footer={<Button onClick={onClose}>Close</Button>}
     >
       <div className="space-y-4">
@@ -229,7 +229,7 @@ export function BomCompareDialog({ open, onClose, initial }: BomCompareDialogPro
                         <span className="whitespace-nowrap tabular-nums">
                           {formatQty(line.qty)}
                           {line.unit_symbol ? ` ${line.unit_symbol}` : ''}
-                          {Number(line.scrap_percent) > 0 ? ` · ${formatQty(line.scrap_percent)}% waste` : ''}
+                          {Number(line.scrap_percent) > 0 ? ` · ${formatQty(line.scrap_percent)}% scrap` : ''}
                         </span>
                       )
                     return (

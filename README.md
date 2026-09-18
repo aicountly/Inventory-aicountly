@@ -44,9 +44,15 @@ Manage through the API's read-only relay (`/api/manage/...`).
   alternate units and conversions, tracking flags, stock levels and opening
   stock per warehouse (`/v1/items/{id}/openings`); soft delete.
 - **Masters** — item groups (tree), stock categories, brands, units of measure,
-  warehouse groups (tree), warehouses, locations, bills of materials
-  (components, by-products, scrap), batches and serial numbers (single and
-  bulk registration).
+  warehouse groups (tree), warehouses, locations, batches and serial numbers
+  (single and bulk registration), and **bills of materials**: a workspace over
+  `/v1/bill-of-materials` with company-wide counters, component previews in the
+  list itself, filters on group / component count / scrap / dates / actor, a
+  detail drawer, a material-cost breakdown valued from `inv_wac_state` (falling
+  back to the item's standard cost, and saying "Cost unavailable" rather than
+  ₹0 when neither exists), a two-bill comparison, a CSV import that refuses to
+  invent item codes, and an editor that shows gross quantity and live costing
+  per component line.
 
 - **Documents** — list, detail (lines with valuation, accounting effects,
   approvals, print snapshot) and create / edit forms for every native type;

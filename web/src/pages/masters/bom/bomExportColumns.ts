@@ -58,7 +58,7 @@ export const BOM_LINE_EXPORT_COLUMNS: readonly ExportableColumn<BomLine>[] = [
   { key: 'unit_symbol', csvHeader: 'Unit', csv: (l) => l.unit_symbol ?? '' },
   {
     key: 'scrap_percent',
-    csvHeader: 'Wastage %',
+    csvHeader: 'Scrap %',
     align: 'right',
     format: 'qty',
     csv: (l) => l.scrap_percent ?? 0,

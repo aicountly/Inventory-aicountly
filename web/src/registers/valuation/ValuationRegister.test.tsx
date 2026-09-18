@@ -191,10 +191,16 @@ describe('valuation register', () => {
 
   it('renders the item code and the row figures', async () => {
     renderRegister()
-    expect(await screen.findByText('TEST-001')).toBeTruthy()
-    // Scoped to the table: an item name also appears in the donut's legend, so
-    // an unscoped lookup matches twice as soon as the analytics have loaded.
-    const table = within(screen.getByRole('table'))
+    const code = await screen.findByText('TEST-001')
+    /*
+     * Scoped to the table the row is IN, not to "the table on screen".
+     *
+     * An item name also appears in the donut's legend, so an unscoped lookup
+     * matches twice once the analytics land — and by then the trend panel has
+     * rendered a second table of its own, so `getByRole('table')` is a race
+     * against how quickly the analytics request resolves.
+     */
+    const table = within(code.closest('table') as HTMLElement)
     expect(table.getByText('DIM-001')).toBeTruthy()
     expect(table.getByText('Test Item')).toBeTruthy()
     expect(table.getByText('523')).toBeTruthy()

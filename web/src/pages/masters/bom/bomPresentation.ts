@@ -103,7 +103,7 @@ export interface BomHealth {
   reasons: string[]
 }
 
-/** Wastage above this reads as a data-entry slip rather than a process loss. */
+/** Scrap above this reads as a data-entry slip rather than a process loss. */
 export const HIGH_WASTAGE_PERCENT = 50
 
 /**
@@ -141,7 +141,7 @@ export function bomHealth(row: Bom): BomHealth {
     }
     const heavy = components.filter((c) => c.scrap_percent > HIGH_WASTAGE_PERCENT)
     if (heavy.length > 0) {
-      reasons.push(`Wastage above ${HIGH_WASTAGE_PERCENT}% on ${heavy.length === 1 ? 'a component' : `${heavy.length} components`}.`)
+      reasons.push(`Scrap above ${HIGH_WASTAGE_PERCENT}% on ${heavy.length === 1 ? 'a component' : `${heavy.length} components`}.`)
     }
   }
   if (!(row.yield_qty > 0)) {

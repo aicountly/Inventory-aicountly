@@ -104,7 +104,7 @@ export function filterSummaryLines(
   if (filters.component_item_id) lines.push(`Contains component: #${filters.component_item_id}`)
   if (filters.min_components) lines.push(`Minimum components: ${filters.min_components}`)
   if (filters.max_components) lines.push(`Maximum components: ${filters.max_components}`)
-  if (filters.has_scrap === '1') lines.push('Wastage: only bills with wastage')
+  if (filters.has_scrap === '1') lines.push('Scrap: only bills with scrap on a component')
   if (filters.has_by_products === '1') lines.push('By-products: only bills with by-products')
   if (filters.created_from || filters.created_to) {
     lines.push(`Created: ${filters.created_from || '…'} to ${filters.created_to || '…'}`)

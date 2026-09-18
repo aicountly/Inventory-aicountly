@@ -61,7 +61,7 @@ function LineTable({ title, lines, emptyLabel }: { title: string; lines: BomLine
             <tr className="bg-gray-50 text-[9.5px] uppercase tracking-wide text-gray-500">
               <th scope="col" className="px-2.5 py-2 text-left font-bold">Item</th>
               <th scope="col" className="px-2.5 py-2 text-right font-bold">Quantity</th>
-              <th scope="col" className="px-2.5 py-2 text-right font-bold">Wastage</th>
+              <th scope="col" className="px-2.5 py-2 text-right font-bold">Scrap %</th>
               <th scope="col" className="px-2.5 py-2 text-right font-bold">Gross qty</th>
             </tr>
           </thead>

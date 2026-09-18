@@ -90,9 +90,21 @@ export function BillOfMaterialsPage() {
     order: 'asc',
     filterKeys: [...BOM_FILTER_KEYS, 'view'],
   })
-  const { view: viewParam, ...filterParams } = list.state.filters
-  const filters = filterParams as BomFilters
-  const view: BomViewMode = viewParam === 'grid' ? 'grid' : 'list'
+  const { setFilters } = list
+  /*
+   * Memoised, and it matters more than it looks.
+   *
+   * `list.state.filters` is stable per URL, but a rest-destructure of it builds
+   * a NEW object on every render. That object is a dependency of the list
+   * query's `useMemo`, so without this the query identity changed on every
+   * render, `useQuery` saw new deps, and the screen re-fetched itself in a loop.
+   */
+  const view: BomViewMode = list.state.filters.view === 'grid' ? 'grid' : 'list'
+  const filters = useMemo<BomFilters>(() => {
+    const { view: _view, ...rest } = list.state.filters
+    void _view
+    return rest as BomFilters
+  }, [list.state.filters])
 
   const summary = useBomSummary(canRead && !accessLoading)
   const query = useBomList({
@@ -130,10 +142,23 @@ export function BillOfMaterialsPage() {
   const [actionBusy, setActionBusy] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
 
+  /** Every filter AND the search term, in one navigation. */
+  const clearEverything = useCallback(() => {
+    setFilters({ ...clearedFilters(), q: '' })
+  }, [setFilters])
+
+  /*
+   * Bound to the two `reload` callbacks rather than to the query objects that
+   * carry them: `useQuery` returns a fresh object every render, so depending on
+   * it would rebuild this handler — and re-register the page's keyboard scope —
+   * on every keystroke.
+   */
+  const reloadList = query.reload
+  const reloadSummary = summary.reload
   const reloadAll = useCallback(() => {
-    query.reload()
-    summary.reload()
-  }, [query, summary])
+    reloadList()
+    reloadSummary()
+  }, [reloadList, reloadSummary])
 
   /* ---- actions --------------------------------------------------------- */
   const openEditor = (row: Bom) => navigate(`/masters/bill-of-materials/${row.bom_id}`)
@@ -207,6 +232,23 @@ export function BillOfMaterialsPage() {
 
   /* ---- export ---------------------------------------------------------- */
   const searchRef = useRef<HTMLInputElement | null>(null)
+  const sheetActionsRef = useRef<HTMLDivElement | null>(null)
+  /*
+   * "BOM report" in the quick-actions rail opens the toolbar's export menu.
+   *
+   * The report IS the export — same columns, same letterhead, same filters —
+   * so the tile drives the control that already exists rather than a second,
+   * half-built screen that would drift out of step with it.
+   */
+  const openExportMenu = useCallback(() => {
+    const trigger = sheetActionsRef.current?.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')
+    if (!trigger) {
+      toast.error('Exporting is not available for your profile.')
+      return
+    }
+    trigger.scrollIntoView({ block: 'nearest' })
+    trigger.click()
+  }, [toast])
   const exportQuery = useMemo<ListQuery>(
     () => ({ q: list.state.q || undefined, sort: list.state.sort, order: list.state.order, with_preview: 1, ...toListQuery(filters) }),
     [list.state.q, list.state.sort, list.state.order, filters],
@@ -268,25 +310,27 @@ export function BillOfMaterialsPage() {
       onCreate={() => createNew()}
       onImport={() => setImportOpen(true)}
       onCreateWithAi={() => setAiOpen(true)}
-      onClearFilters={() => list.setFilters(clearedFilters())}
+      onClearFilters={clearEverything}
       onTemplate={(template: BomTemplate) => createNew({ template: template.key })}
     />
   )
 
   const sheetActions = canExport ? (
-    <ListSheetActions<Bom>
-      columns={BOM_LIST_EXPORT_COLUMNS}
-      rows={rows}
-      fetchAll={fetchAll}
-      filenameBase="bills-of-materials"
-      title="Bills of materials"
-      description="Product structures, components and manufacturing recipes."
-      metaLines={exportMeta}
-      onRefresh={reloadAll}
-      refreshing={query.loading}
-      disabled={total === 0}
-      searchInputRef={searchRef}
-    />
+    <div ref={sheetActionsRef} className="contents">
+      <ListSheetActions<Bom>
+        columns={BOM_LIST_EXPORT_COLUMNS}
+        rows={rows}
+        fetchAll={fetchAll}
+        filenameBase="bills-of-materials"
+        title="Bills of materials"
+        description="Product structures, components and manufacturing recipes."
+        metaLines={exportMeta}
+        onRefresh={reloadAll}
+        refreshing={query.loading}
+        disabled={total === 0}
+        searchInputRef={searchRef}
+      />
+    </div>
   ) : null
 
   const selectionBar =
@@ -350,9 +394,7 @@ export function BillOfMaterialsPage() {
             filters={filters}
             onFilter={list.setFilter}
             onOpenFilters={() => setFiltersOpen(true)}
-            onClearFilters={() => {
-              list.setFilters({ ...clearedFilters(), q: '' })
-            }}
+            onClearFilters={clearEverything}
             options={options}
             view={view}
             onView={(next) => list.setFilter('view', next === 'grid' ? 'grid' : '')}
@@ -366,7 +408,7 @@ export function BillOfMaterialsPage() {
 
           {view === 'grid' ? (
             <BomGrid
-              rows={rows}
+                rows={rows}
               loading={query.loading}
               error={query.error}
               onRetry={query.reload}
@@ -377,7 +419,7 @@ export function BillOfMaterialsPage() {
             />
           ) : (
             <BomTable
-              rows={rows}
+                rows={rows}
               loading={query.loading}
               error={query.error}
               onRetry={query.reload}
@@ -409,8 +451,7 @@ export function BillOfMaterialsPage() {
               }}
               onCost={setCosting}
               onToggleActive={(row) => setPending({ kind: 'toggle', row })}
-              onPrint={setViewing}
-              onExport={setViewing}
+              onSheet={setViewing}
               onDelete={(row) => setPending({ kind: 'delete', row })}
             />
           )}
@@ -446,12 +487,7 @@ export function BillOfMaterialsPage() {
             setCompareWith(selectedRows[0] ?? rows[0] ?? null)
             setCompareOpen(true)
           }}
-          onReport={() => {
-            // The report IS the export: same columns, same letterhead, same
-            // filters. Pointing at it beats a second half-built screen.
-            searchRef.current?.focus()
-            toast.success('Use Export in the toolbar for the BOM report — it carries the filters you have set.')
-          }}
+          onReport={openExportMenu}
           onTryAi={() => setAiOpen(true)}
           onPlayVideo={() => toast.success('Tutorial coming soon.')}
         />

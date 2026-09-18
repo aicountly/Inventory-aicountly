@@ -202,13 +202,8 @@ export interface BomCostLine extends BomLine {
   estimated_cost: number | null
 }
 
-export interface BomCost {
-  bom_id: number
-  bom_code: string
-  bom_name: string
+export interface BomCostTotals {
   currency: string
-  yield_qty: number
-  yield_unit_symbol: string | null
   lines: BomCostLine[]
   component_cost: number
   wastage_cost: number
@@ -220,6 +215,23 @@ export interface BomCost {
   cost_available: boolean
   /** True only when EVERY component has a rate. */
   cost_complete: boolean
+}
+
+export interface BomCost extends BomCostTotals {
+  bom_id: number
+  bom_code: string
+  bom_name: string
+  yield_qty: number
+  yield_unit_symbol: string | null
+}
+
+/** One unsaved component line, as `cost-preview` wants it. */
+export interface BomCostPreviewLine {
+  item_id: number
+  qty: number
+  unit_id?: number | null
+  scrap_percent?: number
+  line_kind?: BomLineKind | string
 }
 
 export type BatchStatus = 'active' | 'quarantine' | 'recalled' | 'expired' | 'closed'
@@ -331,6 +343,16 @@ export const bomApi = {
 
   cost: async (id: number, signal?: AbortSignal): Promise<BomCost> =>
     (await api.get<ItemResponse<BomCost>>(`v1/bill-of-materials/${id}/cost`, { signal })).data,
+
+  /**
+   * Cost a bill that has not been saved — what the editor shows while it is
+   * still being typed. It reads valuation and writes nothing.
+   */
+  costPreview: async (
+    body: { yield_qty: number; lines: BomCostPreviewLine[] },
+    signal?: AbortSignal,
+  ): Promise<BomCostTotals> =>
+    (await api.post<ItemResponse<BomCostTotals>>('v1/bill-of-materials/cost-preview', body, { signal })).data,
 
   duplicate: async (id: number, bomName?: string): Promise<Bom> =>
     (await api.post<ItemResponse<Bom>>(`v1/bill-of-materials/${id}/duplicate`, bomName ? { bom_name: bomName } : {})).data,

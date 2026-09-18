@@ -1,5 +1,6 @@
 import type { PickedItem } from '../../components/ItemPicker'
-import type { Bom, BomLine, BomLineKind } from '../../services/masters'
+import type { Bom, BomCostPreviewLine, BomLine, BomLineKind } from '../../services/masters'
+import { BOM_TEMPLATES } from '../../services/bomAiService'
 import { toNumber } from '../../utils/format'
 
 /** Pure draft ↔ payload helpers for the bill-of-materials form. */
@@ -98,6 +99,61 @@ export function validateBom(header: BomHeaderDraft, lines: BomLineDraft[]): BomV
 
 export function isBomValid(v: BomValidation): boolean {
   return Object.keys(v.header).length === 0 && Object.keys(v.lines).length === 0 && v.general === null
+}
+
+/**
+ * Consumption after wastage — the quantity actually drawn from stock.
+ *
+ *   gross = required × (1 + wastage ÷ 100)
+ *
+ * The same rule the API applies when it explodes a bill into a production
+ * document (BomService::scaleLines), repeated here so the editor shows what
+ * will really be issued rather than what was typed. A blank or nonsensical
+ * wastage is treated as none: an uplift is a cost, and inventing one because a
+ * cell could not be parsed would overstate every run.
+ */
+export function grossQty(qty: string | number, scrapPercent: string | number): number | null {
+  const q = toNumber(qty)
+  if (q === null) return null
+  const scrap = toNumber(scrapPercent) ?? 0
+  const uplift = scrap > 0 ? scrap : 0
+  return Number((q * (1 + uplift / 100)).toFixed(4))
+}
+
+/**
+ * The component lines, in the shape `POST /cost-preview` wants.
+ *
+ * Lines with no item yet are dropped rather than sent as nulls: a half-typed
+ * row is not a costing question, and sending it would have the server answer
+ * "unpriced" for a component nobody has chosen.
+ */
+export function costPreviewLines(lines: BomLineDraft[]): BomCostPreviewLine[] {
+  return lines
+    .filter((l) => l.item !== null)
+    .map((l) => ({
+      item_id: l.item?.item_id as number,
+      qty: toNumber(l.qty) ?? 0,
+      unit_id: toNumber(l.unit_id) || null,
+      scrap_percent: toNumber(l.scrap_percent) ?? 0,
+      line_kind: l.line_kind,
+    }))
+}
+
+/**
+ * The empty rows a template opens the editor with.
+ *
+ * A template is a SHAPE — how many component rows, whether there is a scrap
+ * line — and never an item: an item this company has not defined would become
+ * a fabricated master record the moment the bill was saved.
+ */
+export function linesForTemplate(templateKey: string): BomLineDraft[] {
+  const template = BOM_TEMPLATES.find((t) => t.key === templateKey)
+  if (!template) return [newLine()]
+  const lines: BomLineDraft[] = []
+  for (let i = 0; i < Math.max(1, template.componentRows); i += 1) lines.push(newLine('component'))
+  for (let i = 0; i < template.byProductRows; i += 1) lines.push(newLine('by_product'))
+  for (let i = 0; i < template.scrapRows; i += 1) lines.push(newLine('scrap'))
+  return lines
 }
 
 export function bomPayload(header: BomHeaderDraft, lines: BomLineDraft[]): Record<string, unknown> {

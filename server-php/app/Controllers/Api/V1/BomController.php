@@ -220,6 +220,55 @@ class BomController extends BaseController
     }
 
     /**
+     * POST bill-of-materials/cost-preview — cost a draft that has not been saved.
+     *
+     * The editor needs the same figures as the costing drawer while the bill is
+     * still being typed, and `{id}/cost` cannot answer for a record that does
+     * not exist yet. It reads valuation and writes nothing: no bill, no line, no
+     * audit entry. Body: {yield_qty?, lines: [{item_id, qty, unit_id?,
+     * scrap_percent?, line_kind?}]}.
+     */
+    public function costPreview()
+    {
+        $a = $this->authorize(self::PERM . '.read', true, false);
+        if (isset($a['response'])) {
+            return $a['response'];
+        }
+        $cmpId = (int) $a['ctx']['cmp_id'];
+        $body = $this->request->getJSON(true) ?? [];
+        $lines = [];
+        foreach ((array) ($body['lines'] ?? []) as $l) {
+            if (!is_array($l) || (int) ($l['item_id'] ?? 0) <= 0) {
+                continue;
+            }
+            $lines[] = [
+                'item_id'       => (int) $l['item_id'],
+                'qty'           => (float) ($l['qty'] ?? 0),
+                'unit_id'       => isset($l['unit_id']) && (int) $l['unit_id'] > 0 ? (int) $l['unit_id'] : null,
+                'scrap_percent' => (float) ($l['scrap_percent'] ?? 0),
+                'line_kind'     => (string) ($l['line_kind'] ?? 'component'),
+            ];
+        }
+        $service = new BomCostService();
+        $costs = $service->baseUnitCosts($cmpId, array_map(static fn ($l) => $l['item_id'], $lines));
+        $costed = $service->costLines($cmpId, $lines, $costs);
+        $yield = (float) ($body['yield_qty'] ?? 1);
+
+        return $this->respond(['data' => [
+            'currency'            => $service->baseCurrency($cmpId),
+            'lines'               => $costed['lines'],
+            'component_cost'      => $costed['component_cost'],
+            'wastage_cost'        => $costed['wastage_cost'],
+            'total_cost'          => $costed['total_cost'],
+            'cost_per_unit'       => $yield > 0.0001 ? round($costed['total_cost'] / $yield, 4) : null,
+            'priced_components'   => $costed['priced_components'],
+            'unpriced_components' => $costed['unpriced_components'],
+            'cost_available'      => $costed['priced_components'] > 0,
+            'cost_complete'       => $costed['complete'],
+        ]]);
+    }
+
+    /**
      * POST bill-of-materials/{id}/duplicate — a copy, inactive.
      *
      * Inactive on purpose: a duplicate is the start of an edit, and a second

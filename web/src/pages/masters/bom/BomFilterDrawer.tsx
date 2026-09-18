@@ -168,7 +168,7 @@ export function BomFilterDrawer({ open, onClose, filters, onApply, options }: Bo
                 checked={draft.has_scrap === '1'}
                 onChange={(e) => set('has_scrap', e.target.checked ? '1' : '')}
               />
-              Only bills with wastage on a component
+              Only bills with scrap on a component
             </label>
             <label className="flex items-center gap-2 text-[12px] text-gray-700">
               <input

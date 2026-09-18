@@ -46,7 +46,7 @@ function CostTable({ cost }: { cost: BomCost }) {
           <tr className="bg-gray-50 text-[9.5px] uppercase tracking-wide text-gray-500">
             <th scope="col" className="px-2.5 py-2 text-left font-bold">Component</th>
             <th scope="col" className="px-2.5 py-2 text-right font-bold">Qty</th>
-            <th scope="col" className="px-2.5 py-2 text-right font-bold">Wastage</th>
+            <th scope="col" className="px-2.5 py-2 text-right font-bold">Scrap %</th>
             <th scope="col" className="px-2.5 py-2 text-right font-bold">Gross qty</th>
             <th scope="col" className="px-2.5 py-2 text-right font-bold">Cost / unit</th>
             <th scope="col" className="px-2.5 py-2 text-right font-bold">Estimated cost</th>
@@ -159,7 +159,7 @@ export function BomCostDialog({ bomId, bomName, onClose, onEdit }: BomCostDialog
 
           <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
             <Box label="Raw material" value={exactCost(cost.component_cost, cost.currency)} />
-            <Box label="Wastage" value={exactCost(cost.wastage_cost, cost.currency)} />
+            <Box label="Scrap cost" value={exactCost(cost.wastage_cost, cost.currency)} />
             <Box
               label="Estimated BOM cost"
               value={cost.cost_available ? exactCost(cost.total_cost, cost.currency) : COST_UNAVAILABLE}

@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react'
 import {
   Copy,
-  Download,
   Eye,
   GitCompare,
   IndianRupee,
@@ -49,8 +48,8 @@ export interface BomRowActions {
   onCompare: (row: Bom) => void
   onCost: (row: Bom) => void
   onToggleActive: (row: Bom) => void
-  onPrint: (row: Bom) => void
-  onExport: (row: Bom) => void
+  /** Opens the detail drawer, where the sheet actions for one bill live. */
+  onSheet: (row: Bom) => void
   onDelete: (row: Bom) => void
 }
 
@@ -130,8 +129,7 @@ export function BomTable({
   onCompare,
   onCost,
   onToggleActive,
-  onPrint,
-  onExport,
+  onSheet,
   onDelete,
 }: BomTableProps) {
   const allSelected = rows.length > 0 && rows.every((r) => selected.has(r.bom_id))
@@ -149,10 +147,18 @@ export function BomTable({
     if (canViewCost) {
       actions.push({ key: 'cost', label: 'Cost breakdown', icon: IndianRupee, onSelect: () => onCost(row) })
     }
-    actions.push(
-      { key: 'print', label: 'Print', icon: Printer, onSelect: () => onPrint(row), separated: true },
-      { key: 'export', label: 'Export', icon: Download, onSelect: () => onExport(row) },
-    )
+    /*
+     * One entry, not a Print and an Export that both land in the same place.
+     * The four outputs — CSV, Excel, PDF and the letterheaded print sheet —
+     * live together in the detail drawer, over that bill's own lines.
+     */
+    actions.push({
+      key: 'sheet',
+      label: 'Print or export…',
+      icon: Printer,
+      onSelect: () => onSheet(row),
+      separated: true,
+    })
     if (canWrite) {
       actions.push({
         key: 'toggle',

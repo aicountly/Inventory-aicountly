@@ -96,7 +96,8 @@ export function BomQuickActions({
       className={cx(
         AIC,
         // Stacked in the rail; a row across the foot of the page below `wide`.
-        'grid content-start gap-2.5 sm:grid-cols-2 wide:grid-cols-1',
+        // Never printed: it is a set of controls, not part of the record.
+        'grid content-start gap-2.5 sm:grid-cols-2 wide:grid-cols-1 print:hidden',
         className,
       )}
       aria-label="Bill of materials tools"

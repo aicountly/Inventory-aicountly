@@ -74,8 +74,11 @@ export function BomHero({ sample, onCreateWithAi, className }: BomHeroProps) {
         CARD,
         'grid gap-4 p-4 sm:p-5',
         // One column on a phone, intro + AI card side by side from `md`, and
-        // the diagram only appears once there is room for it to be readable.
-        'md:grid-cols-[minmax(0,1fr)_minmax(17rem,20rem)] xl:grid-cols-[minmax(0,1fr)_minmax(19rem,22rem)_minmax(17rem,20rem)]',
+        // the diagram only from `wide` (1400px) — below that the third column
+        // squeezes the sentence beside it, and the diagram is the decoration,
+        // not the content.
+        'md:grid-cols-[minmax(0,1fr)_minmax(17rem,20rem)] wide:grid-cols-[minmax(0,1fr)_minmax(19rem,22rem)_minmax(17rem,20rem)]',
+        'print:hidden',
         className,
       )}
     >
@@ -97,7 +100,7 @@ export function BomHero({ sample, onCreateWithAi, className }: BomHeroProps) {
       </div>
 
       {/* Decorative: the finished item and its components are both in the table. */}
-      <div className="relative hidden items-center justify-center gap-6 xl:flex" aria-hidden>
+      <div className="relative hidden items-center justify-center gap-6 wide:flex" aria-hidden>
         <div
           className="absolute left-[38%] right-[42%] top-1/2 h-px bg-gray-200"
           aria-hidden

@@ -119,7 +119,7 @@ export const BOM_IMPORT_FIELDS: readonly BomImportFieldSpec[] = [
   { field: 'component_item_code', label: 'Component item code', required: true, hint: 'The SKU of the component consumed.', aliases: ['component item code', 'component code', 'component', 'component sku', 'material code'] },
   { field: 'qty', label: 'Quantity', required: true, hint: 'Per yield of the finished item.', aliases: ['quantity', 'qty', 'required qty', 'component qty'] },
   { field: 'unit_symbol', label: 'Unit', required: false, hint: "Blank uses the component's base unit.", aliases: ['unit', 'uom', 'unit symbol'] },
-  { field: 'scrap_percent', label: 'Wastage %', required: false, hint: 'Blank is treated as zero.', aliases: ['wastage', 'wastage %', 'wastage percent', 'scrap', 'scrap %', 'scrap percent'] },
+  { field: 'scrap_percent', label: 'Scrap %', required: false, hint: 'The wastage uplift on the component. Blank is treated as zero.', aliases: ['wastage', 'wastage %', 'wastage percent', 'scrap', 'scrap %', 'scrap percent'] },
   { field: 'yield_qty', label: 'Yield', required: false, hint: 'Blank is treated as 1.', aliases: ['yield', 'yield qty', 'yield quantity', 'output'] },
   { field: 'line_kind', label: 'Line kind', required: false, hint: 'component, by_product or scrap. Blank is component.', aliases: ['line kind', 'kind', 'type', 'line type'] },
   { field: 'status', label: 'Status', required: false, hint: 'active or inactive. Blank imports as inactive.', aliases: ['status', 'active', 'is active'] },
@@ -240,7 +240,7 @@ export function buildPlan(sheet: ParsedSheet, mapping: BomImportMapping): BomImp
     const scrapRaw = cell(row, 'scrap_percent').replace('%', '')
     const scrapPercent = scrapRaw === '' ? 0 : toNumber(scrapRaw)
     if (scrapPercent === null || scrapPercent < 0 || scrapPercent > 100) {
-      add('error', 'Wastage must be a number between 0 and 100.')
+      add('error', 'Scrap % must be a number between 0 and 100.')
       return
     }
 
