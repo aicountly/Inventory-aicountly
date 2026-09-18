@@ -1,6 +1,6 @@
 import { ActiveBadge, StatusBadge, statusBadgeLabel } from '../components/StatusBadge'
-import { batchesApi, brandsApi, itemGroupsApi, locationsApi, stockCategoriesApi, uomApi, warehouseGroupsApi, warehousesApi, BATCH_STATUSES, LOCATION_TYPES, WAREHOUSE_TYPES } from '../services/masters'
-import type { Batch, Brand, ItemGroup, Location, StockCategory, Uom, Warehouse, WarehouseGroup } from '../services/masters'
+import { batchesApi, brandsApi, itemGroupsApi, locationsApi, stockCategoriesApi, warehouseGroupsApi, warehousesApi, BATCH_STATUSES, LOCATION_TYPES, WAREHOUSE_TYPES } from '../services/masters'
+import type { Batch, Brand, ItemGroup, Location, StockCategory, Warehouse, WarehouseGroup } from '../services/masters'
 import { formatDate, formatDateTime, formatInt, formatQty, humanize } from '../utils/format'
 import { isPickedItem } from './formValues'
 import { buildTree, descendantIds } from './tree'
@@ -123,42 +123,13 @@ export const brandsConfig: MasterConfig<Brand> = {
   ],
 }
 
-export const uomConfig: MasterConfig<Uom> = {
-  slug: 'uom',
-  permissionSlug: 'uom',
-  title: 'Units of measure',
-  singular: 'Unit',
-  idKey: 'unit_id',
-  nameOf: (r) => r.unit_name,
-  api: uomApi,
-  defaultSort: 'unit_name',
-  needsFormOptions: false,
-  columns: [
-    { key: 'unit_name', header: 'Unit', sortKey: 'unit_name', render: (r) => <strong>{r.unit_name}</strong> },
-    { key: 'unit_symbol', header: 'Symbol', sortKey: 'unit_symbol' },
-    { key: 'print_name', header: 'Print name', sortKey: 'print_name' },
-    { key: 'uqc_gst', header: 'GST UQC', sortKey: 'uqc_gst', render: (r) => <span className="mono">{r.uqc_gst ?? '—'}</span> },
-    { key: 'decimal_places', header: 'Decimals', align: 'right', sortKey: 'decimal_places' },
-    activeColumn<Uom>(),
-    updatedAt<Uom>(),
-  ],
-  fields: [
-    { name: 'unit_name', label: 'Unit name', type: 'text', required: true, maxLength: 128, placeholder: 'Pieces' },
-    { name: 'unit_symbol', label: 'Symbol', type: 'text', required: true, maxLength: 16, placeholder: 'Pcs' },
-    { name: 'print_name', label: 'Print name', type: 'text', maxLength: 128, help: 'Defaults to the symbol.' },
-    { name: 'uqc_gst', label: 'GST UQC code', type: 'text', maxLength: 16, placeholder: 'PCS', help: 'Unit quantity code used on GST returns.' },
-    { name: 'decimal_places', label: 'Decimal places', type: 'number', min: 0, max: 4, step: 1, help: '0 to 4.' },
-    { name: 'is_active', label: 'Active', type: 'checkbox' },
-  ],
-  toValues: (row) => ({
-    unit_name: row?.unit_name ?? '',
-    unit_symbol: row?.unit_symbol ?? '',
-    print_name: row?.print_name ?? '',
-    uqc_gst: row?.uqc_gst ?? '',
-    decimal_places: row ? String(row.decimal_places ?? 4) : '4',
-    is_active: row ? Number(row.is_active) === 1 : true,
-  }),
-}
+/*
+ * Units of measure has no config.
+ *
+ * It is the one master with a screen of its own (pages/masters/uom), so a
+ * `uomConfig` left here would be a definition nothing renders — the kind that
+ * gets edited in good faith and changes nothing on screen.
+ */
 
 export const warehouseGroupsConfig: MasterConfig<WarehouseGroup> = {
   slug: 'warehouse-groups',

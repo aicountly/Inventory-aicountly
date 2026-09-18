@@ -58,6 +58,12 @@ $routes->group('', ['namespace' => 'App\Controllers\Api', 'filter' => 'cors'], s
         $routes->get('dashboard/controls', 'DashboardController::controls');
 
         // Masters
+        // Registered before the generic master loop below, so `uom/summary` and
+        // `uom/uqc-codes` resolve as their own actions rather than being read as
+        // an id by `uom/(:segment)`.
+        $routes->get('uom/summary', 'UomController::summary');
+        $routes->get('uom/uqc-codes', 'UomController::uqcCodes');
+        $routes->get('uom/(:num)/usage', 'UomController::usage/$1');
         foreach ([
             'item-groups'      => 'ItemGroupsController',
             'stock-categories' => 'StockCategoriesController',
