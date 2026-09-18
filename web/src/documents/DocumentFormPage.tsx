@@ -1,3 +1,4 @@
+import { useCallback, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useAccess } from '../access/AccessContext'
 import { Notice } from '../components/Notice'
@@ -6,6 +7,7 @@ import { useQuery } from '../hooks/useQuery'
 import { errorMessage } from '../services/api'
 import { documentsApi } from '../services/documentsApi'
 import { DocumentForm } from './DocumentForm'
+import { ProductionWorkspace } from './production/ProductionWorkspace'
 import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS } from './actions'
 import { draftFromDocument } from './formModel'
 import { specForCode, specForSlug, UNAVAILABLE_TYPES } from './registry'
@@ -19,6 +21,13 @@ export function DocumentFormPage() {
   const { can } = useAccess()
   const documentId = id ? Number(id) : null
   const editing = documentId !== null && Number.isFinite(documentId)
+  /*
+   * "Save, post & new" starts a second run without leaving the screen. Bumping this remounts the
+   * editor with a fresh draft, which is what a storekeeper entering a shift's worth of runs wants;
+   * navigating to the same route would not remount anything.
+   */
+  const [freshKey, setFreshKey] = useState(0)
+  const startAnother = useCallback(() => setFreshKey((n) => n + 1), [])
 
   const existing = useQuery((signal) => documentsApi.get(documentId as number, signal), [documentId], { enabled: editing, keepData: false })
 
@@ -93,6 +102,19 @@ export function DocumentFormPage() {
       )
     }
     const initial = draftFromDocument(doc, spec)
+    if (spec.formKind === 'production') {
+      return (
+        <ProductionWorkspace
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          document={doc}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+          onNew={() => navigate('/documents/new/production')}
+        />
+      )
+    }
     return (
       <div className="page">
         <PageHeader title={`Edit ${spec.label.toLowerCase()} ${doc.document_no ?? `#${doc.document_id}`}`} subtitle={`Version ${doc.version} · ${STATUS_LABELS[doc.status as DocumentStatus] ?? doc.status}`} breadcrumbs={[...crumbs, { label: doc.document_no ?? `#${doc.document_id}`, to: `/documents/${doc.document_id}` }]} />
@@ -103,6 +125,21 @@ export function DocumentFormPage() {
   }
 
   const s = spec as NonNullable<typeof spec>
+  /*
+   * Production has its own screen. Same route, same spec, same draft shape and the same
+   * create / post calls — what differs is that the editor reads live availability, cost, batch
+   * and serial stock while the run is being built.
+   */
+  if (s.formKind === 'production') {
+    return (
+      <ProductionWorkspace
+        key={`production-${freshKey}`}
+        spec={s}
+        onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        onNew={startAnother}
+      />
+    )
+  }
   return (
     <div className="page">
       <PageHeader title={`New ${s.label.toLowerCase()}`} breadcrumbs={crumbs} />

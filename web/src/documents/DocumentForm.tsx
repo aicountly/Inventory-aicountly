@@ -19,7 +19,6 @@ import type { NegativeStockDetail } from './negativeStock'
 import { DeferredPurchasePanel } from './panels/DeferredPurchasePanel'
 import { LandedCostPanel } from './panels/LandedCostPanel'
 import { PhysicalCountPanel } from './panels/PhysicalCountPanel'
-import { ProductionPanel } from './panels/ProductionPanel'
 import { SettlementsPanel } from './panels/SettlementsPanel'
 import type { DocumentTypeSpec } from './registry'
 import type { InventoryDocument, JobWorkSettlement, PostingWarning } from './types'
@@ -272,19 +271,6 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
         </div>
       </section>
 
-      {spec.formKind === 'production' ? (
-        <ProductionPanel
-          spec={spec}
-          warehouses={warehouses}
-          defaultWarehouseId={defaultWarehouseId}
-          initial={header.metadata}
-          disabled={disabled}
-          onExplode={(generated, meta) => {
-            replaceOrigin(['bom'], generated)
-            patchHeader({ metadata: { ...header.metadata, ...meta }, default_warehouse_id: meta.warehouse_id })
-          }}
-        />
-      ) : null}
       {spec.formKind === 'job_work_in' ? (
         <SettlementsPanel
           spec={spec}
