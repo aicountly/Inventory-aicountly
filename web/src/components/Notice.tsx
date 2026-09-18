@@ -1,4 +1,4 @@
-import { AlertCircle, AlertTriangle, CheckCircle2, Info } from 'lucide-react'
+import { AlertCircle, AlertTriangle, CheckCircle2, Info, X } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { AIC, cx } from '../ui/cx'
@@ -10,6 +10,9 @@ interface NoticeProps {
   title?: ReactNode
   children?: ReactNode
   actions?: ReactNode
+  /** Renders a trailing close button; the caller owns whether the notice stays dismissed. */
+  onDismiss?: () => void
+  dismissLabel?: string
   className?: string
 }
 
@@ -38,7 +41,7 @@ const STYLE: Record<NoticeKind, { box: string; icon: LucideIcon }> = {
  * its props exactly, so all ~25 screens that already render one pick up the
  * new look without an edit.
  */
-export function Notice({ kind = 'info', title, children, actions, className }: NoticeProps) {
+export function Notice({ kind = 'info', title, children, actions, onDismiss, dismissLabel = 'Dismiss', className }: NoticeProps) {
   const style = STYLE[kind]
   const Icon = style.icon
   return (
@@ -57,6 +60,16 @@ export function Notice({ kind = 'info', title, children, actions, className }: N
         {children}
       </div>
       {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+      {onDismiss ? (
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label={dismissLabel}
+          className="shrink-0 rounded p-0.5 opacity-60 transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-primary/30"
+        >
+          <X className="h-4 w-4" aria-hidden />
+        </button>
+      ) : null}
     </div>
   )
 }

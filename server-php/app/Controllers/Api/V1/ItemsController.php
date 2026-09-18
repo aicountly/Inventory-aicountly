@@ -106,30 +106,7 @@ class ItemsController extends BaseController
         }
         $cmpId = (int) $a['ctx']['cmp_id'];
         $p = $this->listParams(50, 500, 'item_name');
-        $b = $this->baseQuery($cmpId);
-        $status = strtolower((string) ($this->request->getGet('status') ?? ''));
-        if ($status === 'active' || (int) ($this->request->getGet('active_only') ?? 0) === 1) {
-            $b->where('i.is_active', 1);
-        } elseif ($status === 'inactive') {
-            $b->where('i.is_active', 0);
-        }
-        foreach (['item_grp_id', 'stock_cat_id', 'brand_id', 'unit_id'] as $f) {
-            if ($v = (int) $this->request->getGet($f)) {
-                $b->where('i.' . $f, $v);
-            }
-        }
-        // The tax category belongs to Books and is held here as an opaque id, so the column is
-        // books_tax_cat_id while Books' own item-master filter sends it as tax_cat_id.
-        if ($taxCat = (int) ($this->request->getGet('books_tax_cat_id') ?? $this->request->getGet('tax_cat_id'))) {
-            $b->where('i.books_tax_cat_id', $taxCat);
-        }
-        if ($t = $this->request->getGet('item_type')) {
-            $b->where('i.item_type', $t);
-        }
-        $q = trim((string) ($this->request->getGet('q') ?? ''));
-        if ($q !== '') {
-            $this->applySearch($b, $q, (string) ($this->request->getGet('q_mode') ?? 'contains'));
-        }
+        $b = $this->filtered($cmpId);
         $total = (clone $b)->countAllResults(false);
         $sortMap = ['item_name' => 'i.item_name', 'item_sku' => 'i.item_sku', 'updated_at' => 'i.updated_at', 'created_at' => 'i.created_at', 'grp_name' => 'g.grp_name', 'item_id' => 'i.item_id', 'mrp' => 'i.mrp'];
         $rows = $b->select(self::LIST_COLUMNS)->orderBy($sortMap[$p['sort']] ?? 'i.item_name', $p['order'])->limit($p['limit'], $p['offset'])->get()->getResultArray();
@@ -147,6 +124,38 @@ class ItemsController extends BaseController
         }
 
         return $this->respondList($rows, $total, $p['limit'], $p['offset']);
+    }
+
+    /**
+     * GET /v1/items/summary — the figures above the item list.
+     *
+     * Counted over the same `filtered()` builder `index()` lists, so the cards
+     * can never disagree with the rows on screen beneath them.
+     */
+    public function summary()
+    {
+        $a = $this->authorize('masters.items.read', true, false);
+        if (isset($a['response'])) {
+            return $a['response'];
+        }
+        $cmpId = (int) $a['ctx']['cmp_id'];
+        $agg = (clone $this->filtered($cmpId))
+            ->select(
+                'COUNT(*) AS total'
+                . ', SUM(CASE WHEN i.is_active = 1 THEN 1 ELSE 0 END) AS active'
+                . ', COUNT(DISTINCT i.stock_cat_id) AS categories'
+                . ", SUM(CASE WHEN i.item_sku IS NULL OR i.item_sku = '' THEN 1 ELSE 0 END) AS missing_sku",
+                false,
+            )
+            ->get()
+            ->getRowArray() ?: [];
+
+        return $this->respond(['data' => [
+            'total'       => (int) ($agg['total'] ?? 0),
+            'active'      => (int) ($agg['active'] ?? 0),
+            'categories'  => (int) ($agg['categories'] ?? 0),
+            'missing_sku' => (int) ($agg['missing_sku'] ?? 0),
+        ]]);
     }
 
     /** Typeahead: name / alias / sku / barcode prefix search, small payload, availability optional. */
@@ -614,6 +623,47 @@ class ItemsController extends BaseController
             ->join('inv_stock_categories c', 'c.stock_cat_id = i.stock_cat_id', 'left')
             ->join('inv_brands b', 'b.brand_id = i.brand_id', 'left')
             ->where('i.cmp_id', $cmpId)->where('i.deleted_at', null);
+    }
+
+    /**
+     * The filtered query `index()` and `summary()` both read.
+     *
+     * One builder, not two: a summary counted over a different WHERE than the
+     * rows beneath it is a figure that contradicts the table it labels.
+     */
+    private function filtered(int $cmpId)
+    {
+        $b = $this->baseQuery($cmpId);
+        $status = strtolower((string) ($this->request->getGet('status') ?? ''));
+        if ($status === 'active' || (int) ($this->request->getGet('active_only') ?? 0) === 1) {
+            $b->where('i.is_active', 1);
+        } elseif ($status === 'inactive') {
+            $b->where('i.is_active', 0);
+        }
+        foreach (['item_grp_id', 'stock_cat_id', 'brand_id', 'unit_id'] as $f) {
+            if ($v = (int) $this->request->getGet($f)) {
+                $b->where('i.' . $f, $v);
+            }
+        }
+        // The tax category belongs to Books and is held here as an opaque id, so the column is
+        // books_tax_cat_id while Books' own item-master filter sends it as tax_cat_id.
+        if ($taxCat = (int) ($this->request->getGet('books_tax_cat_id') ?? $this->request->getGet('tax_cat_id'))) {
+            $b->where('i.books_tax_cat_id', $taxCat);
+        }
+        if ($t = $this->request->getGet('item_type')) {
+            $b->where('i.item_type', $t);
+        }
+        // The Items screen's "N items have no SKU" nudge links straight here, so
+        // "review them" is the same filtered set the summary counted.
+        if ((int) ($this->request->getGet('missing_sku') ?? 0) === 1) {
+            $b->groupStart()->where('i.item_sku IS NULL')->orWhere('i.item_sku', '')->groupEnd();
+        }
+        $q = trim((string) ($this->request->getGet('q') ?? ''));
+        if ($q !== '') {
+            $this->applySearch($b, $q, (string) ($this->request->getGet('q_mode') ?? 'contains'));
+        }
+
+        return $b;
     }
 
     private function applySearch($b, string $q, string $mode): void

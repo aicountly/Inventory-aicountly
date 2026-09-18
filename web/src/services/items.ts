@@ -183,6 +183,39 @@ export async function fetchItemFormOptions(signal?: AbortSignal): Promise<ItemFo
   }
 }
 
+export interface ItemsSummary {
+  total: number
+  active: number
+  categories: number
+  missing_sku: number
+}
+
+export interface ItemStockByWarehouse {
+  item_id: number
+  warehouse_id: number | null
+  on_hand: number
+  reserved: number
+  committed: number
+  packed: number
+  in_transit: number
+  job_worker: number
+  quality_hold: number
+  damaged: number
+  blocked: number
+  expected: number
+  available: number
+  projected: number
+}
+
+export interface ItemStockDetail {
+  item_id: number
+  /** Company-wide balance — the same figure `Item.stock.on_hand` carries. */
+  total: number
+  by_warehouse: ItemStockByWarehouse[]
+  unit_cost: number | string | null
+  valuation_method: string | null
+}
+
 export interface ItemListQuery extends ListQuery {
   status?: 'active' | 'inactive' | ''
   item_grp_id?: number | ''
@@ -192,6 +225,8 @@ export interface ItemListQuery extends ListQuery {
   item_type?: ItemType | ''
   with_stock?: boolean
   warehouse_id?: number | ''
+  /** Only items with no SKU or an empty one — what the "missing SKU" nudge reviews. */
+  missing_sku?: boolean
 }
 
 /** Fields POST /v1/items/bulk-update accepts. Units and the valuation method are deliberately absent. */
@@ -234,6 +269,19 @@ export const itemsApi = {
     const res = await api.get<ItemResponse<ItemSearchRow[]>>('v1/items/search', { signal, query: { q, limit } })
     return Array.isArray(res.data) ? res.data : []
   },
+  /** The figures above the list — counted over the same filters `list` uses. */
+  summary: async (query: ItemListQuery = {}, signal?: AbortSignal): Promise<ItemsSummary> => {
+    const { q, page: _page, limit: _limit, offset: _offset, sort: _sort, order: _order, ...filters } = query
+    void _page
+    void _limit
+    void _offset
+    void _sort
+    void _order
+    const res = await api.get<ItemResponse<ItemsSummary>>('v1/items/summary', { signal, query: { q, ...filters } })
+    return res.data
+  },
+  /** Per-warehouse availability for one item. */
+  stock: async (id: number, signal?: AbortSignal) => (await api.get<ItemResponse<ItemStockDetail>>(`v1/items/${id}/stock`, { signal })).data,
   /** One field across many items, in a single all-or-nothing transaction. */
   bulkUpdate: async (rows: BulkUpdateRow[]): Promise<BulkUpdateResult> =>
     (await api.post<ItemResponse<BulkUpdateResult>>('v1/items/bulk-update', { rows })).data,
