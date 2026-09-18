@@ -76,7 +76,12 @@ $routes->group('', ['namespace' => 'App\Controllers\Api', 'filter' => 'cors'], s
             $routes->put($slug . '/(:num)', $ctrl . '::update/$1');
             $routes->delete($slug . '/(:num)', $ctrl . '::delete/$1');
         }
+        // Safe after the `serials/(:num)` pattern above: `(:num)` matches digits
+        // only, so `serials/summary` cannot be read as a serial id.
+        $routes->get('serials/summary', 'SerialsController::summary');
+        $routes->get('serials/(:num)/history', 'SerialsController::history/$1');
         $routes->post('serials/bulk', 'SerialsController::bulkCreate');
+        $routes->post('serials/bulk-update', 'SerialsController::bulkUpdate');
         $routes->post('bill-of-materials/(:num)/explode', 'BomController::explode/$1');
         $routes->get('items/form-options', 'ItemsController::formOptions');
         $routes->get('items/search', 'ItemsController::search');
