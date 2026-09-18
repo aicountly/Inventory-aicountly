@@ -87,6 +87,11 @@ export interface BomListRow {
   line_count: number
 }
 
+/** From a search() result set, the one row a scan or an imported SKU should resolve to. */
+export function pickExactMatch(rows: ItemSearchRow[], code: string): ItemSearchRow | undefined {
+  return rows.find((r) => r.item_upc === code || r.item_sku === code) ?? (rows.length === 1 ? rows[0] : undefined)
+}
+
 export const lookupApi = {
   async searchItems(q: string, options: { warehouseId?: number | null; limit?: number; signal?: AbortSignal } = {}): Promise<ItemSearchRow[]> {
     const res = await api.get<ItemResponse<ItemSearchRow[]>>('v1/items/search', {

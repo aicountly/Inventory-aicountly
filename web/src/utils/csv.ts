@@ -44,6 +44,54 @@ export function csvFilename(base: string, scopeLabel = '', date = todayIso()): s
   return `${slug || 'export'}-${date}.csv`
 }
 
+/**
+ * Parse CSV text into rows of raw string cells — quoted fields, escaped `""`,
+ * CR/LF or bare LF line endings. Blank rows are dropped. Good enough for a
+ * small hand-filled import sheet; not a streaming parser for large files.
+ */
+export function parseCsv(text: string): string[][] {
+  const rows: string[][] = []
+  let row: string[] = []
+  let field = ''
+  let inQuotes = false
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') {
+          field += '"'
+          i++
+        } else {
+          inQuotes = false
+        }
+      } else {
+        field += c
+      }
+      continue
+    }
+    if (c === '"') {
+      inQuotes = true
+    } else if (c === ',') {
+      row.push(field)
+      field = ''
+    } else if (c === '\r') {
+      // swallowed; \n (bare or following \r) ends the row
+    } else if (c === '\n') {
+      row.push(field)
+      rows.push(row)
+      row = []
+      field = ''
+    } else {
+      field += c
+    }
+  }
+  if (field.length > 0 || row.length > 0) {
+    row.push(field)
+    rows.push(row)
+  }
+  return rows.filter((r) => r.some((cell) => cell.trim() !== ''))
+}
+
 /** Trigger a download of `csv` as `filename` (UTF-8 with BOM so Excel reads accents). */
 export function downloadCsv(filename: string, csv: string): void {
   const blob = new Blob([`﻿${csv}`], { type: 'text/csv;charset=utf-8' })

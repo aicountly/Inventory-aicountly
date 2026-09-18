@@ -4,6 +4,7 @@ import { BreadcrumbBar } from './BreadcrumbBar'
 import type { Crumb } from './BreadcrumbBar'
 import { PageHeader } from './PageHeader'
 import { usePageBackKeyboard } from '../../keyboard/usePageBackKeyboard'
+import type { IconTone } from '../IconTile'
 import { AIC, cx } from '../cx'
 
 export interface BreadcrumbHeaderProps {
@@ -11,6 +12,7 @@ export interface BreadcrumbHeaderProps {
   title: ReactNode
   description?: ReactNode
   icon?: LucideIcon
+  iconTone?: IconTone
   badge?: ReactNode
   meta?: ReactNode
   /** Full mode only: decoration between the title and the actions. */
@@ -35,6 +37,7 @@ export function BreadcrumbHeader({
   title,
   description,
   icon,
+  iconTone,
   badge,
   meta,
   aside,
@@ -90,6 +93,7 @@ export function BreadcrumbHeader({
         title={title}
         description={description}
         icon={icon}
+        iconTone={iconTone}
         badge={badge}
         meta={meta}
         aside={aside}

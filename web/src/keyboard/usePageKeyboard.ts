@@ -81,15 +81,21 @@ export interface FormKeyboardOptions {
   onSave?: () => void
   onCancel?: () => void
   onDelete?: () => void
+  /** Ctrl/Cmd+Enter — a second, stronger save (e.g. save & post). */
+  onSubmit?: () => void
+  /** Alt+L — append a line and focus it, on forms with a line grid. */
+  onAddLine?: () => void
   saving?: boolean
   enabled?: boolean
 }
 
-/** Entry-form shortcuts: Ctrl+S saves, Esc cancels, Ctrl+Delete deletes. */
+/** Entry-form shortcuts: Ctrl+S saves, Ctrl+Enter submits, Esc cancels, Ctrl+Delete deletes, Alt+L adds a line. */
 export function useFormKeyboard({
   onSave,
   onCancel,
   onDelete,
+  onSubmit,
+  onAddLine,
   saving = false,
   enabled = true,
 }: FormKeyboardOptions): void {
@@ -99,6 +105,11 @@ export function useFormKeyboard({
         if (!enabled || saving || !onSave) return
         e.preventDefault()
         onSave()
+      },
+      'ctrl+enter': (e: KeyboardEvent) => {
+        if (!enabled || saving || !onSubmit) return
+        e.preventDefault()
+        onSubmit()
       },
       escape: (e: KeyboardEvent) => {
         if (!enabled || !onCancel) return
@@ -110,8 +121,13 @@ export function useFormKeyboard({
         e.preventDefault()
         onDelete()
       },
+      'alt+l': (e: KeyboardEvent) => {
+        if (!enabled || saving || !onAddLine) return
+        e.preventDefault()
+        onAddLine()
+      },
     }),
-    [enabled, saving, onSave, onCancel, onDelete],
+    [enabled, saving, onSave, onSubmit, onCancel, onDelete, onAddLine],
   )
 
   useKeyboardScope('form', bindings, { allowInInput: true })

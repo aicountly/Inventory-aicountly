@@ -17,6 +17,35 @@ export interface UnitOption {
   is_default: boolean
 }
 
+interface ItemUnitLike {
+  unit_id: number
+  is_default: number | boolean
+  conversion_factor: number | string
+  unit_symbol?: string | null
+  unit_name?: string | null
+}
+
+/** The item-lookup fields every line-fill path (manual pick, bulk add, scan, import) needs. */
+export interface PickableItem {
+  item_id: number
+  item_name: string
+  print_name?: string | null
+  item_sku: string | null
+  track_batch: number | boolean
+  track_serial: number | boolean
+  unit_id?: number | null
+  unit_symbol?: string | null
+  units?: ItemUnitLike[]
+  default_warehouse_id?: number | null
+}
+
+export function unitOptionsFrom(item: Pick<PickableItem, 'units' | 'unit_id' | 'unit_symbol'>): UnitOption[] {
+  const rows = item.units ?? []
+  const out = rows.map((u) => ({ unit_id: u.unit_id, unit_symbol: u.unit_symbol ?? null, unit_name: u.unit_name ?? null, conversion_factor: Number(u.conversion_factor) || 1, is_default: Number(u.is_default) === 1 }))
+  if (out.length === 0 && item.unit_id) out.push({ unit_id: item.unit_id, unit_symbol: item.unit_symbol ?? null, unit_name: null, conversion_factor: 1, is_default: true })
+  return out
+}
+
 export type LineOrigin = 'manual' | 'settlement' | 'bom' | 'count' | 'deferred'
 
 export interface LineDraft {
@@ -256,6 +285,49 @@ function stripTransferMeta(meta: Record<string, unknown> | null): Record<string,
 
 export function isBlankLine(line: LineDraft): boolean {
   return line.item_id === null && line.qty.trim() === '' && line.book_qty.trim() === '' && line.physical_qty.trim() === ''
+}
+
+/** A fresh line pre-filled from a picked item — the same fill a manual item-search pick does. */
+export function lineFromPickedItem(spec: DocumentTypeSpec, item: PickableItem, options: { warehouseId?: number | null; qty?: string } = {}): LineDraft {
+  const units = unitOptionsFrom(item)
+  const def = units.find((u) => u.is_default) ?? units[0]
+  return newLine(spec, {
+    item_id: item.item_id,
+    item_name: item.print_name || item.item_name,
+    item_sku: item.item_sku,
+    track_batch: Number(item.track_batch) === 1,
+    track_serial: Number(item.track_serial) === 1,
+    units,
+    unit_id: def?.unit_id ?? item.unit_id ?? null,
+    warehouse_id: options.warehouseId ?? item.default_warehouse_id ?? null,
+    qty: options.qty ?? '',
+  })
+}
+
+/** Same item, same warehouse, and nothing that needs its own explicit pick — safe to bump instead of adding a duplicate row. */
+export function canMergeQtyInto(line: LineDraft, itemId: number, warehouseId: number | null): boolean {
+  return line.item_id === itemId && line.warehouse_id === warehouseId && !line.track_batch && !line.track_serial
+}
+
+/**
+ * Append picked items (bulk-add, scan, import) to `lines`: bump a compatible existing row's
+ * quantity, otherwise fill the first blank line or add a new one at the end.
+ */
+export function mergePickedItems(lines: LineDraft[], spec: DocumentTypeSpec, picks: { item: PickableItem; qty: string }[], warehouseId: number | null): LineDraft[] {
+  let out = lines
+  for (const { item, qty } of picks) {
+    const addQty = toNumber(qty) ?? 0
+    const mergeIdx = out.findIndex((l) => canMergeQtyInto(l, item.item_id, warehouseId))
+    if (mergeIdx !== -1) {
+      const current = toNumber(out[mergeIdx].qty) ?? 0
+      out = out.map((l, i) => (i === mergeIdx ? { ...l, qty: String(round4(current + addQty)) } : l))
+      continue
+    }
+    const line = lineFromPickedItem(spec, item, { warehouseId, qty })
+    const blankIdx = out.findIndex(isBlankLine)
+    out = blankIdx !== -1 ? out.map((l, i) => (i === blankIdx ? line : l)) : [...out, line]
+  }
+  return out
 }
 
 /** Shape of one metadata.charges[] entry, as the landed cost panel stores it. */

@@ -1,18 +1,36 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { Boxes, ClipboardList, Eye, FileUp, ListPlus, RefreshCw, ScanBarcode, TriangleAlert } from 'lucide-react'
 import { useAccess } from '../access/AccessContext'
-import { FormField } from '../components/FormField'
+import { ConfirmDialog } from '../components/ConfirmDialog'
 import { Notice } from '../components/Notice'
+import { useFormKeyboard } from '../keyboard/usePageKeyboard'
+import { useUnsavedChanges } from '../hooks/useUnsavedChanges'
 import { errorMessage, isApiError } from '../services/api'
 import { documentsApi } from '../services/documentsApi'
 import { lookupApi } from '../services/lookupApi'
 import type { AvailabilityCheckLine } from '../services/stockApi'
+import { Button } from '../ui/Button'
+import { Input } from '../ui/Input'
+import { Select } from '../ui/Select'
+import { Textarea } from '../ui/Textarea'
+import { FormField, FormGrid, FormSectionCard } from '../ui/shell/FormSectionCard'
+import { ActionBarTotal, StickyActionBar } from '../ui/shell/StickyActionBar'
+import { cx } from '../ui/cx'
+import { notify } from '../ui/notify'
 import { formatQty, todayIso, toNumber } from '../utils/format'
-import { LineEditor, unitOptionsFrom } from './LineEditor'
+import { AIReasonAssistant } from './AIReasonAssistant'
+import { AddMultipleItemsModal } from './AddMultipleItemsModal'
+import type { PickedLine } from './AddMultipleItemsModal'
+import { AttachmentUploader } from './AttachmentUploader'
+import type { StagedAttachment } from './AttachmentUploader'
+import { ImportLinesModal } from './ImportLinesModal'
+import { LineEditor } from './LineEditor'
 import { PartyFields } from './PartyFields'
+import { ScanBarcodeModal } from './ScanBarcodeModal'
 import { WarehouseSelect } from './WarehouseSelect'
 import { canCreate, permissionKeysFor } from './actions'
-import { countDifference, draftTotals, isBlankLine, lineBaseQty, newHeader, newLine, toPayload, validateDraft } from './formModel'
+import { countDifference, draftTotals, isBlankLine, lineBaseQty, mergePickedItems, newHeader, newLine, toPayload, unitOptionsFrom, validateDraft } from './formModel'
 import type { HeaderDraft, LineDraft, LineOrigin } from './formModel'
 import { offendingDraftKeys, parseNegativeStock } from './negativeStock'
 import type { NegativeStockDetail } from './negativeStock'
@@ -43,6 +61,25 @@ function describeError(err: unknown): string {
   return errorMessage(err)
 }
 
+/** Client-side suggestions only — reason_code has no backend master, free text still posts verbatim. */
+const WRITE_OFF_REASON_SUGGESTIONS = ['Damage', 'Expiry', 'Loss', 'Theft', 'Obsolete', 'Quality Rejection', 'Breakage', 'Shrinkage', 'Internal Use', 'Other']
+
+const BULK_TOOLBAR_EXCLUDED: DocumentTypeSpec['formKind'][] = ['production', 'job_work_in', 'physical_count', 'landed_cost']
+
+function linesSubtitle(spec: DocumentTypeSpec): string {
+  if (spec.code === 'WRITE_OFF') return 'Add items to be written off from stock.'
+  switch (spec.lineMode) {
+    case 'fixed_in':
+      return 'Add items being received into stock.'
+    case 'fixed_out':
+      return 'Add items being issued out of stock.'
+    case 'transfer':
+      return 'Add items being moved between warehouses.'
+    default:
+      return 'Add items to this document.'
+  }
+}
+
 /**
  * Create / edit any native document. The header and line columns follow the type spec; the
  * production, job-work, deferred-purchase and count panels generate lines that stay editable.
@@ -55,6 +92,7 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
   const { can } = useAccess()
   const [header, setHeader] = useState<HeaderDraft>(() => initial?.header ?? newHeader(spec, todayIso()))
   const [lines, setLines] = useState<LineDraft[]>(() => initial?.lines ?? (['physical_count', 'production', 'landed_cost'].includes(spec.formKind) ? [] : [newLine(spec)]))
+  const [attachments, setAttachments] = useState<StagedAttachment[]>([])
   const [savedId, setSavedId] = useState<number | null>(documentId ?? null)
   const [errors, setErrors] = useState<string[]>([])
   const [apiError, setApiError] = useState<string | null>(null)
@@ -62,10 +100,18 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
   const [override, setOverride] = useState(false)
   const [warnings, setWarnings] = useState<PostingWarning[]>([])
   const [busy, setBusy] = useState<'save' | 'post' | null>(null)
+  const [dirty, setDirty] = useState(false)
+  const [focusKey, setFocusKey] = useState<string | null>(null)
+  const [addMultipleOpen, setAddMultipleOpen] = useState(false)
+  const [scanOpen, setScanOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
+  const [pendingNav, setPendingNav] = useState<{ to: string; proceed: () => void } | null>(null)
 
   const canOverride = can('stock.negative_override')
   const canPost = can(permissionKeysFor('post', spec.code))
   const canSave = savedId ? can(permissionKeysFor('edit', spec.code)) : canCreate(spec.code, can)
+
+  const markDirty = () => setDirty(true)
 
   // Pre-fill the default warehouse once reference data is known (new documents only).
   useEffect(() => {
@@ -110,9 +156,42 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
     return () => controller.abort()
   }, [initial])
 
-  const patchHeader = (patch: Partial<HeaderDraft>) => setHeader((h) => ({ ...h, ...patch }))
-  const replaceOrigin = (origins: LineOrigin[], generated: LineDraft[], keepManual = true) =>
+  // The just-added row's item search gets focus (Add line click / Alt+L), then releases it so a
+  // later "Change" click on an unrelated row is never hijacked.
+  useEffect(() => {
+    if (focusKey === null) return undefined
+    const id = requestAnimationFrame(() => setFocusKey(null))
+    return () => cancelAnimationFrame(id)
+  }, [focusKey])
+
+  const patchHeader = (patch: Partial<HeaderDraft>) => {
+    markDirty()
+    setHeader((h) => ({ ...h, ...patch }))
+  }
+  const updateLines = (next: LineDraft[]) => {
+    markDirty()
+    setLines(next)
+  }
+  const replaceOrigin = (origins: LineOrigin[], generated: LineDraft[], keepManual = true) => {
+    markDirty()
     setLines((ls) => [...(keepManual ? ls.filter((l) => !origins.includes(l.origin) && !isBlankLine(l)) : []), ...generated])
+  }
+
+  const isTransfer = spec.lineMode === 'transfer'
+  const bulkWarehouseId = isTransfer ? header.from_warehouse_id : header.default_warehouse_id
+
+  const addLineFromShortcut = () => {
+    markDirty()
+    const line = newLine(spec, { warehouse_id: isTransfer ? null : header.default_warehouse_id })
+    setLines((ls) => [...ls, line])
+    setFocusKey(line.key)
+  }
+
+  const applyPicked = (picks: { item: PickedLine['row']; qty: string }[]) => {
+    if (picks.length === 0) return
+    updateLines(mergePickedItems(lines, spec, picks, bulkWarehouseId))
+    notify.success(`${picks.length} item${picks.length === 1 ? '' : 's'} added to the lines below.`)
+  }
 
   const partyRef = toNumber(header.party_ref)
   const partyRefNum = partyRef !== null && partyRef > 0 ? Math.floor(partyRef) : null
@@ -141,11 +220,26 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
     }
     return out
   }, [lines, header.default_warehouse_id, header.from_warehouse_id, spec])
-  const { results: availability, checking } = useAvailability(entries, spec.movesStock || ['job_work_out', 'packing', 'delivery_challan'].includes(spec.formKind))
+  const { results: availability, checking, reload: reloadAvailability } = useAvailability(entries, spec.movesStock || ['job_work_out', 'packing', 'delivery_challan'].includes(spec.formKind))
 
   const offending = useMemo(() => new Set(negative ? offendingDraftKeys(lines, negative) : []), [negative, lines])
   const savedSettlements = useMemo(() => (header.metadata.job_work_settlements ?? []) as JobWorkSettlement[], [header.metadata.job_work_settlements])
   const totals = draftTotals(lines, spec)
+  const impactQtyLabel = spec.lineMode === 'fixed_in' ? 'Quantity in' : spec.lineMode === 'transfer' ? 'Quantity moved' : spec.lineMode === 'fixed_out' ? 'Quantity out' : 'Quantity'
+  const impactQtyValue = spec.lineMode === 'fixed_in' ? totals.qtyIn : totals.qtyOut || totals.qtyIn
+  const impactVerb = spec.lineMode === 'fixed_in' ? 'increased' : spec.lineMode === 'fixed_out' ? 'reduced' : 'adjusted'
+
+  useFormKeyboard({
+    onSave: () => void submit(false),
+    onSubmit: canPost ? () => void submit(true) : undefined,
+    onAddLine: spec.formKind === 'landed_cost' ? undefined : addLineFromShortcut,
+    saving: busy !== null,
+  })
+
+  useUnsavedChanges({
+    when: dirty && busy === null,
+    onBlocked: (to, proceed) => setPendingNav({ to, proceed }),
+  })
 
   const submit = async (post: boolean) => {
     setErrors([])
@@ -155,6 +249,7 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
     const errs = validateDraft(header, lines, spec)
     if (errs.length) {
       setErrors(errs)
+      notify.error(post ? 'Fix the highlighted issues before posting.' : 'Fix the highlighted issues before saving.')
       return
     }
     const payload = toPayload(header, lines, spec)
@@ -172,7 +267,11 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
       if (post) {
         doc = await documentsApi.post(doc.document_id, { negativeOverride: override && canOverride })
         setWarnings(doc.warnings ?? [])
+        notify.success(`${spec.label} ${doc.document_no ?? `#${doc.document_id}`} posted successfully.`)
+      } else {
+        notify.success(`${spec.label} saved as draft.`)
       }
+      setDirty(false)
       onSaved(doc, post)
     } catch (err) {
       const neg = parseNegativeStock(err)
@@ -188,27 +287,27 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
   }
 
   const disabled = busy !== null
-  const isTransfer = spec.lineMode === 'transfer'
   const stockEffectHint = spec.stockEffects.find((s) => s.value === header.stock_effect)?.hint
+  const showBulkToolbar = !BULK_TOOLBAR_EXCLUDED.includes(spec.formKind)
+  const cancelTo = savedId ? `/documents/${savedId}` : '/documents'
 
   return (
     <form
-      className="page"
+      className="aic flex flex-col gap-4"
       onSubmit={(e) => {
         e.preventDefault()
         void submit(false)
       }}
     >
       {refError ? <Notice kind="warning">{refError}</Notice> : null}
-      <section className="form-section">
-        <h2 className="form-section-title">{spec.label}</h2>
-        <p className="form-section-subtitle">{spec.description}</p>
-        <div className="form-grid">
+
+      <FormSectionCard title="Document Details" description={`Enter the basic details for this ${spec.label.toLowerCase()}.`} icon={ClipboardList}>
+        <FormGrid cols={4}>
           <FormField label="Document date" htmlFor="document_date" required>
-            <input id="document_date" type="date" className="input" value={header.document_date} disabled={disabled} onChange={(e) => patchHeader({ document_date: e.target.value })} />
+            <Input id="document_date" type="date" value={header.document_date} disabled={disabled} onChange={(e) => patchHeader({ document_date: e.target.value })} />
           </FormField>
-          <FormField label="Document no." htmlFor="document_no" help="Leave empty to number automatically.">
-            <input id="document_no" className="input" value={header.document_no} disabled={disabled} onChange={(e) => patchHeader({ document_no: e.target.value })} />
+          <FormField label="Document no." htmlFor="document_no" hint="Leave empty to auto-generate.">
+            <Input id="document_no" placeholder="Auto-generate" value={header.document_no} disabled={disabled} onChange={(e) => patchHeader({ document_no: e.target.value })} />
           </FormField>
           {spec.party ? <PartyFields role={spec.party} partyRef={header.party_ref} partyName={header.party_name} onChange={patchHeader} disabled={disabled} /> : null}
           {isTransfer ? (
@@ -221,32 +320,32 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
               </FormField>
             </>
           ) : spec.formKind !== 'production' ? (
-            <FormField label="Default warehouse" htmlFor="default_wh" help="Pre-fills the warehouse on new lines.">
-              <WarehouseSelect id="default_wh" value={header.default_warehouse_id} onChange={(id) => patchHeader({ default_warehouse_id: id })} warehouses={warehouses} emptyLabel="None" disabled={disabled} />
+            <FormField label="Default warehouse" htmlFor="default_wh" required hint="Pre-fills the warehouse on new lines.">
+              <WarehouseSelect id="default_wh" value={header.default_warehouse_id} onChange={(id) => patchHeader({ default_warehouse_id: id })} warehouses={warehouses} emptyLabel="Select warehouse" disabled={disabled} />
             </FormField>
           ) : null}
           {spec.stockEffects.length > 0 ? (
-            <FormField label="Stock effect" htmlFor="stock_effect" help={stockEffectHint}>
-              <select id="stock_effect" className="select" value={header.stock_effect} disabled={disabled} onChange={(e) => patchHeader({ stock_effect: e.target.value, metadata: { ...header.metadata, linked_source_document_id: undefined } })}>
+            <FormField label="Stock effect" htmlFor="stock_effect" hint={stockEffectHint}>
+              <Select id="stock_effect" value={header.stock_effect} disabled={disabled} onChange={(e) => patchHeader({ stock_effect: e.target.value, metadata: { ...header.metadata, linked_source_document_id: undefined } })}>
                 {spec.stockEffects.map((s) => (
                   <option key={s.value} value={s.value}>
                     {s.label}
                   </option>
                 ))}
-              </select>
+              </Select>
             </FormField>
           ) : null}
           {spec.returnable ? (
             <>
               <FormField label="Returnable" htmlFor="returnable">
-                <label className="checkbox" style={{ minHeight: '2.25rem' }}>
-                  <input id="returnable" type="checkbox" checked={header.returnable} disabled={disabled} onChange={(e) => patchHeader({ returnable: e.target.checked })} />
+                <label className="flex h-9 items-center gap-2 text-sm text-gray-700">
+                  <input id="returnable" type="checkbox" className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary/30" checked={header.returnable} disabled={disabled} onChange={(e) => patchHeader({ returnable: e.target.checked })} />
                   Goods are expected back
                 </label>
               </FormField>
               {header.returnable ? (
                 <FormField label="Expected return" htmlFor="expected_return_date">
-                  <input id="expected_return_date" type="date" className="input" value={header.expected_return_date} disabled={disabled} onChange={(e) => patchHeader({ expected_return_date: e.target.value })} />
+                  <Input id="expected_return_date" type="date" value={header.expected_return_date} disabled={disabled} onChange={(e) => patchHeader({ expected_return_date: e.target.value })} />
                 </FormField>
               ) : null}
             </>
@@ -254,89 +353,207 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
           {spec.reason ? (
             <>
               <FormField label="Reason code" htmlFor="reason_code">
-                <input id="reason_code" className="input" value={header.reason_code} disabled={disabled} maxLength={32} onChange={(e) => patchHeader({ reason_code: e.target.value })} placeholder="e.g. DAMAGE" />
+                <Input
+                  id="reason_code"
+                  list={spec.code === 'WRITE_OFF' ? 'reason-code-suggestions' : undefined}
+                  value={header.reason_code}
+                  disabled={disabled}
+                  maxLength={32}
+                  onChange={(e) => patchHeader({ reason_code: e.target.value })}
+                  placeholder="e.g. Damage"
+                />
+                {spec.code === 'WRITE_OFF' ? (
+                  <datalist id="reason-code-suggestions">
+                    {WRITE_OFF_REASON_SUGGESTIONS.map((r) => (
+                      <option key={r} value={r} />
+                    ))}
+                  </datalist>
+                ) : null}
               </FormField>
               <FormField label="Movement reason" htmlFor="movement_reason">
-                <input id="movement_reason" className="input" value={header.movement_reason} disabled={disabled} maxLength={64} onChange={(e) => patchHeader({ movement_reason: e.target.value })} />
+                <Input id="movement_reason" value={header.movement_reason} disabled={disabled} maxLength={64} onChange={(e) => patchHeader({ movement_reason: e.target.value })} placeholder="e.g. Water damage, expired stock, theft…" />
               </FormField>
             </>
           ) : null}
           {spec.formKind === 'packing' ? (
-            <FormField label="Box marks" htmlFor="box_marks" help="One per line.">
-              <textarea id="box_marks" className="textarea" value={(header.metadata.box_marks ?? []).join('\n')} disabled={disabled} onChange={(e) => patchHeader({ metadata: { ...header.metadata, box_marks: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean) } })} />
+            <FormField label="Box marks" htmlFor="box_marks" hint="One per line." className="col-span-full">
+              <Textarea id="box_marks" value={(header.metadata.box_marks ?? []).join('\n')} disabled={disabled} onChange={(e) => patchHeader({ metadata: { ...header.metadata, box_marks: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean) } })} />
             </FormField>
           ) : null}
-          <FormField label="Narration" htmlFor="narration" className="span-all">
-            <textarea id="narration" className="textarea" value={header.narration} disabled={disabled} onChange={(e) => patchHeader({ narration: e.target.value })} />
+        </FormGrid>
+
+        <div className={cx('mt-4 grid grid-cols-1 gap-4', spec.reason ? 'lg:grid-cols-[1.3fr_0.9fr_1fr]' : 'lg:grid-cols-[1.4fr_1fr]')}>
+          <FormField label="Narration / Remarks" htmlFor="narration">
+            <Textarea id="narration" rows={4} value={header.narration} disabled={disabled} onChange={(e) => patchHeader({ narration: e.target.value })} placeholder="Enter detailed remarks, reference, incident details etc…" />
           </FormField>
+          <AttachmentUploader
+            value={attachments}
+            onChange={(files) => {
+              markDirty()
+              setAttachments(files)
+            }}
+            disabled={disabled}
+          />
+          {spec.reason ? (
+            <AIReasonAssistant
+              warehouseId={header.default_warehouse_id}
+              disabled={disabled}
+              onApply={({ reasonCode, remark }) => {
+                patchHeader({
+                  reason_code: reasonCode,
+                  movement_reason: remark && !header.movement_reason.trim() ? remark : header.movement_reason,
+                })
+                notify.success(`Applied "${reasonCode}" as the reason code.`)
+              }}
+            />
+          ) : null}
         </div>
-      </section>
+      </FormSectionCard>
 
       {spec.formKind === 'production' ? (
-        <ProductionPanel
-          spec={spec}
-          warehouses={warehouses}
-          defaultWarehouseId={defaultWarehouseId}
-          initial={header.metadata}
-          disabled={disabled}
-          onExplode={(generated, meta) => {
-            replaceOrigin(['bom'], generated)
-            patchHeader({ metadata: { ...header.metadata, ...meta }, default_warehouse_id: meta.warehouse_id })
-          }}
-        />
+        <FormSectionCard padding="md">
+          <ProductionPanel
+            spec={spec}
+            warehouses={warehouses}
+            defaultWarehouseId={defaultWarehouseId}
+            initial={header.metadata}
+            disabled={disabled}
+            onExplode={(generated, meta) => {
+              replaceOrigin(['bom'], generated)
+              patchHeader({ metadata: { ...header.metadata, ...meta }, default_warehouse_id: meta.warehouse_id })
+            }}
+          />
+        </FormSectionCard>
       ) : null}
       {spec.formKind === 'job_work_in' ? (
-        <SettlementsPanel
-          spec={spec}
-          partyRef={partyRefNum}
-          value={savedSettlements}
-          disabled={disabled}
-          onChange={(settlements, consumed, detectedParty) => {
-            replaceOrigin(['settlement'], consumed)
-            patchHeader({ metadata: { ...header.metadata, job_work_settlements: settlements }, ...(header.party_ref === '' && detectedParty ? { party_ref: String(detectedParty) } : {}) })
-          }}
-        />
+        <FormSectionCard padding="md">
+          <SettlementsPanel
+            spec={spec}
+            partyRef={partyRefNum}
+            value={savedSettlements}
+            disabled={disabled}
+            onChange={(settlements, consumed, detectedParty) => {
+              replaceOrigin(['settlement'], consumed)
+              patchHeader({ metadata: { ...header.metadata, job_work_settlements: settlements }, ...(header.party_ref === '' && detectedParty ? { party_ref: String(detectedParty) } : {}) })
+            }}
+          />
+        </FormSectionCard>
       ) : null}
       {spec.formKind === 'inward_challan' && header.stock_effect === 'settle_deferred' ? (
-        <DeferredPurchasePanel
-          spec={spec}
-          partyRef={partyRefNum}
-          linkedSourceDocumentId={header.metadata.linked_source_document_id ? Number(header.metadata.linked_source_document_id) : null}
-          disabled={disabled}
-          onChange={(docId, generated, detectedParty) => {
-            replaceOrigin(['deferred'], generated)
-            patchHeader({ metadata: { ...header.metadata, linked_source_document_id: docId ?? undefined }, ...(header.party_ref === '' && detectedParty ? { party_ref: String(detectedParty) } : {}) })
-          }}
-        />
+        <FormSectionCard padding="md">
+          <DeferredPurchasePanel
+            spec={spec}
+            partyRef={partyRefNum}
+            linkedSourceDocumentId={header.metadata.linked_source_document_id ? Number(header.metadata.linked_source_document_id) : null}
+            disabled={disabled}
+            onChange={(docId, generated, detectedParty) => {
+              replaceOrigin(['deferred'], generated)
+              patchHeader({ metadata: { ...header.metadata, linked_source_document_id: docId ?? undefined }, ...(header.party_ref === '' && detectedParty ? { party_ref: String(detectedParty) } : {}) })
+            }}
+          />
+        </FormSectionCard>
       ) : null}
-      {spec.formKind === 'physical_count' ? <PhysicalCountPanel spec={spec} warehouses={warehouses} defaultWarehouseId={defaultWarehouseId} disabled={disabled} onLoad={(generated) => replaceOrigin(['count', 'manual'], generated, false)} /> : null}
+      {spec.formKind === 'physical_count' ? (
+        <FormSectionCard padding="md">
+          <PhysicalCountPanel spec={spec} warehouses={warehouses} defaultWarehouseId={defaultWarehouseId} disabled={disabled} onLoad={(generated) => replaceOrigin(['count', 'manual'], generated, false)} />
+        </FormSectionCard>
+      ) : null}
       {spec.formKind === 'landed_cost' ? (
-        <LandedCostPanel
-          initial={header.metadata}
-          disabled={disabled}
-          onChange={(targetId, charges, detectedParty) =>
-            patchHeader({
-              metadata: { ...header.metadata, target_document_id: targetId ?? undefined, charges },
-              ...(header.party_ref === '' && detectedParty ? { party_ref: String(detectedParty) } : {}),
-            })
-          }
-        />
+        <FormSectionCard padding="md">
+          <LandedCostPanel
+            initial={header.metadata}
+            disabled={disabled}
+            onChange={(targetId, charges, detectedParty) =>
+              patchHeader({
+                metadata: { ...header.metadata, target_document_id: targetId ?? undefined, charges },
+                ...(header.party_ref === '' && detectedParty ? { party_ref: String(detectedParty) } : {}),
+              })
+            }
+          />
+        </FormSectionCard>
       ) : null}
 
-      {/* A landed cost allocation has no item lines: a freight bill names no item and no quantity.
-          What it carries is the receipt it loads and the charges, which the panel above collects. */}
+      {/* A landed cost allocation has no item lines: a freight bill names no item and no
+          quantity. What it carries is the receipt it loads and the charges, which the panel above collects. */}
       {spec.formKind === 'landed_cost' ? null : (
-        <section className="form-section">
-          <h2 className="form-section-title">Lines</h2>
-          {spec.formKind === 'revaluation' ? <p className="form-section-subtitle">Quantity is informational; the new unit cost re-prices every layer still holding the item in that warehouse.</p> : null}
-          {refLoading && warehouses.length === 0 ? <span className="hint">Loading warehouses…</span> : null}
-          <LineEditor spec={spec} header={header} lines={lines} onChange={setLines} warehouses={warehouses} availability={availability} checking={checking} offendingKeys={offending} disabled={disabled} />
-        </section>
+        <FormSectionCard
+          icon={Boxes}
+          title="Item Lines"
+          description={linesSubtitle(spec)}
+          action={
+            showBulkToolbar ? (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Button variant="secondary" size="sm" icon={ListPlus} className="border-violet-200 bg-violet-50 text-violet-700" onClick={() => setAddMultipleOpen(true)} disabled={disabled}>
+                  Add Multiple Items
+                </Button>
+                <Button variant="secondary" size="sm" icon={FileUp} onClick={() => setImportOpen(true)} disabled={disabled}>
+                  Import
+                </Button>
+                <Button variant="secondary" size="sm" icon={ScanBarcode} onClick={() => setScanOpen(true)} disabled={disabled}>
+                  Scan Barcode
+                </Button>
+              </div>
+            ) : undefined
+          }
+        >
+          {spec.formKind === 'revaluation' ? <p className="-mt-2 mb-3 text-xs text-gray-500">Quantity is informational; the new unit cost re-prices every layer still holding the item in that warehouse.</p> : null}
+          {refLoading && warehouses.length === 0 ? <p className="mb-2 text-xs text-gray-500">Loading warehouses…</p> : null}
+          <LineEditor spec={spec} header={header} lines={lines} onChange={updateLines} warehouses={warehouses} availability={availability} checking={checking} offendingKeys={offending} disabled={disabled} focusKey={focusKey} />
+
+          <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2">
+            <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3.5">
+              <div className="flex items-center gap-2 text-amber-800">
+                <TriangleAlert className="h-4 w-4 shrink-0" aria-hidden />
+                <strong className="text-sm">Important Notes</strong>
+              </div>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-gray-600">
+                <li>Stock quantity will be {impactVerb} for the selected items once this posts.</li>
+                <li>Ensure proper approval for high-value transactions before posting.</li>
+                <li>Attach supporting documents (photos, reports) wherever possible.</li>
+                <li>This transaction is recorded in the audit trail{spec.code === 'WRITE_OFF' ? ' and can be reversed later from the document if it is posted in error' : ''}.</li>
+              </ul>
+            </div>
+
+            {spec.movesStock ? (
+              <div className="rounded-xl border border-sky-200 bg-sky-50/60 p-3.5">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="flex items-center gap-2 text-sky-700">
+                      <Boxes className="h-4 w-4 shrink-0" aria-hidden />
+                      <strong className="text-sm">Stock Impact Preview</strong>
+                    </div>
+                    <p className="mt-0.5 text-xs text-gray-500">The following will happen after posting:</p>
+                  </div>
+                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-sky-50 px-2.5 py-1 text-[10px] font-semibold text-sky-700">
+                    <Eye className="h-3 w-3" aria-hidden />
+                    Live preview
+                  </span>
+                </div>
+                <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-gray-600">
+                  <li>Stock quantity will be reduced or increased for the selected items</li>
+                  <li>Inventory valuation is calculated by the valuation engine when this posts</li>
+                  <li>Entries will reflect in the Stock Register and Valuation Reports</li>
+                  <li>An audit log will be created for this transaction</li>
+                </ul>
+                {totals.lines > 0 ? (
+                  <div className="mt-3 flex items-center gap-4 border-t border-sky-200 pt-2.5 text-xs">
+                    <span className="text-gray-500">
+                      Items <strong className="font-semibold text-gray-900">{totals.lines}</strong>
+                    </span>
+                    <span className="text-gray-500">
+                      {impactQtyLabel} <strong className="font-semibold text-gray-900">{formatQty(impactQtyValue)}</strong>
+                    </span>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        </FormSectionCard>
       )}
 
       {errors.length > 0 ? (
         <Notice kind="error" title="Please fix before saving">
-          <ul className="warning-list">
+          <ul className="list-disc space-y-0.5 pl-4">
             {errors.map((e) => (
               <li key={e}>{e}</li>
             ))}
@@ -345,9 +562,17 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
       ) : null}
       {apiError && !negative ? <Notice kind="error">{apiError}</Notice> : null}
       {negative ? (
-        <Notice kind="error" title="Insufficient stock">
+        <Notice
+          kind="error"
+          title="Stock availability changed"
+          actions={
+            <Button variant="secondary" size="sm" icon={RefreshCw} onClick={reloadAvailability}>
+              Refresh availability
+            </Button>
+          }
+        >
           {apiError ? <div>{apiError}</div> : null}
-          <ul className="warning-list">
+          <ul className="mt-1 list-disc space-y-0.5 pl-4">
             {negative.map((d, i) => (
               <li key={`${d.item_id}-${d.warehouse_id}-${i}`}>
                 {d.item_name ?? `Item #${d.item_id}`}
@@ -356,18 +581,18 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
             ))}
           </ul>
           {canOverride ? (
-            <label className="checkbox" style={{ marginTop: '0.5rem' }}>
-              <input type="checkbox" checked={override} onChange={(e) => setOverride(e.target.checked)} />
+            <label className="mt-2 flex items-center gap-2 text-sm">
+              <input type="checkbox" className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary/30" checked={override} onChange={(e) => setOverride(e.target.checked)} />
               Post anyway and let stock go negative (override)
             </label>
           ) : (
-            <div className="hint">Reduce the quantities or receive stock first. Posting into negative stock needs the "override negative-stock block" permission.</div>
+            <p className="mt-1 text-xs text-gray-500">Reduce the quantities or receive stock first. Posting into negative stock needs the &ldquo;override negative-stock block&rdquo; permission.</p>
           )}
         </Notice>
       ) : null}
       {warnings.length > 0 ? (
         <Notice kind="warning" title="Posted with warnings">
-          <ul className="warning-list">
+          <ul className="list-disc space-y-0.5 pl-4">
             {warnings.map((w, i) => (
               <li key={`${w.code}-${i}`}>{w.message}</li>
             ))}
@@ -375,24 +600,48 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
         </Notice>
       ) : null}
 
-      <div className="form-actions">
-        <span className="muted" style={{ fontSize: '0.8125rem' }}>
-          {totals.lines} line{totals.lines === 1 ? '' : 's'}
-          {savedId ? ` · draft #${savedId}` : ''}
-        </span>
-        <span className="spacer" />
-        <Link className="btn" to={savedId ? `/documents/${savedId}` : '/documents'}>
+      <StickyActionBar
+        totals={
+          <>
+            <ActionBarTotal label="Items" value={totals.lines} />
+            {totals.qtyIn > 0 || spec.lineMode === 'by_line' ? <ActionBarTotal label="Qty in" value={formatQty(totals.qtyIn)} /> : null}
+            {totals.qtyOut > 0 || spec.lineMode === 'by_line' || isTransfer ? <ActionBarTotal label="Qty out" value={formatQty(totals.qtyOut)} /> : null}
+            {spec.rate ? <ActionBarTotal label="Amount" value={formatQty(totals.amount)} /> : null}
+            {savedId ? <span className="text-xs text-gray-400">Draft #{savedId}</span> : null}
+          </>
+        }
+      >
+        <Link to={cancelTo} className="aic inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-3.5 text-sm font-medium text-gray-700 transition-colors hover:border-primary/40 hover:bg-primary-light hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary/30">
           Cancel
         </Link>
-        <button type="submit" className="btn" disabled={disabled || !canSave}>
-          {busy === 'save' ? 'Saving…' : savedId ? 'Save changes' : 'Save draft'}
-        </button>
+        <Button type="submit" variant="secondary" loading={busy === 'save'} disabled={disabled || !canSave} kbd="Ctrl S">
+          {savedId ? 'Save changes' : 'Save as draft'}
+        </Button>
         {canPost ? (
-          <button type="button" className="btn btn-primary" onClick={() => void submit(true)} disabled={disabled || (!canSave && !savedId)}>
-            {busy === 'post' ? 'Posting…' : negative && override ? 'Post with override' : 'Save & post'}
-          </button>
+          <Button type="button" variant="primary" loading={busy === 'post'} disabled={disabled || (!canSave && !savedId)} onClick={() => void submit(true)} kbd="Ctrl ↵">
+            {negative && override ? 'Post with override' : 'Save & Post'}
+          </Button>
         ) : null}
-      </div>
+      </StickyActionBar>
+
+      <AddMultipleItemsModal open={addMultipleOpen} onClose={() => setAddMultipleOpen(false)} warehouseId={bulkWarehouseId} onAdd={(picks) => applyPicked(picks.map((p) => ({ item: p.row, qty: p.qty })))} />
+      <ScanBarcodeModal open={scanOpen} onClose={() => setScanOpen(false)} warehouseId={bulkWarehouseId} onResolved={(row) => applyPicked([{ item: row, qty: '1' }])} />
+      <ImportLinesModal open={importOpen} onClose={() => setImportOpen(false)} warehouseId={bulkWarehouseId} onImport={(rows) => applyPicked(rows.map((r) => ({ item: r.row, qty: r.qty })))} />
+
+      <ConfirmDialog
+        open={pendingNav !== null}
+        title={`Discard unsaved ${spec.label.toLowerCase()}?`}
+        message="Your changes haven't been saved."
+        confirmLabel="Discard changes"
+        danger
+        onCancel={() => setPendingNav(null)}
+        onConfirm={() => {
+          const p = pendingNav
+          setPendingNav(null)
+          setDirty(false)
+          p?.proceed()
+        }}
+      />
     </form>
   )
 }

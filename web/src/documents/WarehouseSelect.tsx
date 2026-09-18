@@ -1,3 +1,4 @@
+import { Select } from '../ui/Select'
 import type { FormOptionWarehouse } from '../services/items'
 
 interface WarehouseSelectProps {
@@ -15,12 +16,12 @@ interface WarehouseSelectProps {
 export function WarehouseSelect({ value, onChange, warehouses, emptyLabel = 'Select warehouse…', id, disabled, className, invalid }: WarehouseSelectProps) {
   const known = value !== null && warehouses.some((w) => w.warehouse_id === value)
   return (
-    <select
+    <Select
       id={id}
-      className={`select${className ? ` ${className}` : ''}`}
+      className={className}
       value={value ?? ''}
       disabled={disabled}
-      aria-invalid={invalid || undefined}
+      invalid={invalid}
       onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
     >
       <option value="">{emptyLabel}</option>
@@ -31,6 +32,6 @@ export function WarehouseSelect({ value, onChange, warehouses, emptyLabel = 'Sel
           {w.warehouse_code ? ` (${w.warehouse_code})` : ''}
         </option>
       ))}
-    </select>
+    </Select>
   )
 }

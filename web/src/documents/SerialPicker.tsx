@@ -1,9 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
+import { X } from 'lucide-react'
 import { Modal } from '../components/Modal'
 import { Notice } from '../components/Notice'
 import { errorMessage, isAbortError } from '../services/api'
 import { lookupApi } from '../services/lookupApi'
 import type { SerialRow } from '../services/lookupApi'
+import { Button } from '../ui/Button'
+import { Input } from '../ui/Input'
+import { Textarea } from '../ui/Textarea'
+import { cx } from '../ui/cx'
 import type { LineSerial } from './types'
 
 interface SerialPickerProps {
@@ -97,64 +102,72 @@ export function SerialPicker({ itemId, itemName, warehouseId, batchId, direction
 
   return (
     <>
-      <button type="button" className={`btn btn-sm${mismatch ? ' btn-danger' : ''}`} onClick={() => setOpen(true)} disabled={disabled}>
+      <Button variant={mismatch ? 'danger' : 'secondary'} size="xs" onClick={() => setOpen(true)} disabled={disabled}>
         Serials {value.length}
         {requiredCount > 0 ? ` / ${requiredCount}` : ''}
-      </button>
+      </Button>
       <Modal open={open} title={`Serial numbers · ${itemName}`} onClose={() => setOpen(false)} size="lg" busy={registering} footer={
         <>
-          <button type="button" className="btn" onClick={() => setOpen(false)}>
+          <Button variant="secondary" onClick={() => setOpen(false)}>
             Cancel
-          </button>
-          <button type="button" className="btn btn-primary" onClick={done}>
+          </Button>
+          <Button variant="primary" onClick={done}>
             Use {draft.length} serial{draft.length === 1 ? '' : 's'}
-          </button>
+          </Button>
         </>
       }>
-        <p className="hint">
-          {direction === 'out' ? 'Pick the serial numbers being issued (in stock at the selected warehouse).' : 'Pick registered serial numbers awaiting receipt, or register new ones.'}
-          {requiredCount > 0 ? ` The line needs ${requiredCount}.` : ''}
-        </p>
-        {error ? <Notice kind="warning">{error}</Notice> : null}
-        {draft.length > 0 ? (
-          <div className="serial-chip-row">
-            {draft.map((s) => (
-              <span key={s.serial_id} className="chip">
-                {s.serial_no ?? `#${s.serial_id}`}
-                <button type="button" aria-label={`Remove ${s.serial_no ?? s.serial_id}`} onClick={() => setDraft((d) => d.filter((x) => x.serial_id !== s.serial_id))}>
-                  ×
-                </button>
-              </span>
+        <div className="flex flex-col gap-3">
+          <p className="text-xs text-gray-500">
+            {direction === 'out' ? 'Pick the serial numbers being issued (in stock at the selected warehouse).' : 'Pick registered serial numbers awaiting receipt, or register new ones.'}
+            {requiredCount > 0 ? ` The line needs ${requiredCount}.` : ''}
+          </p>
+          {error ? <Notice kind="warning">{error}</Notice> : null}
+          {draft.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5">
+              {draft.map((s) => (
+                <span key={s.serial_id} className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-gray-50 py-0.5 pl-2.5 pr-1 text-xs">
+                  {s.serial_no ?? `#${s.serial_id}`}
+                  <button
+                    type="button"
+                    className="rounded-full p-0.5 text-gray-400 hover:bg-gray-200 hover:text-gray-700"
+                    aria-label={`Remove ${s.serial_no ?? s.serial_id}`}
+                    onClick={() => setDraft((d) => d.filter((x) => x.serial_id !== s.serial_id))}
+                  >
+                    <X className="h-3 w-3" aria-hidden />
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : null}
+          <Input placeholder="Filter serial numbers…" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Filter serial numbers" />
+          <div className="max-h-80 overflow-y-auto rounded-lg border border-gray-200">
+            {loading ? <div className="px-3 py-2 text-sm text-gray-500">Loading…</div> : null}
+            {!loading && visible.length === 0 ? <div className="px-3 py-2 text-sm text-gray-500">No serial numbers {direction === 'out' ? 'in stock here' : 'awaiting receipt'}.</div> : null}
+            {visible.map((r, i) => (
+              <label
+                key={r.serial_id}
+                className={cx('flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-gray-50', i > 0 && 'border-t border-gray-100')}
+              >
+                <input type="checkbox" className="h-3.5 w-3.5 rounded border-gray-300 text-primary focus:ring-primary/30" checked={selectedIds.has(r.serial_id)} onChange={() => toggle(r)} />
+                <span className="font-mono text-xs">{r.serial_no}</span>
+                <span className="text-xs text-gray-500">{[r.batch_no, r.warehouse_name].filter(Boolean).join(' · ')}</span>
+              </label>
             ))}
           </div>
-        ) : null}
-        <input className="input" placeholder="Filter serial numbers…" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Filter serial numbers" />
-        <div className="picker-list">
-          {loading ? <div className="typeahead-empty">Loading…</div> : null}
-          {!loading && visible.length === 0 ? <div className="typeahead-empty">No serial numbers {direction === 'out' ? 'in stock here' : 'awaiting receipt'}.</div> : null}
-          {visible.map((r) => (
-            <label key={r.serial_id}>
-              <input type="checkbox" checked={selectedIds.has(r.serial_id)} onChange={() => toggle(r)} />
-              <span className="mono">{r.serial_no}</span>
-              <span className="muted">
-                {[r.batch_no, r.warehouse_name].filter(Boolean).join(' · ')}
-              </span>
-            </label>
-          ))}
-        </div>
-        {direction === 'in' ? (
-          <div className="stack" style={{ gap: '0.375rem' }}>
-            <label className="field-label" htmlFor={`new-serials-${itemId}`}>
-              Register new serial numbers (one per line)
-            </label>
-            <textarea id={`new-serials-${itemId}`} className="textarea" value={newSerials} onChange={(e) => setNewSerials(e.target.value)} placeholder={'SN-0001\nSN-0002'} />
-            <div>
-              <button type="button" className="btn btn-sm" onClick={() => void register()} disabled={registering || !newSerials.trim()}>
-                {registering ? 'Registering…' : 'Register and select'}
-              </button>
+          {direction === 'in' ? (
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-500" htmlFor={`new-serials-${itemId}`}>
+                Register new serial numbers (one per line)
+              </label>
+              <Textarea id={`new-serials-${itemId}`} value={newSerials} onChange={(e) => setNewSerials(e.target.value)} placeholder={'SN-0001\nSN-0002'} />
+              <div>
+                <Button variant="secondary" size="sm" onClick={() => void register()} disabled={registering || !newSerials.trim()}>
+                  {registering ? 'Registering…' : 'Register and select'}
+                </Button>
+              </div>
             </div>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
       </Modal>
     </>
   )

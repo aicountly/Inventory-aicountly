@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { csvEscape, csvFilename, toCsv } from './csv'
+import { csvEscape, csvFilename, parseCsv, toCsv } from './csv'
 
 describe('csvEscape', () => {
   it('leaves plain values alone and blanks null / undefined', () => {
@@ -43,6 +43,37 @@ describe('toCsv', () => {
 
   it('produces only the header for no rows', () => {
     expect(toCsv([], [{ header: 'A', value: () => 1 }])).toBe('A\r\n')
+  })
+})
+
+describe('parseCsv', () => {
+  it('splits plain rows on commas', () => {
+    expect(parseCsv('sku,qty\nABC-1,5\nABC-2,10')).toEqual([
+      ['sku', 'qty'],
+      ['ABC-1', '5'],
+      ['ABC-2', '10'],
+    ])
+  })
+
+  it('handles quoted fields with embedded commas and escaped quotes', () => {
+    expect(parseCsv('sku,qty\n"Nut, M8",3\n"say ""hi""",1')).toEqual([
+      ['sku', 'qty'],
+      ['Nut, M8', '3'],
+      ['say "hi"', '1'],
+    ])
+  })
+
+  it('accepts CRLF line endings and drops blank rows', () => {
+    expect(parseCsv('sku,qty\r\nABC-1,5\r\n\r\nABC-2,10\r\n')).toEqual([
+      ['sku', 'qty'],
+      ['ABC-1', '5'],
+      ['ABC-2', '10'],
+    ])
+  })
+
+  it('returns an empty array for blank input', () => {
+    expect(parseCsv('')).toEqual([])
+    expect(parseCsv('\n\n')).toEqual([])
   })
 })
 

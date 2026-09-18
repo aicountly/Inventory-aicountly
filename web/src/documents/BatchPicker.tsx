@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react'
+import { Plus } from 'lucide-react'
 import { errorMessage, isAbortError } from '../services/api'
 import { lookupApi } from '../services/lookupApi'
 import type { BatchRow } from '../services/lookupApi'
+import { Button } from '../ui/Button'
+import { Input } from '../ui/Input'
+import { Select } from '../ui/Select'
 import { formatDate, formatQty } from '../utils/format'
 
 interface BatchPickerProps {
@@ -62,26 +66,25 @@ export function BatchPicker({ itemId, warehouseId, value, onChange, allowCreate,
 
   if (creating) {
     return (
-      <div className="stack" style={{ gap: '0.25rem' }}>
-        <input className="input input-sm" placeholder="Batch no." value={batchNo} onChange={(e) => setBatchNo(e.target.value)} aria-label="New batch number" />
-        <input className="input input-sm" type="date" value={expiry} onChange={(e) => setExpiry(e.target.value)} aria-label="Expiry date" />
-        <div className="row" style={{ gap: '0.25rem' }}>
-          <button type="button" className="btn btn-sm btn-primary" onClick={() => void create()} disabled={!batchNo.trim()}>
+      <div className="aic flex flex-col gap-1">
+        <Input size="sm" placeholder="Batch no." value={batchNo} onChange={(e) => setBatchNo(e.target.value)} aria-label="New batch number" />
+        <Input size="sm" type="date" value={expiry} onChange={(e) => setExpiry(e.target.value)} aria-label="Expiry date" />
+        <div className="flex items-center gap-1">
+          <Button variant="primary" size="xs" onClick={() => void create()} disabled={!batchNo.trim()}>
             Add
-          </button>
-          <button type="button" className="btn btn-sm btn-ghost" onClick={() => setCreating(false)}>
+          </Button>
+          <Button variant="ghost" size="xs" onClick={() => setCreating(false)}>
             Cancel
-          </button>
+          </Button>
         </div>
-        {error ? <span className="field-error">{error}</span> : null}
+        {error ? <span className="text-[11px] text-red-600">{error}</span> : null}
       </div>
     )
   }
 
   return (
-    <div className="stack" style={{ gap: '0.125rem' }}>
-      <select
-        className="select"
+    <div className="aic flex flex-col gap-1">
+      <Select
         value={value ?? ''}
         disabled={disabled}
         aria-label="Batch"
@@ -99,10 +102,11 @@ export function BatchPicker({ itemId, warehouseId, value, onChange, allowCreate,
             {b.stock ? ` · avail ${formatQty(b.stock.available)}` : ''}
           </option>
         ))}
-      </select>
+      </Select>
       {allowCreate && !disabled ? (
-        <button type="button" className="btn-link" style={{ fontSize: '0.75rem', alignSelf: 'flex-start' }} onClick={() => setCreating(true)}>
-          + New batch
+        <button type="button" className="aic inline-flex items-center gap-1 self-start text-[11px] font-medium text-primary hover:underline" onClick={() => setCreating(true)}>
+          <Plus className="h-3 w-3" aria-hidden />
+          New batch
         </button>
       ) : null}
     </div>
