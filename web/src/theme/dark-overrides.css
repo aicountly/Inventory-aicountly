@@ -179,6 +179,11 @@
 .dark .bg-sky-50 {
   background-color: rgb(12 74 110 / 0.22);
 }
+/* The count chip on Warehouse groups deepens its own wash on hover rather than
+   switching colour, so the hover step is the same hue one notch stronger. */
+.dark .hover\:bg-sky-100:hover {
+  background-color: rgb(12 74 110 / 0.34);
+}
 .dark .bg-violet-50 {
   background-color: rgb(76 29 149 / 0.22);
 }
@@ -225,6 +230,9 @@
 .dark .border-sky-100,
 .dark .border-sky-200 {
   border-color: rgb(7 89 133 / 0.5);
+}
+.dark .hover\:border-sky-300:hover {
+  border-color: rgb(7 89 133 / 0.75);
 }
 .dark .border-violet-200 {
   border-color: rgb(91 33 182 / 0.5);

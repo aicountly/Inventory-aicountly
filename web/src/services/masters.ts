@@ -57,8 +57,18 @@ export interface Uom extends AuditFields {
 export interface WarehouseGroup extends AuditFields {
   warehouse_group_id: number
   grp_name: string
+  /** Short handle, unique per company, upper-cased by the API. */
+  grp_code: string | null
+  description: string | null
   parent_grp_id: number | null
   is_active: number
+  /** Warehouses naming this group. Decorated by the API, never counted here. */
+  warehouse_count?: number
+  /** Groups naming this one as their parent. */
+  child_count?: number
+  /** Member display name for `created_by`; null when the actor is not a member. */
+  created_by_name?: string | null
+  updated_by_name?: string | null
 }
 
 export type WarehouseType = 'standard' | 'transit' | 'damaged' | 'quarantine' | 'consignment' | 'job_worker' | 'virtual'
