@@ -168,6 +168,9 @@
 .dark .bg-emerald-100 {
   background-color: rgb(6 78 59 / 0.3);
 }
+.dark .bg-violet-100 {
+  background-color: rgb(76 29 149 / 0.3);
+}
 .dark .bg-amber-50 {
   background-color: rgb(120 53 15 / 0.22);
 }
@@ -179,7 +182,8 @@
 .dark .bg-sky-50 {
   background-color: rgb(12 74 110 / 0.22);
 }
-.dark .bg-violet-50 {
+.dark .bg-violet-50,
+.dark .hover\:bg-violet-50:hover {
   background-color: rgb(76 29 149 / 0.22);
 }
 .dark .bg-rose-50 {
@@ -206,11 +210,15 @@
 .dark .bg-red-50\/40 {
   background-color: rgb(127 29 29 / 0.09);
 }
+.dark .bg-amber-50\/40 {
+  background-color: rgb(120 53 15 / 0.09);
+}
 
 .dark .border-emerald-100,
 .dark .border-emerald-200 {
   border-color: rgb(6 95 70 / 0.5);
 }
+.dark .border-amber-100,
 .dark .border-amber-200,
 .dark .border-amber-300 {
   border-color: rgb(146 64 14 / 0.5);
@@ -226,7 +234,9 @@
 .dark .border-sky-200 {
   border-color: rgb(7 89 133 / 0.5);
 }
-.dark .border-violet-200 {
+.dark .border-violet-100,
+.dark .border-violet-200,
+.dark .hover\:border-violet-300:hover {
   border-color: rgb(91 33 182 / 0.5);
 }
 .dark .border-teal-200 {
@@ -252,16 +262,20 @@
 .dark .text-red-600\/80,
 .dark .text-red-600\/90,
 .dark .text-red-700,
+.dark .text-red-800,
 .dark .hover\:text-red-600:hover,
 .dark .hover\:text-red-700:hover {
   color: rgb(252 165 165);
 }
 .dark .text-sky-600,
-.dark .text-sky-700 {
+.dark .text-sky-700,
+.dark .text-sky-800 {
   color: rgb(125 211 252);
 }
 .dark .text-violet-600,
-.dark .text-violet-700 {
+.dark .text-violet-700,
+.dark .text-violet-800,
+.dark .hover\:text-violet-800:hover {
   color: rgb(196 181 253);
 }
 .dark .text-rose-600 {

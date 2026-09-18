@@ -43,11 +43,15 @@ export function PageHeader({
         // the title into an ellipsis. `md:` is 768px, which is exactly a
         // portrait tablet, and five header buttons beside a heading there left
         // the heading about 190px — "Inventory d…" over four lines of subtitle.
+        // `basis-72` is a flex BASIS: on the md: row it is the title block's
+        // width, but in the mobile column it would be its HEIGHT — 288px of
+        // blank between the subtitle and the actions on every page that has
+        // both. Hence md: on the two flex properties, not just on the direction.
         'flex flex-col gap-2 md:flex-row md:flex-wrap md:items-start md:justify-between',
         className,
       )}
     >
-      <div className="min-w-0 flex-1 basis-72 flex items-start gap-3">
+      <div className="min-w-0 md:flex-1 md:basis-72 flex items-start gap-3">
         {backTo ? (
           <Link
             to={backTo}
