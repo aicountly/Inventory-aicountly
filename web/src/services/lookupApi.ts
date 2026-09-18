@@ -96,6 +96,22 @@ export const lookupApi = {
     return res.data
   },
 
+  /**
+   * One item by barcode or SKU (`GET /v1/items/by-barcode/{code}`) — what a scanner and a pasted
+   * code column resolve through. 404s when nothing matches, so callers catch.
+   *
+   * The endpoint answers with the list columns, which carry no alternate units and no default
+   * warehouse, so both are normalised to the search row's shape rather than left undefined: a
+   * caller reading `row.units` must not have to know which endpoint the row came from.
+   */
+  async byBarcode(code: string, warehouseId?: number | null, signal?: AbortSignal): Promise<ItemSearchRow> {
+    const res = await api.get<ItemResponse<Partial<ItemSearchRow> & { item_id: number }>>(`v1/items/by-barcode/${encodeURIComponent(code)}`, {
+      query: { warehouse_id: warehouseId ?? undefined },
+      signal,
+    })
+    return { units: [], default_warehouse_id: null, ...res.data } as ItemSearchRow
+  },
+
   async itemsByIds(ids: number[], signal?: AbortSignal): Promise<ItemSearchRow[]> {
     if (ids.length === 0) return []
     const res = await api.post<ItemResponse<ItemSearchRow[]>>('v1/items/bulk-lookup', { item_ids: ids }, { signal })

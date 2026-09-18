@@ -36,6 +36,13 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { MASTER_PERMISSION_SLUGS, P } from '../services/access'
+import { slugForCode } from '../documents/registry'
+
+/** `/documents/new/<slug>` — the create route DocumentFormPage owns. */
+const documentEntry = (code: string): string => `/documents/new/${slugForCode(code)}`
+
+/** The type's own create permission, or the blanket one (documents/actions.ts). */
+const documentCreate = (code: string): readonly string[] => [`documents.${slugForCode(code)}.create`, 'documents.create']
 
 /**
  * The one navigation model for the whole app.
@@ -417,6 +424,27 @@ export const SIDEBAR_NAV: readonly SidebarNavItem[] = [
             description: 'Every type you can raise — receipts, issues, transfers, adjustments, production, job work.',
             icon: FilePlus2,
           },
+        ],
+      },
+      {
+        /*
+         * The adjustments, straight from the rail.
+         *
+         * The hub above lists all twenty-one types and stays the way in to the rest; these six are
+         * the ones a stores or finance user raises week in, week out, and reaching them was two
+         * clicks and a scan of a grouped list. Each one is a real create route
+         * (`/documents/new/<slug>`) gated on the type's own create permission, so a profile that
+         * cannot raise one never sees it.
+         */
+        label: 'Adjust stock',
+        icon: Scale,
+        items: [
+          { label: 'Stock revaluation', path: documentEntry('REVALUATION'), description: 'Re-price the cost of stock on hand without moving any of it.', icon: Coins, permissions: documentCreate('REVALUATION') },
+          { label: 'Stock transfer', path: documentEntry('STOCK_TRANSFER'), description: 'Move stock between two warehouses.', icon: ArrowLeftRight, permissions: documentCreate('STOCK_TRANSFER') },
+          { label: 'Stock journal', path: documentEntry('STOCK_JOURNAL'), description: 'Free-form in and out lines with a stock adjustment effect.', icon: ScrollText, permissions: documentCreate('STOCK_JOURNAL') },
+          { label: 'Batch adjustment', path: documentEntry('BATCH_ADJUSTMENT'), description: 'Correct batch allocations without changing value.', icon: Layers, permissions: documentCreate('BATCH_ADJUSTMENT') },
+          { label: 'Serial adjustment', path: documentEntry('SERIAL_ADJUSTMENT'), description: 'Correct serial numbers without changing value.', icon: Barcode, permissions: documentCreate('SERIAL_ADJUSTMENT') },
+          { label: 'Physical stock count', path: documentEntry('PHYSICAL_ADJUSTMENT'), description: 'Book quantity against counted quantity per item and warehouse.', icon: ClipboardList, permissions: documentCreate('PHYSICAL_ADJUSTMENT') },
         ],
       },
       {

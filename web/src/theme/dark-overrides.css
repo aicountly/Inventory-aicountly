@@ -179,7 +179,8 @@
 .dark .bg-sky-50 {
   background-color: rgb(12 74 110 / 0.22);
 }
-.dark .bg-violet-50 {
+.dark .bg-violet-50,
+.dark .hover\:bg-violet-50:hover {
   background-color: rgb(76 29 149 / 0.22);
 }
 .dark .bg-rose-50 {
@@ -226,7 +227,8 @@
 .dark .border-sky-200 {
   border-color: rgb(7 89 133 / 0.5);
 }
-.dark .border-violet-200 {
+.dark .border-violet-200,
+.dark .hover\:border-violet-200:hover {
   border-color: rgb(91 33 182 / 0.5);
 }
 .dark .border-teal-200 {
