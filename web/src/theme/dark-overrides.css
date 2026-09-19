@@ -212,7 +212,8 @@
   border-color: rgb(6 95 70 / 0.5);
 }
 .dark .border-amber-200,
-.dark .border-amber-300 {
+.dark .border-amber-300,
+.dark .hover\:border-amber-300:hover {
   border-color: rgb(146 64 14 / 0.5);
 }
 .dark .border-red-100,
@@ -239,7 +240,8 @@
 .dark .text-emerald-600,
 .dark .text-emerald-700,
 .dark .text-emerald-800,
-.dark .text-emerald-900 {
+.dark .text-emerald-900,
+.dark .hover\:text-emerald-800:hover {
   color: rgb(110 231 183);
 }
 .dark .text-amber-600,
