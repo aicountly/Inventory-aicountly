@@ -20,6 +20,7 @@ import { METHOD_LABELS, REPORT_METHODS, valuationApi } from '../../services/valu
 import type { ValuationSnapshotRow } from '../../services/valuationApi'
 import { formatInt, formatMoney, formatQty, todayIso } from '../../utils/format'
 import '../views.css'
+import { ValuationTabs } from './ValuationLayout'
 
 const FILTER_KEYS = ['as_of', 'method', 'item_id', 'warehouse_id'] as const
 
@@ -104,6 +105,7 @@ export function ValuationSnapshotPage() {
           />
         }
       />
+      <ValuationTabs />
       <RequirePermission permission={P.report('valuation')} what="stock valuation">
         <div className="toolbar">
           <input className="input date" type="date" value={asOf} onChange={(e) => params.setFilter('as_of', e.target.value)} aria-label="As at" />

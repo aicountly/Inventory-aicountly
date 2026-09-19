@@ -24,6 +24,7 @@ import type { RecalcJob } from '../../services/valuationApi'
 import { useToast } from '../../ui/ToastContext'
 import { formatDate, formatDateTime, formatInt, formatMoney, humanize, todayIso } from '../../utils/format'
 import '../views.css'
+import { ValuationTabs } from './ValuationLayout'
 
 const FILTER_KEYS = ['status', 'item_id', 'trigger_kind', 'from', 'to', 'all_fy'] as const
 const STATUS_TONE: Record<string, 'neutral' | 'good' | 'warning' | 'critical' | 'info'> = { QUEUED: 'info', RUNNING: 'warning', COMPLETED: 'good', FAILED: 'critical', CANCELLED: 'neutral' }
@@ -133,6 +134,7 @@ export function RecalculationsPage() {
           </>
         }
       />
+      <ValuationTabs />
       <RequirePermission permission={P.report('valuation')} what="recalculations">
         <div className="toolbar">
           <select className="select" value={state.filters.status ?? ''} onChange={(e) => params.setFilter('status', e.target.value)} aria-label="Status">

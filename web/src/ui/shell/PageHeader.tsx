@@ -78,7 +78,13 @@ export function PageHeader({
         </div>
       ) : null}
       {actions ? (
-        <div className="flex items-center flex-wrap gap-2 shrink-0 print:hidden">{actions}</div>
+        // `flex-wrap` with `min-w-0`, not `shrink-0` — the same fix the compact
+        // variant of BreadcrumbHeader already carries, for the same reason: a
+        // shrink-proof row cannot fall below its max-content width, so on a
+        // tablet a header with four or more buttons never wrapped and pushed
+        // the page sideways instead. Letting it shrink costs nothing where
+        // there is room, because the row is max-content anyway.
+        <div className="flex min-w-0 flex-wrap items-center gap-2 print:hidden">{actions}</div>
       ) : null}
     </div>
   )

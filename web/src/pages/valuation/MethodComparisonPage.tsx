@@ -24,6 +24,7 @@ import { formatCurrencyCompact } from '../../dashboard/formatters'
 import { FILTER_CARD } from '../../styles/designTokens'
 import { formatInt, formatMoney, formatQty, todayIso } from '../../utils/format'
 import { cx } from '../../ui/cx'
+import { ValuationTabs } from './ValuationLayout'
 
 const FILTER_KEYS = ['as_of', 'item_id', 'warehouse_id'] as const
 
@@ -107,6 +108,8 @@ export function MethodComparisonPage() {
         icon={Scale}
         backTo="/registers/valuation"
       />
+
+      <ValuationTabs />
 
       <RequirePermission permission={P.report('valuation')} what="Method comparison">
         <div className={cx(FILTER_CARD, 'flex flex-wrap items-end gap-3')}>

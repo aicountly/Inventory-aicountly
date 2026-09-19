@@ -171,6 +171,14 @@
 .dark .bg-amber-50 {
   background-color: rgb(120 53 15 / 0.22);
 }
+/* The hover step of the warning button on the cost-layer workspace. Kept
+   beside its base for the same reason the red one is: a wash that darkens on
+   hover in light mode has to lighten on a dark card, or the control loses its
+   feedback exactly where the contrast is already tightest. */
+.dark .bg-amber-100,
+.dark .hover\:bg-amber-100:hover {
+  background-color: rgb(120 53 15 / 0.3);
+}
 .dark .bg-red-50,
 .dark .hover\:bg-red-50:hover,
 .dark .focus\:bg-red-50:focus {
@@ -212,7 +220,8 @@
   border-color: rgb(6 95 70 / 0.5);
 }
 .dark .border-amber-200,
-.dark .border-amber-300 {
+.dark .border-amber-300,
+.dark .hover\:border-amber-400:hover {
   border-color: rgb(146 64 14 / 0.5);
 }
 .dark .border-red-100,
@@ -245,7 +254,8 @@
 .dark .text-amber-600,
 .dark .text-amber-700,
 .dark .text-amber-800,
-.dark .text-amber-900 {
+.dark .text-amber-900,
+.dark .hover\:text-amber-900:hover {
   color: rgb(252 211 77);
 }
 .dark .text-red-600,

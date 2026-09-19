@@ -21,6 +21,7 @@ import type { ValuationRevision } from '../../services/valuationApi'
 import { useToast } from '../../ui/ToastContext'
 import { formatDate, formatDateTime, formatMoney, formatQty } from '../../utils/format'
 import '../views.css'
+import { ValuationTabs } from './ValuationLayout'
 
 const FILTER_KEYS = ['acknowledged', 'job_id', 'document_id', 'item_id', 'source_app', 'from', 'to'] as const
 
@@ -140,6 +141,7 @@ export function RevisionsPage() {
           </>
         }
       />
+      <ValuationTabs />
       <RequirePermission permission={P.report('valuation')} what="valuation revisions">
         <div className="toolbar">
           <select className="select" value={acknowledged} onChange={(e) => params.setFilter('acknowledged', e.target.value)} aria-label="Acknowledged">
