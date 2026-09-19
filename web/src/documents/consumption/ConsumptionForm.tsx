@@ -208,6 +208,18 @@ export function ConsumptionForm({ spec, documentId, initial, existingStatus, exi
     setWarnings([])
     if (kind === 'draft') setNegative(null)
     const errs = validateDraft(header, lines, spec)
+    // validateDraft only flags a serial mismatch once some serials are picked; it does not
+    // require batch/serial selection in the first place — the backend does not enforce this
+    // either (a confirmed gap), so it is worth catching here before a batch/serial-tracked line
+    // silently posts against no specific batch or serial at all.
+    lines.filter((l) => !isBlankLine(l)).forEach((l, i) => {
+      const n = i + 1
+      if (l.item_id && l.track_batch && !l.batch_id) errs.push(`Line ${n}: this item is batch-tracked — pick a batch.`)
+      if (l.item_id && l.track_serial) {
+        const required = lineBaseQty(l)
+        if (l.serials.length !== required) errs.push(`Line ${n}: this item is serial-tracked — pick ${formatQty(required)} serial number(s) (${l.serials.length} selected).`)
+      }
+    })
     if (errs.length) {
       setErrors(errs)
       return
