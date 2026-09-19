@@ -206,6 +206,9 @@
 .dark .bg-red-50\/40 {
   background-color: rgb(127 29 29 / 0.09);
 }
+.dark .bg-amber-50\/40 {
+  background-color: rgb(120 53 15 / 0.09);
+}
 
 .dark .border-emerald-100,
 .dark .border-emerald-200 {

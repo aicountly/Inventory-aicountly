@@ -6,11 +6,21 @@ import { useQuery } from '../hooks/useQuery'
 import { errorMessage } from '../services/api'
 import { documentsApi } from '../services/documentsApi'
 import { DocumentForm } from './DocumentForm'
+import { MaterialIssuePage } from './materialIssue/MaterialIssuePage'
 import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS } from './actions'
 import { draftFromDocument } from './formModel'
 import { specForCode, specForSlug, UNAVAILABLE_TYPES } from './registry'
 import type { DocumentStatus } from './types'
 import './documents.css'
+
+/**
+ * Types with a screen of their own instead of the generic lines form.
+ *
+ * Only the entry experience differs: the draft model, the validation, the
+ * payload and the posting calls are the shared ones, so a type in this set
+ * behaves exactly as it did — it is just laid out for the job it does.
+ */
+const DEDICATED_FORMS = new Set(['MATERIAL_ISSUE'])
 
 /** `/documents/new/:slug` and `/documents/:id/edit`. */
 export function DocumentFormPage() {
@@ -93,16 +103,36 @@ export function DocumentFormPage() {
       )
     }
     const initial = draftFromDocument(doc, spec)
+    const reapproval = doc.status === 'APPROVED' || doc.status === 'PENDING_APPROVAL'
+      ? <Notice kind="info">Saving changes returns the document to draft; it will need approval again.</Notice>
+      : null
+    if (DEDICATED_FORMS.has(spec.code)) {
+      return (
+        <MaterialIssuePage
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          documentNo={doc.document_no}
+          status={doc.status as DocumentStatus}
+          notice={reapproval}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
     return (
       <div className="page">
         <PageHeader title={`Edit ${spec.label.toLowerCase()} ${doc.document_no ?? `#${doc.document_id}`}`} subtitle={`Version ${doc.version} · ${STATUS_LABELS[doc.status as DocumentStatus] ?? doc.status}`} breadcrumbs={[...crumbs, { label: doc.document_no ?? `#${doc.document_id}`, to: `/documents/${doc.document_id}` }]} />
-        {doc.status === 'APPROVED' || doc.status === 'PENDING_APPROVAL' ? <Notice kind="info">Saving changes returns the document to draft; it will need approval again.</Notice> : null}
+        {reapproval}
         <DocumentForm key={doc.document_id} spec={spec} documentId={doc.document_id} initial={initial} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
       </div>
     )
   }
 
   const s = spec as NonNullable<typeof spec>
+  if (DEDICATED_FORMS.has(s.code)) {
+    return <MaterialIssuePage key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
   return (
     <div className="page">
       <PageHeader title={`New ${s.label.toLowerCase()}`} breadcrumbs={crumbs} />

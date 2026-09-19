@@ -47,7 +47,11 @@ export function PageHeader({
         className,
       )}
     >
-      <div className="min-w-0 flex-1 basis-72 flex items-start gap-3">
+      {/* `basis-72` is a width for the `md:flex-row` case. Unprefixed it is also
+          the flex basis of the column below 768px, where the main axis is
+          vertical — an 18rem-tall title block with a 100px title in it, on every
+          page that uses this header. It belongs to the row, so it is scoped to it. */}
+      <div className="min-w-0 flex-1 md:basis-72 flex items-start gap-3">
         {backTo ? (
           <Link
             to={backTo}
