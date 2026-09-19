@@ -37,6 +37,55 @@ final class StockAgeingBucketsTest extends TestCase
         }
     }
 
+    /** @return array<string, array{qty: float, value: float}> */
+    private static function buckets(float $a = 0, float $b = 0, float $c = 0, float $d = 0, float $e = 0): array
+    {
+        $qty = [$a, $b, $c, $d, $e];
+
+        return array_combine(
+            InventoryReportService::AGE_BUCKETS,
+            array_map(static fn (float $v) => ['qty' => $v, 'value' => $v * 10], $qty),
+        );
+    }
+
+    public function testStockHealthTakesTheOldestMaterialBand(): void
+    {
+        // 10% of the value past 180 days is enough, however fresh the other 90% is.
+        $this->assertSame('obsolete', InventoryReportService::classifyStockHealth(self::buckets(90, 0, 0, 0, 10), 1000.0));
+        $this->assertSame('slow', InventoryReportService::classifyStockHealth(self::buckets(80, 0, 0, 20, 0), 1000.0));
+        $this->assertSame('watch', InventoryReportService::classifyStockHealth(self::buckets(70, 0, 30, 0, 0), 1000.0));
+        // Just under each trigger, so the next band down decides.
+        $this->assertSame('slow', InventoryReportService::classifyStockHealth(self::buckets(0, 0, 0, 91, 9), 1000.0));
+        $this->assertSame('watch', InventoryReportService::classifyStockHealth(self::buckets(0, 0, 72, 19, 9), 1000.0));
+    }
+
+    public function testStockHealthFreshNeedsMostOfTheValueInTheNewestBucket(): void
+    {
+        $this->assertSame('fresh', InventoryReportService::classifyStockHealth(self::buckets(70, 30, 0, 0, 0), 1000.0));
+        $this->assertSame('healthy', InventoryReportService::classifyStockHealth(self::buckets(69, 31, 0, 0, 0), 1000.0));
+        $this->assertSame('fresh', InventoryReportService::classifyStockHealth(self::buckets(100, 0, 0, 0, 0), 1000.0));
+        $this->assertSame('healthy', InventoryReportService::classifyStockHealth(self::buckets(0, 100, 0, 0, 0), 1000.0));
+    }
+
+    public function testStockHealthFallsBackToQuantityWhenTheLineCarriesNoValue(): void
+    {
+        $free = ['0_30' => ['qty' => 0.0, 'value' => 0.0], '31_60' => ['qty' => 0.0, 'value' => 0.0], '61_90' => ['qty' => 0.0, 'value' => 0.0], '91_180' => ['qty' => 0.0, 'value' => 0.0], '180_plus' => ['qty' => 40.0, 'value' => 0.0]];
+        $this->assertSame('obsolete', InventoryReportService::classifyStockHealth($free, 0.0), 'zero-cost stock still ages');
+        // Nothing on hand at all is not a verdict about ageing.
+        $this->assertSame('healthy', InventoryReportService::classifyStockHealth(self::buckets(), 0.0));
+    }
+
+    public function testStockHealthStatusesAreStableAndLabelled(): void
+    {
+        $this->assertSame(['obsolete', 'slow', 'watch', 'healthy', 'fresh'], InventoryReportService::STOCK_HEALTH_STATUSES);
+        foreach (InventoryReportService::STOCK_HEALTH_STATUSES as $status) {
+            $this->assertArrayHasKey($status, InventoryReportService::STOCK_HEALTH_LABELS);
+        }
+        foreach (array_keys(InventoryReportService::STOCK_HEALTH_TRIGGERS) as $bucket) {
+            $this->assertContains($bucket, InventoryReportService::AGE_BUCKETS, 'a trigger names a band that exists');
+        }
+    }
+
     public function testAgeDaysFromTimestampsIsDateOnlyAndNeverNegative(): void
     {
         $this->assertSame(0, InventoryReportService::ageDays('2026-04-01 23:59:59', '2026-04-01'));

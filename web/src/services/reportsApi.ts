@@ -21,6 +21,8 @@ export interface ReportItemColumns {
   item_name: string | null
   item_alias: string | null
   item_sku: string | null
+  /** HSN / SAC code from the item master. */
+  hsn_sac?: string | null
   unit_id: number | null
   unit_symbol: string | null
   item_grp_id: number | null
@@ -148,6 +150,40 @@ export interface AgeBucket {
   value: number
 }
 
+/**
+ * A bucket in the SUMMARY, which also carries a headcount.
+ *
+ * `items` counts each line once, in the band its own weighted average age falls in — the
+ * donut drawn over it is a whole, and a count that added a line to every band it touched
+ * would sum to more items than the register has rows. The row-level buckets carry no such
+ * count, because a row IS one item.
+ */
+export interface AgeBucketTotals extends AgeBucket {
+  items: number
+}
+
+/**
+ * How one line's ageing reads as a single word.
+ *
+ * Decided by the server from the shares of THAT LINE's own value
+ * (InventoryReportService::classifyStockHealth), so the CSV, the PDF and the printed
+ * sheet carry the same word the screen does.
+ */
+export type StockHealthStatus = 'fresh' | 'healthy' | 'watch' | 'slow' | 'obsolete'
+
+/** One dimension of the ageing split — a warehouse or an item group. */
+export interface AgeingBreakdown {
+  warehouse_id?: number | null
+  warehouse_name?: string | null
+  item_grp_id?: number | null
+  grp_name?: string | null
+  items: number
+  qty: number
+  value: number
+  value_over_90: number
+  value_over_180: number
+}
+
 export interface StockAgeingRow extends ReportItemColumns {
   warehouse_id: number | null
   warehouse_name: string | null
@@ -159,15 +195,26 @@ export interface StockAgeingRow extends ReportItemColumns {
   weighted_age_days: number | null
   layers: number
   aged_from: string | null
+  health_status: StockHealthStatus
 }
 
 export interface StockAgeingSummary {
   items: number
   total_qty: number
   total_value: number
-  buckets: Record<AgeBucketKey, AgeBucket>
+  buckets: Record<AgeBucketKey, AgeBucketTotals>
   bucket_labels: Record<AgeBucketKey, string>
   as_of: string
+  /** Quantity-weighted mean age over the whole filtered set. */
+  weighted_age_days: number | null
+  oldest_days: number | null
+  by_health: Record<StockHealthStatus, { items: number; value: number }>
+  /** Biggest holding first, bounded server-side. */
+  by_warehouse: AgeingBreakdown[]
+  by_item_group: AgeingBreakdown[]
+  /** Echo of the two derived filters, so the screen can say what it applied. */
+  age_bucket: AgeBucketKey | null
+  health: StockHealthStatus | null
 }
 
 export type MovementClass = 'fast' | 'slow' | 'non_moving' | 'dead'

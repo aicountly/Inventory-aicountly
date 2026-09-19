@@ -111,7 +111,14 @@ class ReportsController extends BaseController
     public function stockAgeing()
     {
         return $this->report('stock_ageing', function (array $ctx, array $p) {
-            $f = $this->commonFilters($p) + $this->dates(['as_of']) + ['by_warehouse' => $this->flag('by_warehouse', false)];
+            $f = $this->commonFilters($p) + $this->dates(['as_of']) + [
+                'by_warehouse' => $this->flag('by_warehouse', false),
+                // Both are properties of the assembled line rather than of any column a
+                // table here carries, so the service applies them — and applies them
+                // before it totals, so the cards and the footer speak for what is shown.
+                'age_bucket'   => strtolower(trim((string) ($this->request->getGet('age_bucket') ?? ''))) ?: null,
+                'health'       => strtolower(trim((string) ($this->request->getGet('health') ?? ''))) ?: null,
+            ];
 
             return $this->reports->stockAgeing((int) $ctx['cmp_id'], (int) $ctx['fy_id'], (int) $ctx['bo_id'], $f, $p['limit'], $p['offset']);
         }, 100, 1000, 'item_name');

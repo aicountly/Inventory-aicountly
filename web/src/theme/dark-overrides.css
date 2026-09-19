@@ -264,8 +264,14 @@
 .dark .text-violet-700 {
   color: rgb(196 181 253);
 }
-.dark .text-rose-600 {
+.dark .text-rose-600,
+.dark .text-rose-700 {
   color: rgb(253 164 175);
+}
+/* The 91-180 ageing band, which is orange everywhere it is drawn. */
+.dark .text-orange-600,
+.dark .text-orange-700 {
+  color: rgb(253 186 116);
 }
 .dark .text-teal-600,
 .dark .text-teal-700 {

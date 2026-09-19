@@ -1,4 +1,4 @@
-import { AlertTriangle, CalendarClock, Hourglass, ShoppingCart, TrendingDown } from 'lucide-react'
+import { AlertTriangle, CalendarClock, ShoppingCart, TrendingDown } from 'lucide-react'
 import type {
   MovementAnalysisRow,
   MovementAnalysisSummary,
@@ -6,22 +6,17 @@ import type {
   NearExpirySummary,
   ReplenishmentRow,
   ReplenishmentSummary,
-  StockAgeingRow,
-  StockAgeingSummary,
 } from '../../services/reportsApi'
 import { buildTotalsRow, totalsLabel } from '../../registers/registerTotals'
 import type { RegisterConfig, StatCardSpec } from '../../registers/RegisterConfig'
 import { StatusBadge } from '../../ui/StatusBadge'
 import { formatInt, formatMoney, formatQty } from '../../utils/format'
 import {
-  AGE_BUCKET_LABELS,
-  AGE_BUCKET_ORDER,
   MOVEMENT_CLASS_LABELS,
   MOVEMENT_CLASS_ORDER,
   MOVEMENT_CLASS_TONES,
   expiryTone,
 } from '../helpers'
-import type { ReportColumn } from '../types'
 import {
   DASH,
   byWarehouseFilter,
@@ -41,113 +36,6 @@ function ledgerLink(itemId: number, warehouseId?: number | null): string {
   const qs = new URLSearchParams({ item_id: String(itemId) })
   if (warehouseId) qs.set('warehouse_id', String(warehouseId))
   return `/registers/stock-ledger?${qs.toString()}`
-}
-
-const ageBucketColumns: ReportColumn<StockAgeingRow>[] = AGE_BUCKET_ORDER.flatMap((key) => [
-  {
-    key: `bucket_${key}_qty`,
-    header: `${AGE_BUCKET_LABELS[key]} qty`,
-    align: 'right' as const,
-    format: 'qty' as const,
-    configureLabel: `${AGE_BUCKET_LABELS[key]} — quantity`,
-    render: (r: StockAgeingRow) => formatQty(r.buckets?.[key]?.qty),
-    csv: (r: StockAgeingRow) => r.buckets?.[key]?.qty ?? 0,
-  },
-  {
-    key: `bucket_${key}_value`,
-    header: `${AGE_BUCKET_LABELS[key]} value`,
-    align: 'right' as const,
-    format: 'amount' as const,
-    amount: true,
-    configureLabel: `${AGE_BUCKET_LABELS[key]} — value`,
-    render: (r: StockAgeingRow) => formatMoney(r.buckets?.[key]?.value),
-    csv: (r: StockAgeingRow) => r.buckets?.[key]?.value ?? 0,
-  },
-])
-
-export const stockAgeingConfig: RegisterConfig<StockAgeingRow, StockAgeingSummary> = {
-  slug: 'stock_ageing',
-  path: 'stock-ageing',
-  title: 'Stock ageing',
-  description:
-    'Open cost layers bucketed by age as at a date — how long the stock on hand has been sitting',
-  group: 'analysis',
-  icon: Hourglass,
-  defaultSort: 'total_value',
-  defaultOrder: 'desc',
-  minWidth: 1600,
-  printOrientation: 'landscape',
-  filters: [
-    { key: 'as_of', kind: 'date', label: 'As at', defaultValue: (c) => c.today },
-    itemFilter,
-    warehouseFilter,
-    byWarehouseFilter,
-  ],
-  columns: [
-    itemColumn<StockAgeingRow>(),
-    textColumn<StockAgeingRow>('warehouse_name', 'Warehouse', false),
-    ...ageBucketColumns,
-    qtyColumn<StockAgeingRow>('total_qty', 'Total qty', { strong: true }),
-    moneyColumn<StockAgeingRow>('total_value', 'Total value', { strong: true }),
-    {
-      key: 'weighted_age_days',
-      header: 'Avg age (days)',
-      align: 'right',
-      sortKey: 'weighted_age_days',
-      render: (r) => (r.weighted_age_days === null ? DASH : formatInt(Math.round(r.weighted_age_days))),
-    },
-    {
-      key: 'oldest_days',
-      header: 'Oldest',
-      align: 'right',
-      sortKey: 'oldest_days',
-      render: (r) => (r.oldest_days === null ? DASH : `${formatInt(r.oldest_days)} d`),
-    },
-  ],
-  rowKey: (r) => `${r.item_id}:${r.warehouse_id ?? 0}`,
-  drillTo: (r) => ledgerLink(r.item_id, r.warehouse_id),
-  // Every bucket has a server-side total, so the footer lines up column for
-  // column with the header — including the buckets a reader has hidden.
-  totals: (s) => {
-    const values: Record<string, string> = {
-      total_qty: formatQty(s.total_qty),
-      total_value: formatMoney(s.total_value),
-    }
-    for (const key of AGE_BUCKET_ORDER) {
-      values[`bucket_${key}_qty`] = formatQty(s.buckets?.[key]?.qty)
-      values[`bucket_${key}_value`] = formatMoney(s.buckets?.[key]?.value)
-    }
-    return buildTotalsRow(
-      [
-        { key: 'item_name' },
-        { key: 'warehouse_name' },
-        ...AGE_BUCKET_ORDER.flatMap((key) => [
-          { key: `bucket_${key}_qty`, align: 'right' as const },
-          { key: `bucket_${key}_value`, align: 'right' as const },
-        ]),
-        { key: 'total_qty', align: 'right' as const },
-        { key: 'total_value', align: 'right' as const },
-        { key: 'weighted_age_days', align: 'right' as const },
-        { key: 'oldest_days', align: 'right' as const },
-      ],
-      values,
-      { label: totalsLabel(s.items, 'item'), labelKey: 'item_name' },
-    )
-  },
-  summary: (s) => [
-    { label: 'Items', value: formatInt(s.items) },
-    { label: 'Total qty', value: formatQty(s.total_qty) },
-    { label: 'Total value', value: formatMoney(s.total_value), tone: 'good' },
-    ...AGE_BUCKET_ORDER.map((key) => ({
-      label: s.bucket_labels?.[key] ?? AGE_BUCKET_LABELS[key],
-      value: formatMoney(s.buckets?.[key]?.value),
-      hint: `${formatQty(s.buckets?.[key]?.qty)} qty`,
-      tone: (key === '180_plus' ? 'critical' : key === '91_180' ? 'warning' : 'neutral') as
-        | 'critical'
-        | 'warning'
-        | 'neutral',
-    })),
-  ],
 }
 
 export const movementAnalysisConfig: RegisterConfig<MovementAnalysisRow, MovementAnalysisSummary> = {

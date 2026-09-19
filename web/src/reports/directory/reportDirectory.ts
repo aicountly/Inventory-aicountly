@@ -26,8 +26,8 @@ import {
   movementAnalysisConfig,
   nearExpiryConfig,
   replenishmentConfig,
-  stockAgeingConfig,
 } from '../configs/analysisReports'
+import { stockAgeingConfig } from '../configs/stockAgeing'
 import {
   batchStockConfig,
   serialStockConfig,

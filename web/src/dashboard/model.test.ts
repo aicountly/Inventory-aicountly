@@ -262,11 +262,11 @@ describe('ageingSeries', () => {
     total_qty: 100,
     total_value: 1000,
     buckets: {
-      '0_30': { qty: 40, value: 500 },
-      '31_60': { qty: 20, value: 250 },
-      '61_90': { qty: 10, value: 150 },
-      '91_180': { qty: 20, value: 100 },
-      '180_plus': { qty: 10, value: 0 },
+      '0_30': { qty: 40, value: 500, items: 4 },
+      '31_60': { qty: 20, value: 250, items: 2 },
+      '61_90': { qty: 10, value: 150, items: 2 },
+      '91_180': { qty: 20, value: 100, items: 2 },
+      '180_plus': { qty: 10, value: 0, items: 0 },
     },
     bucket_labels: {
       '0_30': '0-30 days',
@@ -276,6 +276,19 @@ describe('ageingSeries', () => {
       '180_plus': '180+ days',
     },
     as_of: ASOF,
+    weighted_age_days: 48,
+    oldest_days: 210,
+    by_health: {
+      fresh: { items: 4, value: 500 },
+      healthy: { items: 2, value: 250 },
+      watch: { items: 2, value: 150 },
+      slow: { items: 2, value: 100 },
+      obsolete: { items: 0, value: 0 },
+    },
+    by_warehouse: [],
+    by_item_group: [],
+    age_bucket: null,
+    health: null,
   }
 
   it('keeps the buckets in age order, including empty ones', () => {

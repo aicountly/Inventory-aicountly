@@ -240,6 +240,35 @@ final class InventoryReportServiceTest extends IntegrationTestCase
         $this->assertEqualsWithDelta(33.0, $r['summary']['total_qty'], 0.0001);
         $this->assertEqualsWithDelta(2640.0, $r['summary']['total_value'], 0.01);
 
+        // Quantity-weighted mean age over the whole set, not the mean of the two rows'
+        // own means: (8x26 + 5x51 + 20x26) / 33.
+        $this->assertSame(30, $r['summary']['weighted_age_days']);
+        $this->assertSame(51, $r['summary']['oldest_days']);
+        // Each line counted once, in the band its own weighted age falls in.
+        $this->assertSame(1, $r['summary']['buckets']['0_30']['items'], 'Gadget, 26 days');
+        $this->assertSame(1, $r['summary']['buckets']['31_60']['items'], 'Widget, 36 days');
+        $this->assertSame(0, $r['summary']['buckets']['180_plus']['items']);
+        $this->assertSame('fresh', $gadget['health_status'], 'all of its value in the newest band');
+        $this->assertSame('healthy', $widget['health_status'], '63% fresh is not enough for "fresh"');
+        $this->assertSame(1, $r['summary']['by_health']['fresh']['items']);
+        $this->assertSame(1, $r['summary']['by_health']['healthy']['items']);
+        // One warehouse holds everything, and the breakdown totals to the summary.
+        $this->assertCount(1, $r['summary']['by_warehouse']);
+        $this->assertEqualsWithDelta(2640.0, $r['summary']['by_warehouse'][0]['value'], 0.01);
+        $this->assertEqualsWithDelta(0.0, $r['summary']['by_warehouse'][0]['value_over_90'], 0.01);
+
+        // The age band narrows the rows AND the figures beside them: Widget is the only
+        // line with stock in 31-60, and it comes back whole.
+        $band = $this->reports->stockAgeing($this->cmpId, $this->fyId, 0, ['as_of' => '2026-05-31', 'age_bucket' => '31_60'], 50, 0);
+        $this->assertSame(1, $band['total']);
+        $this->assertSame('Widget', $band['rows'][0]['item_name']);
+        $this->assertEqualsWithDelta(13.0, $band['summary']['total_qty'], 0.0001, 'the line is kept whole, not sliced to the band');
+        $this->assertSame(0, $band['summary']['by_health']['fresh']['items'], 'Gadget is gone from the totals too');
+
+        $healthy = $this->reports->stockAgeing($this->cmpId, $this->fyId, 0, ['as_of' => '2026-05-31', 'health' => 'fresh'], 50, 0);
+        $this->assertSame(1, $healthy['total']);
+        $this->assertSame('Gadget', $healthy['rows'][0]['item_name']);
+
         // far in the future everything is 180+
         $old = $this->reports->stockAgeing($this->cmpId, $this->fyId, 0, ['as_of' => '2027-03-31', 'item_id' => $s['widget']], 50, 0);
         $this->assertEqualsWithDelta(13.0, $old['rows'][0]['buckets']['180_plus']['qty'], 0.0001);

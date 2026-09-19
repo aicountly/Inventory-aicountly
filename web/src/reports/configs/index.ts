@@ -1,5 +1,6 @@
 import type { RegisterConfig } from '../../registers/RegisterConfig'
-import { movementAnalysisConfig, nearExpiryConfig, replenishmentConfig, stockAgeingConfig } from './analysisReports'
+import { movementAnalysisConfig, nearExpiryConfig, replenishmentConfig } from './analysisReports'
+import { stockAgeingConfig } from './stockAgeing'
 import { batchStockConfig, serialStockConfig, stockSummaryConfig, warehouseStockConfig } from './stockReports'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
