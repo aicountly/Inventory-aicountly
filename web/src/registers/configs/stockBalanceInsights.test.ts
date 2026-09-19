@@ -99,10 +99,35 @@ describe('the stock balance at-a-glance strip', () => {
   })
 
   it('says "All good!" only when the page IS the whole register', () => {
-    const { by, set } = insightsFor([row()])
+    const { by } = insightsFor([row()])
     expect(by('negative').hint).toBe('All good!')
     expect(by('sync').hint).toBe('Data up to date')
-    expect(set.note).toBe('Your inventory. In perfect balance.')
+    expect(by('insights').hint).toBe('No additional issues detected')
+  })
+
+  /*
+   * The fifth tile is called "Insights", never "AI insights".
+   *
+   * There is no insights service in Inventory to call. The tile counts rows
+   * that are already on screen, so these pin both the wording and the fact
+   * that it says something the four tiles beside it do not.
+   */
+  it('reports held stock as an insight, additive to the other tiles', () => {
+    const { by } = insightsFor([
+      row({ reserved_qty: 4 }),
+      row({ balance_id: 2, packed_qty: 1 }),
+      row({ balance_id: 3, job_worker_qty: 2 }),
+      row({ balance_id: 4 }),
+    ])
+    expect(by('insights').label).toBe('Insights')
+    expect(by('insights').hint).toBe('3 rows reserved, packed or at a job worker')
+  })
+
+  it('never claims a machine analysed anything', () => {
+    const { set } = insightsFor([row()])
+    const labels = set.items.map((i) => String(i.label))
+    expect(labels).toContain('Insights')
+    expect(labels.some((l) => /\bAI\b/i.test(l))).toBe(false)
   })
 
   /** The one that matters. */
@@ -113,10 +138,13 @@ describe('the stock balance at-a-glance strip', () => {
     expect(by('skus').hint).toBe('On this page')
     expect(by('sync').hint).toBe('Figures cover this page')
     expect(set.note, 'no all-clear over 2 rows of 800').toBeUndefined()
+    // The insight is scoped for the same reason every other hint here is.
+    expect(by('insights').hint).toBe('No additional issues detected · this page')
   })
 
   it('claims nothing about an empty result', () => {
-    const { set } = insightsFor([])
+    const { set, by } = insightsFor([])
     expect(set.note).toBeUndefined()
+    expect(by('insights').hint).toBe('No additional issues detected')
   })
 })
