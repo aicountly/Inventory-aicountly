@@ -131,8 +131,18 @@ class ValuationController extends BaseController
     }
 
     /**
-     * GET /valuation/cost-layers?item_id=&warehouse_id=&open_only=1&layer_kind=
+     * GET /valuation/cost-layers
+     *   ?item_id=&warehouse_id=&batch_id=&open_only=1&layer_kind=&status=&from=&to=&all_fy=
+     *
      * FIFO/LIFO layers of one item with the consumption trail of each layer.
+     *
+     * Two aggregates come back, and the difference between them is the whole
+     * point. `summary` describes the layers the filters actually selected — it
+     * is what the screen's counts and totals may quote. `distribution`
+     * deliberately ignores `open_only` and `status`, because it is the split of
+     * the item's layers BY state: computed over a set already narrowed to one
+     * state it would report that state as 100% of the item's value, which is
+     * the most confidently wrong figure a valuation screen could print.
      */
     public function costLayers()
     {
@@ -151,28 +161,54 @@ class ValuationController extends BaseController
             return $this->failStructured(404, 'not_found', 'Item not found');
         }
         $p = $this->listParams(200, 2000, 'received_at');
-        $b = $db->table('inv_cost_layers cl')->where('cl.cmp_id', $cmpId)->where('cl.item_id', $itemId);
+
+        // Every filter EXCEPT the two that select a layer state, so the
+        // distribution below can still see the states those would remove.
+        $scoped = $db->table('inv_cost_layers cl')->where('cl.cmp_id', $cmpId)->where('cl.item_id', $itemId);
         if ((int) ($this->request->getGet('all_fy') ?? 0) !== 1) {
-            $b->where('cl.fy_id', (int) $a['ctx']['fy_id']);
+            $scoped->where('cl.fy_id', (int) $a['ctx']['fy_id']);
         }
         $warehouseId = (int) ($this->request->getGet('warehouse_id') ?? 0);
         if ($warehouseId > 0) {
-            $b->where('cl.warehouse_id', $warehouseId);
-        }
-        if ((int) ($this->request->getGet('open_only') ?? 0) === 1) {
-            $b->where('cl.qty_remaining >', 0);
+            $scoped->where('cl.warehouse_id', $warehouseId);
         }
         $kind = strtolower(trim((string) ($this->request->getGet('layer_kind') ?? '')));
         if (in_array($kind, ['opening', 'receipt', 'backorder', 'revaluation'], true)) {
-            $b->where('cl.layer_kind', $kind);
+            $scoped->where('cl.layer_kind', $kind);
         }
+        if ($batchId = (int) ($this->request->getGet('batch_id') ?? 0)) {
+            $scoped->where('cl.batch_id', $batchId);
+        }
+        if ($from = $this->dateParam('from')) {
+            $scoped->where('cl.received_at >=', $from . ' 00:00:00');
+        }
+        if ($to = $this->dateParam('to')) {
+            $scoped->where('cl.received_at <=', $to . ' 23:59:59');
+        }
+
+        $b = clone $scoped;
+        if ((int) ($this->request->getGet('open_only') ?? 0) === 1) {
+            $b->where('cl.qty_remaining >', 0);
+        }
+        $status = strtolower(trim((string) ($this->request->getGet('status') ?? '')));
+        if (isset(self::LAYER_STATE_SQL[$status])) {
+            $b->where('(' . self::LAYER_STATE_SQL[$status] . ')', null, false);
+        }
+
         $total = (clone $b)->countAllResults(false);
-        $summary = (clone $b)->select('COALESCE(SUM(CASE WHEN cl.qty_remaining > 0 THEN cl.qty_remaining ELSE 0 END),0) AS open_qty, COALESCE(SUM(CASE WHEN cl.qty_remaining > 0 THEN cl.qty_remaining * cl.unit_cost ELSE 0 END),0) AS open_value, COALESCE(SUM(CASE WHEN cl.qty_remaining < 0 THEN cl.qty_remaining ELSE 0 END),0) AS backorder_qty', false)->get()->getRowArray() ?: [];
-        $sort = in_array($p['sort'], ['received_at', 'layer_id', 'qty_remaining', 'unit_cost', 'layer_kind'], true) ? 'cl.' . $p['sort'] : 'cl.received_at';
-        $layers = $b->select('cl.layer_id, cl.fy_id, cl.item_id, cl.warehouse_id, cl.batch_id, cl.layer_kind, cl.qty_received, cl.qty_remaining, cl.unit_cost, cl.received_at, cl.source_document_id, cl.source_line_id, cl.created_at, w.warehouse_name, d.document_no AS source_document_no, d.document_type AS source_document_type, d.document_date AS source_document_date')
+        $summary = (clone $b)->select(self::LAYER_SUMMARY_SELECT, false)->get()->getRowArray() ?: [];
+        $buckets = (clone $scoped)->select(self::LAYER_BUCKET_SELECT, false)->get()->getRowArray() ?: [];
+        // `remaining_value` is not a column — it is what the screen's "highest
+        // value first" view orders by, so it is spelled out here rather than
+        // sorted client-side over one page of a thousand-layer item.
+        $sort = in_array($p['sort'], ['received_at', 'layer_id', 'qty_remaining', 'qty_received', 'unit_cost', 'layer_kind'], true)
+            ? 'cl.' . $p['sort']
+            : ($p['sort'] === 'remaining_value' ? '(cl.qty_remaining * cl.unit_cost)' : 'cl.received_at');
+        $layers = $b->select('cl.layer_id, cl.fy_id, cl.item_id, cl.warehouse_id, cl.batch_id, cl.layer_kind, cl.qty_received, cl.qty_remaining, cl.unit_cost, cl.received_at, cl.source_document_id, cl.source_line_id, cl.created_at, w.warehouse_name, d.document_no AS source_document_no, d.document_type AS source_document_type, d.document_date AS source_document_date, bt.batch_no, bt.lot_no, bt.expiry_date, bt.status AS batch_status')
             ->join('inv_warehouses w', 'w.warehouse_id = cl.warehouse_id', 'left')
             ->join('inv_documents d', 'd.document_id = cl.source_document_id', 'left')
-            ->orderBy($sort, $p['order'])->orderBy('cl.layer_id', $p['order'])
+            ->join('inv_batches bt', 'bt.batch_id = cl.batch_id', 'left')
+            ->orderBy($sort, $p['order'], false)->orderBy('cl.layer_id', $p['order'])
             ->limit($p['limit'], $p['offset'])->get()->getResultArray();
 
         $position = [];
@@ -185,6 +221,12 @@ class ValuationController extends BaseController
             }
             $l['qty_consumed'] = $l['qty_received'] !== null ? round($l['qty_received'] - $l['qty_remaining'], 4) : null;
             $l['remaining_value'] = round($l['qty_remaining'] * $l['unit_cost'], 4);
+            // What the layer was worth when it opened, which is what a split by
+            // state has to add up: a closed layer's remaining value is zero, so
+            // a distribution over remaining value would price every exhausted
+            // layer at nothing and claim the item's cost never moved.
+            $l['layer_value'] = round(($l['qty_received'] ?? $l['qty_remaining']) * $l['unit_cost'], 4);
+            $l['layer_status'] = self::layerStatus($l['qty_received'], $l['qty_remaining']);
             $l['consumptions'] = [];
             $layers[$idx] = $l;
             $position[$l['layer_id']] = $idx;
@@ -212,11 +254,76 @@ class ValuationController extends BaseController
             }
         }
 
+        $receivedQty = round((float) ($summary['received_qty'] ?? 0), 4);
+        $receivedValue = round((float) ($summary['received_value'] ?? 0), 4);
+
         return $this->respondList($layers, $total, $p['limit'], $p['offset'], ['item' => $item, 'summary' => [
-            'open_qty'      => round((float) ($summary['open_qty'] ?? 0), 4),
-            'open_value'    => round((float) ($summary['open_value'] ?? 0), 4),
-            'backorder_qty' => round((float) ($summary['backorder_qty'] ?? 0), 4),
-        ]]);
+            'open_qty'       => round((float) ($summary['open_qty'] ?? 0), 4),
+            'open_value'     => round((float) ($summary['open_value'] ?? 0), 4),
+            'backorder_qty'  => round((float) ($summary['backorder_qty'] ?? 0), 4),
+            'layer_count'    => (int) ($summary['layer_count'] ?? 0),
+            'received_qty'   => $receivedQty,
+            'received_value' => $receivedValue,
+            'unit_cost_min'  => $summary['unit_cost_min'] === null ? null : round((float) $summary['unit_cost_min'], 4),
+            'unit_cost_max'  => $summary['unit_cost_max'] === null ? null : round((float) $summary['unit_cost_max'], 4),
+            // Weighted by the quantity each layer opened with — the average a
+            // rupee of this item actually cost, not the average of the rates.
+            'unit_cost_avg'  => $receivedQty > 0 ? round($receivedValue / $receivedQty, 4) : null,
+            'first_received_at' => $summary['first_received_at'] ?? null,
+            'last_received_at'  => $summary['last_received_at'] ?? null,
+        ], 'distribution' => self::distribution($buckets)]);
+    }
+
+    /**
+     * The four states a cost layer can be in, as SQL predicates.
+     *
+     * `qty_received IS NULL` is a layer migrated from Books, which recorded no
+     * opening quantity. It is untouched stock, not an exhausted layer, so it
+     * reads as open rather than falling through to partially consumed.
+     */
+    private const LAYER_STATE_SQL = [
+        'open'     => 'cl.qty_remaining > 0 AND (cl.qty_received IS NULL OR cl.qty_remaining >= cl.qty_received)',
+        'partial'  => 'cl.qty_remaining > 0 AND cl.qty_received IS NOT NULL AND cl.qty_remaining < cl.qty_received',
+        'closed'   => 'cl.qty_remaining = 0',
+        'negative' => 'cl.qty_remaining < 0',
+    ];
+
+    private const LAYER_SUMMARY_SELECT = 'COALESCE(SUM(CASE WHEN cl.qty_remaining > 0 THEN cl.qty_remaining ELSE 0 END),0) AS open_qty, COALESCE(SUM(CASE WHEN cl.qty_remaining > 0 THEN cl.qty_remaining * cl.unit_cost ELSE 0 END),0) AS open_value, COALESCE(SUM(CASE WHEN cl.qty_remaining < 0 THEN cl.qty_remaining ELSE 0 END),0) AS backorder_qty, COUNT(*) AS layer_count, COALESCE(SUM(COALESCE(cl.qty_received, cl.qty_remaining)),0) AS received_qty, COALESCE(SUM(COALESCE(cl.qty_received, cl.qty_remaining) * cl.unit_cost),0) AS received_value, MIN(cl.unit_cost) AS unit_cost_min, MAX(cl.unit_cost) AS unit_cost_max, MIN(cl.received_at) AS first_received_at, MAX(cl.received_at) AS last_received_at';
+
+    private const LAYER_BUCKET_SELECT = 'COUNT(*) AS layer_count, COALESCE(SUM(COALESCE(cl.qty_received, cl.qty_remaining)),0) AS total_qty, COALESCE(SUM(COALESCE(cl.qty_received, cl.qty_remaining) * cl.unit_cost),0) AS total_value, COALESCE(SUM(CASE WHEN ' . self::LAYER_STATE_SQL['open'] . ' THEN 1 ELSE 0 END),0) AS open_count, COALESCE(SUM(CASE WHEN ' . self::LAYER_STATE_SQL['open'] . ' THEN COALESCE(cl.qty_received, cl.qty_remaining) ELSE 0 END),0) AS open_qty, COALESCE(SUM(CASE WHEN ' . self::LAYER_STATE_SQL['open'] . ' THEN COALESCE(cl.qty_received, cl.qty_remaining) * cl.unit_cost ELSE 0 END),0) AS open_value, COALESCE(SUM(CASE WHEN ' . self::LAYER_STATE_SQL['partial'] . ' THEN 1 ELSE 0 END),0) AS partial_count, COALESCE(SUM(CASE WHEN ' . self::LAYER_STATE_SQL['partial'] . ' THEN COALESCE(cl.qty_received, cl.qty_remaining) ELSE 0 END),0) AS partial_qty, COALESCE(SUM(CASE WHEN ' . self::LAYER_STATE_SQL['partial'] . ' THEN COALESCE(cl.qty_received, cl.qty_remaining) * cl.unit_cost ELSE 0 END),0) AS partial_value, COALESCE(SUM(CASE WHEN ' . self::LAYER_STATE_SQL['closed'] . ' THEN 1 ELSE 0 END),0) AS closed_count, COALESCE(SUM(CASE WHEN ' . self::LAYER_STATE_SQL['closed'] . ' THEN COALESCE(cl.qty_received, cl.qty_remaining) ELSE 0 END),0) AS closed_qty, COALESCE(SUM(CASE WHEN ' . self::LAYER_STATE_SQL['closed'] . ' THEN COALESCE(cl.qty_received, cl.qty_remaining) * cl.unit_cost ELSE 0 END),0) AS closed_value, COALESCE(SUM(CASE WHEN ' . self::LAYER_STATE_SQL['negative'] . ' THEN 1 ELSE 0 END),0) AS negative_count, COALESCE(SUM(CASE WHEN ' . self::LAYER_STATE_SQL['negative'] . ' THEN COALESCE(cl.qty_received, cl.qty_remaining) ELSE 0 END),0) AS negative_qty, COALESCE(SUM(CASE WHEN ' . self::LAYER_STATE_SQL['negative'] . ' THEN COALESCE(cl.qty_received, cl.qty_remaining) * cl.unit_cost ELSE 0 END),0) AS negative_value';
+
+    /** The state one layer is in — the PHP twin of LAYER_STATE_SQL. */
+    private static function layerStatus(?float $qtyReceived, float $qtyRemaining): string
+    {
+        if ($qtyRemaining < 0) {
+            return 'negative';
+        }
+        if ($qtyRemaining == 0.0) {
+            return 'closed';
+        }
+
+        return $qtyReceived === null || $qtyRemaining >= $qtyReceived ? 'open' : 'partial';
+    }
+
+    /** @param array<string, mixed> $row */
+    private static function distribution(array $row): array
+    {
+        $buckets = [];
+        foreach (['open', 'partial', 'closed', 'negative'] as $state) {
+            $buckets[] = [
+                'status'      => $state,
+                'layer_count' => (int) ($row[$state . '_count'] ?? 0),
+                'qty'         => round((float) ($row[$state . '_qty'] ?? 0), 4),
+                'value'       => round((float) ($row[$state . '_value'] ?? 0), 4),
+            ];
+        }
+
+        return [
+            'layer_count' => (int) ($row['layer_count'] ?? 0),
+            'total_qty'   => round((float) ($row['total_qty'] ?? 0), 4),
+            'total_value' => round((float) ($row['total_value'] ?? 0), 4),
+            'buckets'     => $buckets,
+        ];
     }
 
     /**

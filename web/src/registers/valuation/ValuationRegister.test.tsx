@@ -205,8 +205,8 @@ describe('valuation register', () => {
 
   it('totals from the server summary, not from the rows on screen', async () => {
     renderRegister()
-    const table = await screen.findByRole('table')
-    const foot = table.querySelector('tfoot')
+    const code = await screen.findByText('TEST-001')
+    const foot = code.closest('table')?.querySelector('tfoot')
     expect(foot).toBeTruthy()
     expect(within(foot as HTMLElement).getByText('Total (2 items)')).toBeTruthy()
     expect(within(foot as HTMLElement).getByText('965')).toBeTruthy()
