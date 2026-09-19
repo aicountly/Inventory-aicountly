@@ -7,11 +7,13 @@ import type { StatCardSpec } from './RegisterConfig'
 /**
  * The register's KPI cards.
  *
- * `previous` is never passed. The Inventory report endpoints send no
- * comparative figures, and StatCard's contract is that an absent `previous`
- * renders the hint line and no delta chip — which is the designed fallback.
- * Inventing a percentage here would put a number on a manager's screen that no
- * server ever computed.
+ * `previous` is passed through, and passed through ONLY — this file never derives one.
+ * StatCard's contract is that an absent `previous` renders the hint line and no delta
+ * chip, which is the designed fallback for the endpoints that send no comparative, and
+ * most of them do not. A register that has one (the movement register asks
+ * `/v1/stock-movements` for the same aggregate over the preceding window) hands the
+ * server's own figure over; inventing a percentage here would put a number on a
+ * manager's screen that nothing ever computed.
  */
 export function RegisterKpis({
   cards,
@@ -36,6 +38,8 @@ export function RegisterKpis({
           badge={card.badge}
           to={card.to}
           current={card.current}
+          previous={card.previous}
+          invertDelta={card.invertDelta}
           emphasizeNegative={card.emphasizeNegative}
         />
       ))}

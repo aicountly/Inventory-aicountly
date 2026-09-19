@@ -1,5 +1,7 @@
 import {
+  ArrowDownLeft,
   ArrowLeftRight,
+  ArrowUpRight,
   Boxes,
   BookOpen,
   CircleCheck,
@@ -22,23 +24,48 @@ import type {
   StockMovementRow,
 } from '../../services/stockViewsApi'
 import type { LedgerQuery } from '../../services/stockViewsApi'
+import { EmptyState } from '../../ui/EmptyState'
 import { StatusBadge } from '../../ui/StatusBadge'
-import { formatInt, formatMoney, formatQty } from '../../utils/format'
+import { formatDate, formatInt, formatMoney, formatQty } from '../../utils/format'
 import {
   DASH,
   batchFilter,
   dateColumn,
   dateTimeColumn,
   itemFilter,
+  itemGroupFilter,
   moneyColumn,
   periodFilter,
   qtyColumn,
+  stockCategoryFilter,
   textColumn,
   warehouseFilter,
 } from '../../reports/configs/common'
 import { StockBalanceRowActions } from '../StockBalanceRowActions'
+import { MovementHeaderActions } from '../movement/MovementHeaderActions'
+import { MovementRowActions } from '../movement/MovementRowActions'
+import { MovementSelectionActions } from '../movement/MovementSelectionActions'
+import { MovementTrendChart, MovementTrendChartSkeleton } from '../movement/MovementTrendChart'
+import {
+  MovementQtyCell,
+  MovementSourceBadge,
+  MovementTypeBadge,
+  MovementWarehouseCell,
+  movementQtyCsv,
+  warehouseCsv,
+} from '../movement/movementCells'
+import {
+  comparisonFor,
+  comparisonHint,
+  movementScopeHint,
+  movementSummaryOf,
+  movementSummaryOverRows,
+} from '../movement/movementSummary'
+import type { MovementRegisterSummary } from '../movement/movementSummary'
 import { buildTotalsRow, totalsLabel } from '../registerTotals'
 import { defineRegister } from '../RegisterConfig'
+import type { RegisterGrouping } from '../RegisterConfig'
+import type { ReportColumn } from '../../reports/types'
 import { pageHint, summaryOverRows, withPageSummary } from './pageSummary'
 import type { PageSummary } from './pageSummary'
 
@@ -256,60 +283,333 @@ export const stockLedgerRegister = defineRegister<LedgerRow, LedgerSummary>({
 
 /* ------------------------------------------------------- movement register */
 
-const MOVEMENT_SUM_KEYS = ['qty', 'value'] as const
+/**
+ * The movement register's column-preference key.
+ *
+ * Shared with `SavedViewsMenu`, which scopes a reader's saved filter sets by the same
+ * key: both are per-register, per-member preferences and neither may collide with the
+ * stock ledger, whose permission slug this register borrows.
+ */
+const MOVEMENT_PREFS_KEY = 'movement_register'
+
+/**
+ * The register's grid.
+ *
+ * Declared as a named constant rather than inline because the selection toolbar exports
+ * exactly these columns: a file of ticked rows that carried different columns from the
+ * table they were ticked in is a file nobody can reconcile against the screen.
+ *
+ * The first eleven are what the mock shows and what an inventory or accounts reader
+ * works down; everything after them ships hidden and is on offer in Customize columns.
+ * Nothing the endpoint sends has been dropped — the old one-row register's Direction,
+ * Kind, signed Qty and Party are all still here, and Category, Reference, Posted at and
+ * Posted by are new columns for fields the API was already sending with nowhere to put.
+ */
+/*
+ * Widths, not just minimums.
+ *
+ * SmartTable only applies `minWidth` alongside an explicit `width`, so a column that
+ * declares one alone is laid out by the browser — and with `table-layout: auto` the
+ * browser hands the slack to whichever column has the most of it. On this grid that was
+ * Date, which took 340px to print "18 Sept 2026" while the item name wrapped onto three
+ * lines. Pinning the columns whose content is a fixed shape (a date, a batch code, a
+ * quantity, an amount) leaves the rest for the ones that are actually text.
+ */
+const MOVEMENT_COLUMNS: ReportColumn<StockMovementRow>[] = [
+  {
+    ...dateColumn<StockMovementRow>('movement_date', 'Date'),
+    alwaysVisible: true,
+    width: '6.75rem',
+    minWidth: 96,
+  },
+  {
+    key: 'document_no',
+    header: 'Document',
+    alwaysVisible: true,
+    sortKey: 'document_no',
+    width: '8.5rem',
+    minWidth: 112,
+    render: (r) => documentCell(r.document_id, r.document_no),
+    csv: (r) => r.document_no ?? (r.document_id ? `#${r.document_id}` : ''),
+  },
+  {
+    key: 'document_type',
+    header: 'Type',
+    sortKey: 'document_type',
+    width: '9rem',
+    minWidth: 118,
+    render: (r) => <MovementTypeBadge row={r} />,
+    csv: (r) => r.document_type_label ?? r.document_type,
+  },
+  {
+    key: 'item_name',
+    header: 'Item',
+    sortKey: 'item_name',
+    alwaysVisible: true,
+    width: '12.5rem',
+    minWidth: 165,
+    render: (r) => itemCell(r.item_id, r.item_name, r.item_sku, r.warehouse_id),
+    csv: (r) => r.item_name ?? `Item #${r.item_id}`,
+  },
+  {
+    key: 'warehouse_name',
+    header: 'Warehouse',
+    sortKey: 'warehouse_name',
+    width: '11rem',
+    minWidth: 140,
+    render: (r) => <MovementWarehouseCell row={r} />,
+    csv: warehouseCsv,
+  },
+  { ...textColumn<StockMovementRow>('batch_no', 'Batch'), sortKey: 'batch_no', width: '5.5rem' },
+  /*
+   * Inward and outward as two columns, split from the one signed quantity the row
+   * carries. Neither takes a sort key: the endpoint orders by the signed `qty` and
+   * cannot order by half of it, and a header that moved the arrow without reordering
+   * the rows would be read as having sorted them.
+   */
+  {
+    key: 'in_qty',
+    header: 'In qty',
+    align: 'right',
+    alwaysVisible: true,
+    format: 'qty',
+    width: '7rem',
+    minWidth: 96,
+    render: (r) => <MovementQtyCell row={r} side="in" />,
+    csv: (r) => movementQtyCsv(r, 'in'),
+  },
+  {
+    key: 'out_qty',
+    header: 'Out qty',
+    align: 'right',
+    alwaysVisible: true,
+    format: 'qty',
+    width: '7rem',
+    minWidth: 96,
+    render: (r) => <MovementQtyCell row={r} side="out" />,
+    csv: (r) => movementQtyCsv(r, 'out'),
+  },
+  {
+    ...moneyColumn<StockMovementRow>('unit_cost', 'Rate'),
+    width: '6rem',
+    minWidth: 84,
+    configureHint: 'Discloses unit cost.',
+  },
+  {
+    ...moneyColumn<StockMovementRow>('value', 'Value'),
+    width: '7.5rem',
+    minWidth: 100,
+    configureHint: 'Signed, like the stored figure: negative where stock left.',
+    // Signed on purpose. The footer's Net value is this column's sum, so printing it
+    // unsigned would leave a column that does not add up to the total beneath it. The
+    // colour is what stops the minus being a surprise next to two unsigned quantity
+    // columns — and the In / Out columns already say the direction in words.
+    render: (r) => (
+      <span className={r.value !== null && r.value < 0 ? 'text-rose-700' : undefined}>
+        {formatMoney(r.value)}
+      </span>
+    ),
+  },
+  {
+    key: 'source_app',
+    header: 'Source',
+    sortKey: 'source_app',
+    width: '9rem',
+    minWidth: 120,
+    render: (r) => <MovementSourceBadge row={r} />,
+    csv: (r) => (r.source_app ? `${r.source_app} ${r.source_document_no ?? ''}`.trim() : 'Inventory'),
+  },
+  {
+    key: 'direction',
+    header: 'Dir.',
+    sortKey: 'direction',
+    defaultVisible: false,
+    configureHint: 'What the movement was recorded as, before the sign of the quantity.',
+    render: (r) => <StatusBadge value={r.direction} tone={r.direction === 'in' ? 'good' : 'warning'} />,
+    csv: (r) => r.direction,
+  },
+  {
+    ...qtyColumn<StockMovementRow>('qty', 'Signed qty'),
+    defaultVisible: false,
+    configureHint: 'The stored quantity — negative when stock left.',
+    render: (r) => (
+      <strong className={r.qty < 0 ? 'font-semibold text-red-600' : 'font-semibold text-gray-900'}>
+        {formatQty(r.qty)} {r.unit_symbol ?? ''}
+      </strong>
+    ),
+    csv: (r) => r.qty,
+  },
+  {
+    key: 'movement_kind',
+    header: 'Kind',
+    defaultVisible: false,
+    render: (r) => movementKindCell(r.movement_kind),
+    csv: (r) => r.movement_kind,
+  },
+  { ...textColumn<StockMovementRow>('cat_name', 'Category', false), defaultVisible: false },
+  {
+    key: 'source_document_no',
+    header: 'Reference',
+    defaultVisible: false,
+    configureHint: 'The number the raising product gave the document.',
+    render: (r) => r.source_document_no ?? DASH,
+    csv: (r) => r.source_document_no ?? '',
+  },
+  { ...textColumn<StockMovementRow>('party_name', 'Party', false), defaultVisible: false },
+  { ...dateTimeColumn<StockMovementRow>('created_at', 'Posted at'), defaultVisible: false },
+  { ...textColumn<StockMovementRow>('created_by', 'Posted by', false), defaultVisible: false },
+]
+
+/**
+ * One grouping of the movement register, with the subtotal every grouping shares.
+ *
+ * Grouping is a view of the rows ON SCREEN — the engine re-orders what the page served
+ * and totals what it grouped — so each subtotal says so in its own label while the pinned
+ * footer beneath stays the authority on the whole filtered set. Six groupings differing
+ * only in how they key a row do not need six copies of that paragraph or of the sum.
+ */
+function movementGrouping(
+  key: string,
+  label: string,
+  of: (row: StockMovementRow) => { key: string; label: string },
+): RegisterGrouping<StockMovementRow> {
+  return {
+    key,
+    label,
+    of,
+    subtotal: (rows, group) =>
+      buildTotalsRow(
+        [
+          { key: 'movement_date' },
+          { key: 'in_qty', align: 'right' },
+          { key: 'out_qty', align: 'right' },
+          { key: 'value', align: 'right' },
+        ],
+        {
+          in_qty: formatQty(rows.reduce((a, r) => a + (r.qty > 0 ? r.qty : 0), 0)),
+          out_qty: formatQty(rows.reduce((a, r) => a + (r.qty < 0 ? -r.qty : 0), 0)),
+          value: formatMoney(rows.reduce((a, r) => a + (r.value ?? 0), 0)),
+        },
+        {
+          // Named "on this page" because that is what it is: the footer below still
+          // carries the figure for the whole filtered set.
+          label: `${group.label} · ${totalsLabel(rows.length, 'movement')} on this page`,
+          labelKey: 'movement_date',
+        },
+      ),
+  }
+}
+
 
 /**
  * Every posted movement in the year and branch, across all items.
  *
- * The companion to the ledger: the ledger answers "what happened to this
- * item", this answers "what happened on these days, from this source".
+ * The companion to the ledger: the ledger answers "what happened to this item", this
+ * answers "what happened on these days, from this source".
+ *
+ * It is laid out as a `panel` — page heading, a carded filter grid with period chips,
+ * metric cards and a trend band — because this is a register people work in all day
+ * rather than glance at, and because its filters ARE the question: a period, a warehouse
+ * and a document type decide every figure on the screen.
+ *
+ * Its figures come from the endpoint's own aggregate (`summary=1`) over the whole filtered
+ * set, not from the served page, and its comparison is the same aggregate over the
+ * preceding window. That is what lets a card over a 25-row page speak for all 4,000
+ * matching movements and carry an honest percentage beside it — see
+ * `registers/movement/movementSummary.ts` for what happens when the server sends neither.
  */
-export const movementRegister = defineRegister<StockMovementRow, PageSummary>({
+export const movementRegister = defineRegister<StockMovementRow, MovementRegisterSummary>({
   slug: 'stock_ledger',
   path: 'movement-register',
   // Shares its permission slug with the stock ledger but is a different grid,
   // so it needs its own column-preference key.
-  columnPrefsKey: 'movement_register',
+  columnPrefsKey: MOVEMENT_PREFS_KEY,
   title: 'Movement register',
   description:
     'Every posted movement in the year and branch — receipts, issues, reversals and revaluations, whichever product raised them',
-  shortDescription: 'Every posted movement, any item, any source',
+  shortDescription: 'Track all inventory movements across your business in real time',
   group: 'movement',
   icon: ArrowLeftRight,
   permission: [P.report('stock_ledger'), P.documentsRead],
   defaultSort: 'movement_date',
   defaultOrder: 'desc',
-  minWidth: 1500,
+  // Eleven columns ship visible, plus the tick box and the row menu. Below this the item
+  // name starts breaking across three lines and takes each row's height with it, so the
+  // body scrolls sideways instead — which is what an enterprise register grid does.
+  minWidth: 1520,
   rowNoun: 'movement',
   filenameBase: 'movement-register',
-  fetch: async ({ query, signal }) =>
-    withPageSummary(
-      await stockMovementsApi.list(query, signal),
-      'movement_register',
-      MOVEMENT_SUM_KEYS,
-    ),
-  summaryForRows: (s, rows) => summaryOverRows(s, rows, MOVEMENT_SUM_KEYS),
+  layout: 'panel',
+  filterPanel: {
+    description: 'Narrow the register to the movements you are asking about',
+    // The periods a movement register is actually read over. Each one writes real dates
+    // into the URL, and "This FY" takes them from the financial year the header selects —
+    // never from the calendar year, which in India is not the same thing.
+    quickRanges: ['today', 'last_7', 'last_30', 'this_month', 'fy_to_date'],
+    // Eight controls plus the button cell: two clean rows of five rather than three
+    // ragged rows of four.
+    gridColumns: 5,
+    primaryKeys: [
+      'from',
+      'q',
+      'warehouse_id',
+      'batch_id',
+      'document_type',
+      'direction',
+      'movement_kind',
+      'stock_cat_id',
+    ],
+  },
+  headerActions: <MovementHeaderActions registerKey={MOVEMENT_PREFS_KEY} />,
+  tableTitle: 'Movements',
+  tableHint: 'Every line the filters match, newest first',
+  defaultLimit: 25,
+  /**
+   * One request for the page, its aggregate and its chart.
+   *
+   * They travel together so the three can never answer differently filtered questions —
+   * a KPI card that disagrees with the table under it is worse than no card. The export
+   * pager asks for neither: it walks every page of the same query, and re-running the
+   * aggregate on each of seventeen pages would recompute a figure the caller already has
+   * (`summaryForRows` re-totals over what the export actually wrote).
+   */
+  fetch: async ({ query, signal, purpose }) => {
+    const wantsAggregate = purpose !== 'export'
+    const response = await stockMovementsApi.list(
+      { ...query, ...(wantsAggregate ? { summary: 1, trend: 1 } : {}) },
+      signal,
+    )
+    return { ...response, report: 'movement_register', summary: movementSummaryOf(response) }
+  },
+  summaryForRows: (s, rows) => movementSummaryOverRows(s, rows),
   filters: [
     ...periodFilter,
-    { key: 'q', kind: 'text', label: 'Search', placeholder: 'Item, document or party…' },
-    itemFilter,
+    {
+      key: 'q',
+      kind: 'text',
+      label: 'Search',
+      // Exactly the columns StockMovementsController::filteredMovements searches. A
+      // placeholder that named a field the query does not read would send a reader
+      // hunting for a batch number the box cannot find.
+      placeholder: 'Item, document no., batch, reference…',
+    },
     warehouseFilter,
     batchFilter,
-    { key: 'document_type', kind: 'document_type', label: 'Type' },
+    { key: 'document_type', kind: 'document_type', label: 'Document type' },
     {
       key: 'direction',
       kind: 'select',
       label: 'Direction',
       placeholder: 'In and out',
       options: [
-        { value: 'in', label: 'In' },
-        { value: 'out', label: 'Out' },
+        { value: 'in', label: 'Inward only' },
+        { value: 'out', label: 'Outward only' },
       ],
     },
     {
       key: 'movement_kind',
       kind: 'select',
-      label: 'Kind',
+      label: 'Movement type',
       placeholder: 'All kinds',
       options: [
         { value: 'physical', label: 'Physical' },
@@ -317,166 +617,162 @@ export const movementRegister = defineRegister<StockMovementRow, PageSummary>({
         { value: 'revaluation', label: 'Revaluation' },
       ],
     },
-    { key: 'all_fy', kind: 'toggle', label: 'All years', defaultOn: false },
+    { ...stockCategoryFilter, label: 'Item category' },
+    // Behind "More filters": each one narrows to a question asked less often than the
+    // eight above, and none is dropped — the panel's overflow carries the count of those
+    // that are set, so a filter cannot be on without the reader being told.
+    itemFilter,
+    itemGroupFilter,
+    { key: 'all_fy', kind: 'toggle', label: 'All financial years', defaultOn: false },
     // Not shown, but declared: /documents/:id and the dashboard link straight to
     // "the movements this document made", and StockMovementsController reads it.
     { key: 'document_id', kind: 'number', label: 'Document', hidden: true },
   ],
-  columns: [
-    { ...dateColumn<StockMovementRow>('movement_date', 'Date'), alwaysVisible: true, minWidth: 96 },
-    {
-      key: 'document_no',
-      header: 'Document',
-      alwaysVisible: true,
-      sortKey: 'document_no',
-      render: (r) => documentCell(r.document_id, r.document_no),
-      csv: (r) => r.document_no ?? (r.document_id ? `#${r.document_id}` : ''),
-    },
-    {
-      key: 'document_type',
-      header: 'Type',
-      sortKey: 'document_type',
-      render: (r) => r.document_type_label ?? r.document_type,
-      csv: (r) => r.document_type_label ?? r.document_type,
-    },
-    {
-      key: 'item_name',
-      header: 'Item',
-      sortKey: 'item_name',
-      alwaysVisible: true,
-      minWidth: 180,
-      render: (r) => itemCell(r.item_id, r.item_name, r.item_sku, r.warehouse_id),
-      csv: (r) => r.item_name ?? `Item #${r.item_id}`,
-    },
-    textColumn<StockMovementRow>('warehouse_name', 'Warehouse', false),
-    textColumn<StockMovementRow>('batch_no', 'Batch', false),
-    {
-      key: 'direction',
-      header: 'Dir.',
-      sortKey: 'direction',
-      render: (r) => <StatusBadge value={r.direction} tone={r.direction === 'in' ? 'good' : 'warning'} />,
-      csv: (r) => r.direction,
-    },
-    {
-      ...qtyColumn<StockMovementRow>('qty', 'Qty', { strong: true }),
-      alwaysVisible: true,
-      render: (r) => (
-        <strong className={r.qty < 0 ? 'font-semibold text-red-600' : 'font-semibold text-gray-900'}>
-          {formatQty(r.qty)} {r.unit_symbol ?? ''}
-        </strong>
-      ),
-      csv: (r) => r.qty,
-    },
-    { ...moneyColumn<StockMovementRow>('unit_cost', 'Rate'), configureHint: 'Discloses unit cost.' },
-    moneyColumn<StockMovementRow>('value', 'Value'),
-    {
-      key: 'movement_kind',
-      header: 'Kind',
-      render: (r) => movementKindCell(r.movement_kind),
-      csv: (r) => r.movement_kind,
-    },
-    {
-      key: 'source_app',
-      header: 'Source',
-      render: (r) =>
-        r.source_app ? `${r.source_app} · ${r.source_document_no ?? r.source_document_id ?? ''}` : DASH,
-      csv: (r) => (r.source_app ? `${r.source_app} ${r.source_document_no ?? ''}`.trim() : ''),
-    },
-    { ...textColumn<StockMovementRow>('party_name', 'Party', false), defaultVisible: false },
-  ],
+  // "All financial years" widens the query past the year the header selects, and the
+  // scope line is the only record of that on a printed sheet.
+  scopePeriodFor: (v) => (v.all_fy === '1' ? 'All financial years' : undefined),
+  columns: MOVEMENT_COLUMNS,
   rowKey: (r) => r.movement_id,
   drillTo: (r) => (r.document_id ? `/documents/${r.document_id}` : null),
+  // A control, not a column — so it never reaches a CSV or a printed sheet.
+  rowActions: (r) => <MovementRowActions row={r} />,
+  /**
+   * Ticking rows answers "what do these come to together", which a register cannot be
+   * read down to answer. Nothing here writes: the actions are a subtotal and a file.
+   */
+  selectable: {
+    idOf: (r) => r.movement_id,
+    label: 'Select movement',
+    actions: (selected, _clear, summary) => (
+      <MovementSelectionActions rows={selected} summary={summary} columns={MOVEMENT_COLUMNS} />
+    ),
+  },
   groupBy: [
-    {
-      key: 'document_type',
-      label: 'Document type',
-      of: (r) => ({ key: r.document_type, label: r.document_type_label ?? r.document_type }),
-      subtotal: (rows, group) =>
-        buildTotalsRow(
-          [
-            { key: 'movement_date' },
-            { key: 'qty', align: 'right' },
-            { key: 'value', align: 'right' },
-          ],
-          {
-            qty: formatQty(rows.reduce((a, r) => a + r.qty, 0)),
-            value: formatMoney(rows.reduce((a, r) => a + (r.value ?? 0), 0)),
-          },
-          // Named "on this page" because that is what it is: the footer below
-          // still carries the figure for the whole filtered set.
-          { label: `${group.label} · ${totalsLabel(rows.length, 'movement')} on this page`, labelKey: 'movement_date' },
-        ),
-    },
-    {
-      key: 'warehouse',
-      label: 'Warehouse',
-      of: (r) => ({ key: String(r.warehouse_id ?? 0), label: r.warehouse_name ?? 'No warehouse' }),
-      subtotal: (rows, group) =>
-        buildTotalsRow(
-          [
-            { key: 'movement_date' },
-            { key: 'qty', align: 'right' },
-            { key: 'value', align: 'right' },
-          ],
-          {
-            qty: formatQty(rows.reduce((a, r) => a + r.qty, 0)),
-            value: formatMoney(rows.reduce((a, r) => a + (r.value ?? 0), 0)),
-          },
-          { label: `${group.label} · ${totalsLabel(rows.length, 'movement')} on this page`, labelKey: 'movement_date' },
-        ),
-    },
+    movementGrouping('document_type', 'Document type', (r) => ({
+      key: r.document_type,
+      label: r.document_type_label ?? r.document_type,
+    })),
+    movementGrouping('warehouse', 'Warehouse', (r) => ({
+      key: String(r.warehouse_id ?? 0),
+      label: r.warehouse_name ?? 'No warehouse',
+    })),
+    movementGrouping('item', 'Item', (r) => ({
+      key: String(r.item_id),
+      label: r.item_name ?? `Item #${r.item_id}`,
+    })),
+    movementGrouping('date', 'Date', (r) => ({
+      key: r.movement_date,
+      label: formatDate(r.movement_date),
+    })),
+    movementGrouping('batch', 'Batch', (r) => ({
+      key: String(r.batch_id ?? 0),
+      label: r.batch_no ?? 'No batch',
+    })),
+    movementGrouping('category', 'Item category', (r) => ({
+      key: String(r.stock_cat_id ?? 0),
+      label: r.cat_name ?? 'No category',
+    })),
   ],
+  /**
+   * The pinned footer, over the WHOLE filtered set.
+   *
+   * `s.in_qty` and friends are the endpoint's aggregate, so the figure under a 25-row page
+   * is the total of every matching movement — which is the difference between a register
+   * and a list. When the aggregate is missing (an export re-total, an older API) `whole`
+   * is false and the label says which rows the figures cover.
+   */
   totals: (s) =>
     buildTotalsRow(
       [
         { key: 'movement_date' },
-        { key: 'qty', align: 'right' },
+        { key: 'in_qty', align: 'right' },
+        { key: 'out_qty', align: 'right' },
         { key: 'value', align: 'right' },
       ],
-      { qty: formatQty(s.sums.qty), value: formatMoney(s.sums.value) },
       {
-        label: `${totalsLabel(s.pageRows, 'movement')} — ${pageHint(s)}`,
+        in_qty: formatQty(s.in_qty),
+        out_qty: formatQty(s.out_qty),
+        value: formatMoney(s.net_value),
+      },
+      {
+        // Kept short on purpose. SmartTable pins the totals row `whitespace-nowrap` so it
+        // cannot break over three lines, which means whatever is written here sets the
+        // width of the column it sits in — a sentence here stretched Date to 330px and
+        // pushed Source off the screen. The caveat is only spelled out when there IS one:
+        // a server aggregate covers every matching movement, and the cards above already
+        // say so.
+        label: s.whole
+          ? totalsLabel(s.total, 'movement')
+          : `${totalsLabel(s.pageRows, 'movement')} — this page only`,
         labelKey: 'movement_date',
       },
     ),
   kpis: (s) => [
     {
-      key: 'rows',
-      label: 'Movements',
+      key: 'movements',
+      label: 'Total movements',
       value: formatInt(s.total),
-      hint: 'matching the filters',
+      hint: comparisonHint(s),
       icon: ArrowLeftRight,
       tone: 'primary',
+      current: s.movements,
+      previous: comparisonFor(s, 'movements'),
     },
     {
-      key: 'qty',
-      label: 'Net quantity',
-      value: formatQty(s.sums.qty),
-      hint: pageHint(s),
-      icon: ArrowLeftRight,
+      key: 'in_qty',
+      label: 'Total inward qty',
+      value: formatQty(s.in_qty),
+      hint: comparisonHint(s),
+      icon: ArrowDownLeft,
       tone: 'info',
-      current: s.sums.qty,
-      emphasizeNegative: true,
+      current: s.in_qty,
+      previous: comparisonFor(s, 'in_qty'),
     },
     {
-      key: 'value',
-      label: 'Net value',
-      value: formatMoney(s.sums.value),
-      hint: pageHint(s),
+      key: 'out_qty',
+      label: 'Total outward qty',
+      value: formatQty(s.out_qty),
+      hint: comparisonHint(s),
+      icon: ArrowUpRight,
+      tone: 'rose',
+      current: s.out_qty,
+      previous: comparisonFor(s, 'out_qty'),
+      // More stock leaving is not in itself good news, so the chip is not coloured as
+      // though it were: up is drawn red here and green on the inward card beside it.
+      invertDelta: true,
+    },
+    {
+      key: 'net_qty',
+      label: 'Net quantity',
+      value: formatQty(s.net_qty),
+      hint: comparisonHint(s),
       icon: Scale,
-      tone: 'success',
-      current: s.sums.value,
+      tone: 'violet',
+      current: s.net_qty,
+      previous: comparisonFor(s, 'net_qty'),
       emphasizeNegative: true,
     },
   ],
+  analytics: ({ summary, loading }) => <MovementTrendChart summary={summary} loading={loading} />,
+  analyticsSkeleton: <MovementTrendChartSkeleton />,
   summary: (s) => [
     { label: 'Movements', value: formatInt(s.total) },
-    { label: 'Net qty', value: formatQty(s.sums.qty), hint: pageHint(s) },
-    { label: 'Net value', value: formatMoney(s.sums.value), hint: pageHint(s) },
+    { label: 'Inward qty', value: formatQty(s.in_qty), hint: movementScopeHint(s) },
+    { label: 'Outward qty', value: formatQty(s.out_qty), hint: movementScopeHint(s) },
+    { label: 'Net qty', value: formatQty(s.net_qty), hint: movementScopeHint(s) },
+    { label: 'Net value', value: formatMoney(s.net_value), hint: movementScopeHint(s) },
   ],
   rowClassName: (r) => (r.movement_kind === 'reversal' ? 'bg-amber-50/60' : undefined),
-  emptyMessage: 'No movements match these filters.',
+  emptyMessage: 'No inventory movements match the selected filters.',
+  emptyUnfiltered: (
+    <EmptyState
+      icon={ArrowLeftRight}
+      title="No movements yet"
+      description="Nothing has moved stock in this financial year. Post a receipt, an issue or an opening stock document and every line it moves appears here."
+    />
+  ),
 })
+
 
 /* -------------------------------------------------------- balance register */
 

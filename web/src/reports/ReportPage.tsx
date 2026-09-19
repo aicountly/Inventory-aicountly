@@ -694,7 +694,9 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
         ) : undefined
       }
       insights={
-        config.insights || analyticsBand ? (
+        // `analyticsSkeleton` counts: on the first load there is no band yet, and the
+        // slot has to exist for the placeholder that stands in for it.
+        config.insights || analyticsBand || (config.analytics && config.analyticsSkeleton) ? (
           <>
             {config.insights ? (
               result.loading && !result.data ? (
@@ -705,7 +707,7 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
             ) : null}
             {/* Under the strip: the strip says what the rows are, the band shows
                 the shape of the set they came from. */}
-            {analyticsBand}
+            {result.loading && !result.data ? config.analyticsSkeleton : analyticsBand}
           </>
         ) : undefined
       }
@@ -724,6 +726,11 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
         ) : (
           <SmartTable
             {...REPORT_TABLE_PROPS}
+            // A name, so the grid is identifiable among the tables on the page. Any
+            // register carrying an analytics band also carries the accessible data
+            // tables its charts ship, and "the table" then means three different
+            // things — to a screen-reader moving between them, and to a test.
+            caption={config.tableTitle ?? config.title}
             fillAvailable={!analyticsBand}
             className={analyticsBand ? 'max-h-[min(34rem,58vh)]' : undefined}
             columns={tableColumns}

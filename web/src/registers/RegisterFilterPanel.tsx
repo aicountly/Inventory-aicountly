@@ -36,6 +36,20 @@ export interface RegisterFilterPanelProps {
 }
 
 /**
+ * Cells per row at `xl` and wider, spelled out because Tailwind reads class names out of
+ * the source: `xl:grid-cols-${n}` is a string at build time and produces no CSS at all.
+ *
+ * A register with many filters wants five or six so its controls land in whole rows; the
+ * narrower breakpoints stay one and two either way, because a six-column grid on a laptop
+ * is six controls too narrow to read.
+ */
+const GRID_COLUMNS: Record<number, string> = {
+  4: 'xl:grid-cols-4',
+  5: 'lg:grid-cols-3 xl:grid-cols-5',
+  6: 'lg:grid-cols-3 xl:grid-cols-6',
+}
+
+/**
  * The register filter *panel* — the same declared `ReportFilter[]` as the
  * toolbar, arranged as a card: heading, quick period chips, a labelled grid and
  * an overflow popover for the filters a register would rather not spend a
@@ -96,9 +110,26 @@ export function RegisterFilterPanel({
   // The period the chips drive: the register's own declared date range.
   const range = useMemo(() => visible.find((f) => f.kind === 'date_range'), [visible])
   const rangeToKey = range?.toKey ?? 'to'
-  const activePreset = range
-    ? matchDateRangePreset(values[range.key] ?? '', values[rangeToKey] ?? '', ctx)
-    : null
+  const from = range ? (values[range.key] ?? '') : ''
+  const to = range ? (values[rangeToKey] ?? '') : ''
+  const activePreset = range ? matchDateRangePreset(from, to, ctx) : null
+
+  /**
+   * Whether a chip IS the period on screen.
+   *
+   * Compared by the dates it resolves to, not by `matchDateRangePreset`'s answer: several
+   * presets legitimately name the same range — inside an April–March financial year, "This
+   * FY-to-date" and "This half year-to-date" are both 1 April to today until October — and
+   * the matcher can only return one of them. Naming the first meant the chip a reader had
+   * just pressed, and the one describing the register's own default, both sat unlit.
+   */
+  const chipIsActive = (id: string) => {
+    if (!range) return false
+    if (id === activePreset) return true
+    if (id === ALL_DATES_PRESET_ID) return from === '' && to === ''
+    const resolved = getDateRangeForPreset(id, ctx)
+    return resolved !== null && resolved.from === from && resolved.to === to
+  }
 
   const chips = useMemo(() => {
     if (!range || !spec.quickRanges?.length) return []
@@ -200,12 +231,15 @@ export function RegisterFilterPanel({
 
         <div className="flex flex-wrap items-center gap-1.5">
           {scope ? (
-            <span className="mr-1 whitespace-nowrap text-xs font-semibold text-gray-500">
+            // Wraps on a phone rather than being clipped: the scope line names the
+            // company, the financial year and the branch every figure below belongs to,
+            // and half of it is worse than two lines of it.
+            <span className="mr-1 min-w-0 text-xs font-semibold text-gray-500 sm:whitespace-nowrap">
               {scope}
             </span>
           ) : null}
           {chips.map((chip) => {
-            const active = activePreset === chip.id
+            const active = chipIsActive(chip.id)
             return (
               <button
                 key={chip.id}
@@ -268,7 +302,7 @@ export function RegisterFilterPanel({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 items-end gap-x-4 gap-y-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className={cx('grid grid-cols-1 items-end gap-x-4 gap-y-3 sm:grid-cols-2', GRID_COLUMNS[spec.gridColumns ?? 4])}>
         {primary.map(control)}
         <div className="flex items-end justify-end gap-2 min-w-0">
           {onReset ? (

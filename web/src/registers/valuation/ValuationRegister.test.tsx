@@ -192,9 +192,11 @@ describe('valuation register', () => {
   it('renders the item code and the row figures', async () => {
     renderRegister()
     expect(await screen.findByText('TEST-001')).toBeTruthy()
-    // Scoped to the table: an item name also appears in the donut's legend, so
-    // an unscoped lookup matches twice as soon as the analytics have loaded.
-    const table = within(screen.getByRole('table'))
+    // Scoped to the register's own table, BY NAME: an item name also appears in the
+    // donut's legend, and the trend card ships an accessible data table of its own the
+    // moment its fetch lands — so an unscoped lookup for "the table" was a race that
+    // failed roughly one run in six.
+    const table = within(screen.getByRole('table', { name: 'Item-wise valuation' }))
     expect(table.getByText('DIM-001')).toBeTruthy()
     expect(table.getByText('Test Item')).toBeTruthy()
     expect(table.getByText('523')).toBeTruthy()
@@ -203,7 +205,7 @@ describe('valuation register', () => {
 
   it('totals from the server summary, not from the rows on screen', async () => {
     renderRegister()
-    const table = await screen.findByRole('table')
+    const table = await screen.findByRole('table', { name: 'Item-wise valuation' })
     const foot = table.querySelector('tfoot')
     expect(foot).toBeTruthy()
     expect(within(foot as HTMLElement).getByText('Total (2 items)')).toBeTruthy()

@@ -36,6 +36,18 @@ export interface StatCardSpec {
   to?: string
   /** Only for the red-when-negative case; never a fabricated comparison. */
   current?: number | null
+  /**
+   * The same measure over the previous period, from the SERVER.
+   *
+   * Passing it is what draws the delta chip, so it is the one field on this type that
+   * must never be a guess, a page figure compared against a whole-set figure, or a zero
+   * standing in for "we did not measure that window". A register whose endpoint sends no
+   * comparative leaves it undefined and gets the hint line instead, which is the designed
+   * fallback — see StatCard.
+   */
+  previous?: number | null
+  /** For measures where down is the good direction (ageing, shortfalls, failures). */
+  invertDelta?: boolean
   emphasizeNegative?: boolean
 }
 
@@ -128,6 +140,15 @@ export interface RegisterFilterPanelSpec {
    * Omit and every filter is in the grid.
    */
   primaryKeys?: readonly string[]
+  /**
+   * Cells per row in the grid at `xl` and wider. Four by default.
+   *
+   * Only worth raising on a register carrying enough filters that four columns wrap them
+   * into three ragged rows: eight filters plus the button cell read as two clean rows of
+   * five, and the eye finds a control by position rather than by reading every label.
+   * Narrower breakpoints are unaffected — one column, then two, whatever this says.
+   */
+  gridColumns?: 4 | 5 | 6
 }
 
 /** What an analytics band is handed. See `RegisterConfig.analytics`. */
@@ -281,6 +302,16 @@ export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
    * the figures, not the pictures.
    */
   analytics?: (args: AnalyticsArgs<T, S>) => ReactNode
+
+  /**
+   * The analytics band's own geometry while the FIRST response is in flight.
+   *
+   * `analytics` is handed a summary, so it cannot render before one exists and the band
+   * would otherwise appear from nothing and shove the table down the page. Same contract
+   * as the KPI cards' skeleton: first load only — a refresh keeps the charts on screen
+   * and dims them rather than replacing a figure a reader is looking at with a grey bar.
+   */
+  analyticsSkeleton?: ReactNode
 
   /**
    * The operational strip under the KPI cards — what the rows on screen say

@@ -81,9 +81,23 @@ export interface StockMovementRow {
   item_sku: string | null
   unit_id: number | null
   unit_symbol: string | null
+  stock_cat_id: number | null
+  item_grp_id: number | null
+  cat_name: string | null
   warehouse_name: string | null
   warehouse_code: string | null
   batch_no: string | null
+  /**
+   * The transfer's two ends, carried from the document.
+   *
+   * A movement row stands in ONE warehouse, because that is what it did to stock; a
+   * transfer is two rows. These let the register read "WH-A → WH-B" on the line without
+   * inventing a second warehouse for a row that only ever had one.
+   */
+  from_warehouse_id: number | null
+  to_warehouse_id: number | null
+  from_warehouse_name: string | null
+  to_warehouse_name: string | null
   document_no: string | null
   document_status: string | null
   source_app: string | null
@@ -103,14 +117,91 @@ export interface MovementFilters extends ListQuery {
   document_type?: string
   direction?: 'in' | 'out' | string
   movement_kind?: MovementKind | string
+  /** Item-master filters, applied through the items join. */
+  stock_cat_id?: number | string
+  item_grp_id?: number | string
+  brand_id?: number | string
+  /** The product that raised the document — `books`, `pos`, … */
+  source_app?: string
   from?: string
   to?: string
   all_fy?: boolean | number | string
+  /** `1` asks for the aggregate over the whole filtered set. */
+  summary?: 0 | 1
+  /** `1` asks for the inward / outward series over the same filters. */
+  trend?: 0 | 1
+}
+
+/**
+ * Inward, outward and net over a set of movements.
+ *
+ * In / out is the sign of the quantity, which is how the stock ledger decides it too: a
+ * reversal of a receipt carries `direction: 'in'` and a negative quantity, and counting it
+ * as inward would report goods arriving that actually left.
+ *
+ * Quantities are each item's base unit, so a figure spanning items counts units and not
+ * anything physical — the register says so wherever it prints one.
+ */
+export interface MovementAggregate {
+  movements: number
+  /** Distinct items touched. */
+  items: number
+  /** Distinct documents that raised them. */
+  documents: number
+  in_qty: number
+  out_qty: number
+  net_qty: number
+  in_value: number
+  out_value: number
+  net_value: number
+}
+
+/** The same aggregate over the window immediately before the one asked for. */
+export interface MovementComparative extends MovementAggregate {
+  from: string
+  to: string
+}
+
+export type MovementTrendBucket = 'day' | 'week' | 'month'
+
+export interface MovementTrendPoint {
+  /** ISO date the bucket starts on. */
+  bucket: string
+  movements: number
+  in_qty: number
+  out_qty: number
+  in_value: number
+  out_value: number
+}
+
+export interface MovementTrendSeries {
+  /** What one point covers. Widens with the span so a year is not 365 columns. */
+  bucket: MovementTrendBucket
+  from: string | null
+  to: string | null
+  /** True when the series hit the endpoint's cap and the tail was cut. */
+  truncated: boolean
+  points: MovementTrendPoint[]
+}
+
+/** `summary=1`: the aggregate over the whole filtered set, and its comparison window. */
+export interface MovementSummaryResponse extends MovementAggregate {
+  from: string | null
+  to: string | null
+  /** Null when the period is open at either end, so no equal window can be formed. */
+  previous: MovementComparative | null
+}
+
+export interface MovementListResponse extends ListResponse<StockMovementRow> {
+  summary?: MovementSummaryResponse
+  trend?: MovementTrendSeries
 }
 
 export const stockMovementsApi = {
-  list(filters: MovementFilters = {}, signal?: AbortSignal): Promise<ListResponse<StockMovementRow>> {
-    return api.list<StockMovementRow>('v1/stock-movements', filters, { signal })
+  list(filters: MovementFilters = {}, signal?: AbortSignal): Promise<MovementListResponse> {
+    return api.list<StockMovementRow>('v1/stock-movements', filters, {
+      signal,
+    }) as Promise<MovementListResponse>
   },
 }
 
