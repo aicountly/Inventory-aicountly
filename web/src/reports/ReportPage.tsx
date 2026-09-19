@@ -17,6 +17,7 @@ import { RegisterKpis, RegisterKpisSkeleton, summaryItemsToCards } from '../regi
 import { describeDateRange } from '../registers/dateRangePresets'
 import { totalsLabel as registerTotalsLabel, totalsRowToText } from '../registers/registerTotals'
 import { useColumnConfig } from '../registers/useColumnConfig'
+import { ViewPresetSelect, presetMatching, visibilityForPreset } from '../registers/ViewPresetSelect'
 import {
   registerColumnPrefsKey,
   registerPermission,
@@ -113,7 +114,14 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
   const permission = useMemo(() => registerPermission(config), [config])
   const allowed = can(permission)
 
-  const filterKeys = useMemo(() => filterUrlKeys(config.filters), [config.filters])
+  // `view` is the saved-view name. It lives in the URL so an arrangement can be linked,
+  // and it is deliberately NOT a declared filter: `values` is built from `config.filters`
+  // alone, so a view can never reach the API as a query parameter it would ignore.
+  const viewPresets = config.viewPresets
+  const filterKeys = useMemo(
+    () => (viewPresets ? [...filterUrlKeys(config.filters), 'view'] : filterUrlKeys(config.filters)),
+    [config.filters, viewPresets],
+  )
   const params = useListParams({
     sort: config.defaultSort,
     order: config.defaultOrder,
@@ -214,12 +222,44 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
     ready: columnsReady,
   } = useColumnConfig(prefsKey, config.columns)
 
+  // ---- saved views ---------------------------------------------------------
+  // A preset IS a column choice, so it writes through the same per-user preference the
+  // Configure Columns dialog does rather than holding a second idea of what is on
+  // screen. The control therefore reports what the grid actually shows — "Custom" after
+  // a hand edit — and the URL keeps the name the reader started from.
+  const urlView = state.filters.view ?? ''
+  const presetValue = useMemo(
+    () => (viewPresets ? presetMatching(config.columns, visibility, viewPresets) : ''),
+    [viewPresets, config.columns, visibility],
+  )
+  // `params.setFilter` rather than `params`: the params object is a fresh literal every
+  // render, and depending on it would rebuild this handler on every keystroke elsewhere.
+  const setFilter = params.setFilter
+  const applyPreset = useCallback(
+    (id: string) => {
+      const preset = viewPresets?.find((p) => p.id === id)
+      if (preset) setVisibility(visibilityForPreset(config.columns, preset))
+      setFilter('view', id)
+    },
+    [viewPresets, config.columns, setVisibility, setFilter],
+  )
+  // Arriving with ?view= is an explicit request for that arrangement, so it is applied
+  // once the per-user key is known. Arriving WITHOUT one is not: the columns somebody
+  // deliberately set last week are what loads, and no preset overwrites them on sight.
+  const deepLinkApplied = useRef(false)
+  useEffect(() => {
+    if (!viewPresets || !columnsReady || deepLinkApplied.current) return
+    deepLinkApplied.current = true
+    const preset = urlView ? viewPresets.find((p) => p.id === urlView) : undefined
+    if (preset) setVisibility(visibilityForPreset(config.columns, preset))
+  }, [viewPresets, columnsReady, urlView, config.columns, setVisibility])
+
   // ---- KPI cards -----------------------------------------------------------
   const kpiCards = useMemo(() => {
     if (!result.data || summary === undefined) return []
-    if (config.kpis) return config.kpis(summary, result.data)
+    if (config.kpis) return config.kpis(summary, result.data, values)
     return summaryItemsToCards(config.summary(summary, result.data))
-  }, [config, result.data, summary])
+  }, [config, result.data, summary, values])
 
   // ---- the at-a-glance strip ----------------------------------------------
   // Derived from the response already in hand — never a second request, and
@@ -238,6 +278,18 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
     if (!analytics || summary === undefined) return null
     return analytics({ summary, rows, values, query: apiFilters, loading: result.loading })
   }, [analytics, summary, rows, values, apiFilters, result.loading])
+
+  // ---- the intelligence rail ----------------------------------------------
+  // Same inputs as the analytics band, for the same reason: a card beside the table
+  // must not be able to answer a differently-filtered question from the table.
+  const asideOf = config.aside
+  const asideRail = useMemo(() => {
+    if (!asideOf || summary === undefined) return null
+    return asideOf({ summary, rows, values, query: apiFilters, loading: result.loading })
+  }, [asideOf, summary, rows, values, apiFilters, result.loading])
+  // A rail and a viewport-locked table cannot share one height, exactly as with the
+  // chart band: the page scrolls as a whole and the table takes a bounded scroll box.
+  const bounded = Boolean(analyticsBand) || Boolean(asideOf)
 
   // The same Configure Columns dialog is offered from the toolbar and from over
   // the table, so the open flag lives here rather than inside either trigger.
@@ -438,14 +490,14 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
       const rescoped = summaryForRows(summary, all)
       const response: ReportResponse<T, S> = { ...result.data, data: [...all], summary: rescoped }
       const cards = config.kpis
-        ? config.kpis(rescoped, response)
+        ? config.kpis(rescoped, response, values)
         : summaryItemsToCards(config.summary(rescoped, response))
       return {
         summaryCards: toSheetCards(cards),
         totalsText: config.totals ? totalsRowToText(visibleColumns, config.totals(rescoped, all)) : null,
       }
     },
-    [summaryForRows, summary, config, result.data, visibleColumns],
+    [summaryForRows, summary, config, result.data, visibleColumns, values],
   )
 
   const printSummaryCards = useMemo(() => toSheetCards(kpiCards), [kpiCards])
@@ -575,6 +627,15 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
     </>
   )
 
+  const viewPresetControl = viewPresets?.length ? (
+    <ViewPresetSelect
+      presets={viewPresets}
+      value={presetValue}
+      onChange={applyPreset}
+      layout={panel ? 'stacked' : 'inline'}
+    />
+  ) : undefined
+
   const groupByControl = config.groupBy?.length ? (
     <FilterField label="Group by">
       <Select
@@ -606,9 +667,10 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
       description={headerDescription}
       icon={config.icon ?? FileSearch}
       headerVariant={panel ? 'page' : 'compact'}
-      // A chart band and a viewport-locked table cannot share one flex column:
-      // the band takes its height and the table's `flex-1` resolves to nothing.
-      fill={!analyticsBand}
+      // A chart band or an intelligence rail and a viewport-locked table cannot share
+      // one flex column: the sibling takes its height and the table's `flex-1` resolves
+      // to nothing.
+      fill={!bounded}
       headerAside={
         config.headerAside ?? (
           <LiveDataBadge
@@ -647,6 +709,7 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
             ctx={ctx}
             searchInputRef={searchInputRef}
             scope={scopeLabel}
+            trailing={viewPresetControl}
           />
         ) : (
           <RegisterFilterBar
@@ -659,7 +722,14 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
             showReset={Object.keys(state.filters).length > 0}
             ctx={ctx}
             searchInputRef={searchInputRef}
-            trailing={groupByControl}
+            trailing={
+              viewPresetControl || groupByControl ? (
+                <>
+                  {viewPresetControl}
+                  {groupByControl}
+                </>
+              ) : undefined
+            }
           />
         )
       }
@@ -693,6 +763,11 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
           <RegisterKpis cards={kpiCards} layout={panel ? 'metric' : 'stacked'} />
         ) : undefined
       }
+      // The column is reserved from the first paint: a rail that appeared only once the
+      // response landed would shove the table sideways under the reader's cursor.
+      aside={
+        asideOf ? (asideRail ?? <div aria-hidden className="skeleton h-72 rounded-xl" />) : undefined
+      }
       insights={
         config.insights || analyticsBand ? (
           <>
@@ -724,8 +799,14 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
         ) : (
           <SmartTable
             {...REPORT_TABLE_PROPS}
-            fillAvailable={!analyticsBand}
-            className={analyticsBand ? 'max-h-[min(34rem,58vh)]' : undefined}
+            fillAvailable={!bounded}
+            className={
+              analyticsBand
+                ? 'max-h-[min(34rem,58vh)]'
+                : asideOf
+                  ? 'max-h-[min(44rem,66vh)]'
+                  : undefined
+            }
             columns={tableColumns}
             rows={tableRows}
             rowKey={config.rowKey}
@@ -770,7 +851,7 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
                 config.emptyUnfiltered
               ) : (
                 <EmptyState
-                  title="No rows match these filters"
+                  title={config.emptyTitle ?? 'No rows match these filters'}
                   description={
                     config.emptyMessage ?? 'Widen the period or clear a filter and try again.'
                   }

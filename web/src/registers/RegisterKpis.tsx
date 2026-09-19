@@ -1,3 +1,4 @@
+import { Fragment } from 'react'
 import { Activity } from 'lucide-react'
 import { SUMMARY_ICON, SUMMARY_TONE } from '../components/SummaryStrip'
 import type { SummaryItem } from '../components/SummaryStrip'
@@ -24,7 +25,12 @@ export function RegisterKpis({
   if (!cards.length) return null
   return (
     <>
-      {cards.map((card) => (
+      {cards.map((card) =>
+        // A card that declares its own insides keeps the grid cell and nothing else:
+        // see StatCardSpec.node.
+        card.node !== undefined ? (
+          <Fragment key={card.key}>{card.node}</Fragment>
+        ) : (
         <StatCard
           key={card.key}
           layout={layout}
@@ -38,7 +44,8 @@ export function RegisterKpis({
           current={card.current}
           emphasizeNegative={card.emphasizeNegative}
         />
-      ))}
+        ),
+      )}
     </>
   )
 }

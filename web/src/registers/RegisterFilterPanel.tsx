@@ -33,6 +33,15 @@ export interface RegisterFilterPanelProps {
   searchInputRef?: RefObject<HTMLInputElement | null>
   /** Company · financial year · branch, printed above the grid. */
   scope?: ReactNode
+  /**
+   * A register's own control in the grid, after the declared filters.
+   *
+   * For something that shapes the VIEW rather than the question — the saved-view
+   * picker, a grouping. It shares the grid because it is one more labelled control
+   * the reader's eye runs along, and putting it on a row of its own above the table
+   * would separate it from the six controls it is read with.
+   */
+  trailing?: ReactNode
 }
 
 /**
@@ -70,6 +79,7 @@ export function RegisterFilterPanel({
   ctx,
   searchInputRef,
   scope,
+  trailing,
 }: RegisterFilterPanelProps) {
   const [moreOpen, setMoreOpen] = useState(false)
   const moreRef = useRef<HTMLDivElement>(null)
@@ -268,8 +278,14 @@ export function RegisterFilterPanel({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 items-end gap-x-4 gap-y-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div
+        className={cx(
+          'grid items-end gap-x-4 gap-y-3',
+          spec.gridClassName ?? 'grid-cols-1 sm:grid-cols-2 xl:grid-cols-4',
+        )}
+      >
         {primary.map(control)}
+        {trailing}
         <div className="flex items-end justify-end gap-2 min-w-0">
           {onReset ? (
             <Button

@@ -151,6 +151,36 @@ final class InventoryReportServiceTest extends IntegrationTestCase
         $only = $this->reports->warehouseStock($this->cmpId, $this->fyId, 0, ['to' => '2026-05-31', 'warehouse_id' => $s['wh2']], 50, 0);
         $this->assertSame(1, $only['total']);
         $this->assertSame($s['wh2'], $only['rows'][0]['warehouse_id']);
+
+        // A back-dated read must not carry today's reservations: inv_stock_balances has no
+        // date dimension, so the buckets are null rather than zero and the summary says so.
+        $this->assertFalse($r['summary']['live_buckets']);
+        $this->assertNull($r['summary']['reserved_qty']);
+        $this->assertNull($rows['Widget@Main']['reserved_qty']);
+        $this->assertNull($rows['Widget@Main']['available_qty']);
+
+        // Every row is judged, and the counts cover every state over the whole result.
+        $this->assertSame('negative', $rows['Widget@Main']['stock_health'], 'below zero on that shelf');
+        $this->assertSame('healthy', $rows['Gadget@Main']['stock_health'], 'no thresholds are set on the seed items');
+        $this->assertSame(InventoryReportService::STOCK_HEALTH, array_keys($r['summary']['health']));
+        $this->assertSame(4, array_sum($r['summary']['health']), 'every row lands in exactly one state');
+        $this->assertSame(1, $r['summary']['health']['negative']);
+        $this->assertSame(2, $r['summary']['items']);
+        $this->assertSame(3, $r['summary']['warehouses'], 'Main, Depot and the no-warehouse row');
+
+        // The health filter narrows the rows but not the counts: the card that offers it
+        // has to be able to say what filtering would find.
+        $bad = $this->reports->warehouseStock($this->cmpId, $this->fyId, 0, ['to' => '2026-05-31', 'nonzero' => true, 'health' => 'negative'], 50, 0);
+        $this->assertSame(1, $bad['total']);
+        $this->assertSame('negative', $bad['rows'][0]['stock_health']);
+        $this->assertSame(4, array_sum($bad['summary']['health']));
+        $this->assertSame('negative', $bad['summary']['health_filter']);
+
+        $attention = $this->reports->warehouseStock($this->cmpId, $this->fyId, 0, ['to' => '2026-05-31', 'nonzero' => true, 'health' => 'attention'], 50, 0);
+        $this->assertSame(1, $attention['total'], 'only the negative row needs attention here');
+
+        $this->expectException(InventoryException::class);
+        $this->reports->warehouseStock($this->cmpId, $this->fyId, 0, ['to' => '2026-05-31', 'health' => 'sparkling'], 50, 0);
     }
 
     public function testBatchStockNearExpiryAndSerialStock(): void

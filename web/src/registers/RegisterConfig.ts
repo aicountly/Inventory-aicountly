@@ -37,6 +37,17 @@ export interface StatCardSpec {
   /** Only for the red-when-negative case; never a fabricated comparison. */
   current?: number | null
   emphasizeNegative?: boolean
+  /**
+   * Renders instead of the card, keeping its cell in the KPI grid.
+   *
+   * For the one tile in a strip that is not a figure — a written observation, say. It is
+   * still declared as a card so it takes the same track, the same height and the same
+   * place in the reading order; only its insides differ. A card with `node` carries no
+   * label, value or tone of its own, and the export skips it (toSheetCards keeps only
+   * string / number values), which is right: a sentence about the figures is not one of
+   * the figures the sheet is a record of.
+   */
+  node?: ReactNode
 }
 
 /** Sections of the registers hub. */
@@ -128,6 +139,36 @@ export interface RegisterFilterPanelSpec {
    * Omit and every filter is in the grid.
    */
   primaryKeys?: readonly string[]
+  /**
+   * The grid the filter cells are laid out in.
+   *
+   * Four columns is the house default and right for four to six controls. A register
+   * carrying seven wants a denser track on a wide screen rather than one control
+   * stranded on a second row; it says so here rather than every panel growing a
+   * breakpoint for the widest register that exists.
+   */
+  gridClassName?: string
+}
+
+/**
+ * A saved arrangement of the register: which columns are on, under a name.
+ *
+ * Presets are a VIEW, not a question — nothing about the query changes, so nothing is
+ * sent to the server and the reader's own Configure-Columns choice is what loads. Picking
+ * one from the control is the only thing that applies it, which is why arriving on the
+ * page never overwrites the columns someone deliberately set last week.
+ */
+export interface RegisterViewPreset {
+  /** URL value (`?view=`) and storage id. */
+  id: string
+  label: string
+  /** One line in the control's title attribute, saying what the preset is for. */
+  description?: string
+  /**
+   * Column keys this preset shows. `alwaysVisible` columns are on whatever this says.
+   * Omit for the register's shipped defaults — that is what "Default" is.
+   */
+  columns?: readonly string[]
 }
 
 /** What an analytics band is handed. See `RegisterConfig.analytics`. */
@@ -262,8 +303,20 @@ export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
    */
   summaryForRows?: (summary: S, rows: readonly T[]) => S
 
-  /** Clickable KPI cards above the table. Falls back to `summary` when absent. */
-  kpis?: (summary: S, response: ReportResponse<T, S>) => StatCardSpec[]
+  /**
+   * Clickable KPI cards above the table. Falls back to `summary` when absent.
+   *
+   * `values` is the effective filter set, defaults resolved — what the register was
+   * actually asked. A card that drills down needs it: a link built from the summary
+   * alone would drop the warehouse or the date the reader is looking at and answer a
+   * wider question than the one on screen. Optional, because most cards do not build
+   * links and every config written before it existed takes two arguments.
+   */
+  kpis?: (
+    summary: S,
+    response: ReportResponse<T, S>,
+    values?: Record<string, string>,
+  ) => StatCardSpec[]
 
   /**
    * An analytics band under the KPI cards.
@@ -281,6 +334,26 @@ export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
    * the figures, not the pictures.
    */
   analytics?: (args: AnalyticsArgs<T, S>) => ReactNode
+
+  /**
+   * The intelligence rail: a column of cards beside the table, about the same filtered
+   * set the table is showing.
+   *
+   * For a register a reader works in rather than glances at, where the answer to "and
+   * what else should I know" is a handful of small, stable panels — where the stock
+   * sits, what is moving, what needs attention — that would each be a poor use of a
+   * whole row above the table. It is handed the same summary and rows as `analytics`,
+   * so a figure in the rail cannot disagree with the figure in the footer.
+   *
+   * Screen only (`print:hidden`, like every other piece of chrome): the sheet carries
+   * the rows, the KPI cards and the totals, which are the record. A register that
+   * declares one stops filling the viewport and takes a bounded table instead — a rail
+   * and a viewport-locked table cannot share one height.
+   */
+  aside?: (args: AnalyticsArgs<T, S>) => ReactNode
+
+  /** Named column arrangements offered above the table. See RegisterViewPreset. */
+  viewPresets?: readonly RegisterViewPreset[]
 
   /**
    * The operational strip under the KPI cards — what the rows on screen say
@@ -360,6 +433,16 @@ export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
    * the filtered message, which is right often enough.
    */
   emptyUnfiltered?: ReactNode
+
+  /**
+   * Heading of the filtered empty state.
+   *
+   * Defaults to "No rows match these filters", which is right for most registers and
+   * vague on one a reader reaches by name — "No warehouse stock found" tells them the
+   * register ran and found nothing, rather than that something about their filters is
+   * the subject. `emptyMessage` is the line under it either way.
+   */
+  emptyTitle?: string
 
   /** Noun used in the totals label: "Total (412 movements)". */
   rowNoun?: string
