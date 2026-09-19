@@ -47,7 +47,10 @@ export function PageHeader({
         className,
       )}
     >
-      <div className="min-w-0 flex-1 basis-72 flex items-start gap-3">
+      {/* `basis-72` only from `md`: below it the header is a COLUMN, where
+          flex-basis is the height, and an 18rem basis left a phone-width page
+          with 288px of empty space between the title and the first card. */}
+      <div className="min-w-0 flex-1 md:basis-72 flex items-start gap-3">
         {backTo ? (
           <Link
             to={backTo}

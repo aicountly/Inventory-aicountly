@@ -12,6 +12,14 @@ interface ImportMetaEnv {
   readonly VITE_GA4_SAAS_INVENTORY_MEASUREMENT_ID?: string
   /** Generic GA4 measurement ID fallback, checked when the product-specific one is unset. */
   readonly VITE_GA4_MEASUREMENT_ID?: string
+  /**
+   * Material receipt integrations, each off until the endpoint behind it exists.
+   * See documents/receipt/integrations.ts — every one of these is a LIVE API
+   * call through Inventory's own relay, never a copy of another product's data.
+   */
+  readonly VITE_FEATURE_RECEIPT_PURCHASE_ORDERS?: string
+  readonly VITE_FEATURE_RECEIPT_AI_AUTOFILL?: string
+  readonly VITE_FEATURE_RECEIPT_ATTACHMENTS?: string
 }
 
 interface ImportMeta {

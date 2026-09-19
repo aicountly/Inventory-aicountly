@@ -6,6 +6,7 @@ import { useQuery } from '../hooks/useQuery'
 import { errorMessage } from '../services/api'
 import { documentsApi } from '../services/documentsApi'
 import { DocumentForm } from './DocumentForm'
+import { MaterialReceiptForm } from './receipt/MaterialReceiptForm'
 import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS } from './actions'
 import { draftFromDocument } from './formModel'
 import { specForCode, specForSlug, UNAVAILABLE_TYPES } from './registry'
@@ -24,6 +25,17 @@ export function DocumentFormPage() {
 
   const spec = editing ? specForCode(existing.data?.document_type) : specForSlug(slug)
   const crumbs = [{ label: 'Documents', to: '/documents' }]
+  /**
+   * A material receipt has its own workspace rather than the shared editor.
+   *
+   * It is the one native type a storekeeper lives in all day — supplier
+   * paperwork, gate details, batches and serials, forty lines at a time — and
+   * it earns a screen built around that. Everything underneath is still shared:
+   * the same draft model, the same payload, the same create / update / post
+   * calls and the same permission gates, which is why the branch is here at the
+   * end of the gates rather than a second route.
+   */
+  const isReceipt = spec?.code === 'MATERIAL_RECEIPT'
 
   if (!editing && !spec) {
     return (
@@ -93,6 +105,17 @@ export function DocumentFormPage() {
       )
     }
     const initial = draftFromDocument(doc, spec)
+    if (isReceipt) {
+      return (
+        <MaterialReceiptForm
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          currencyCode={doc.currency_code}
+        />
+      )
+    }
     return (
       <div className="page">
         <PageHeader title={`Edit ${spec.label.toLowerCase()} ${doc.document_no ?? `#${doc.document_id}`}`} subtitle={`Version ${doc.version} · ${STATUS_LABELS[doc.status as DocumentStatus] ?? doc.status}`} breadcrumbs={[...crumbs, { label: doc.document_no ?? `#${doc.document_id}`, to: `/documents/${doc.document_id}` }]} />
@@ -103,6 +126,7 @@ export function DocumentFormPage() {
   }
 
   const s = spec as NonNullable<typeof spec>
+  if (isReceipt) return <MaterialReceiptForm key={s.code} spec={s} />
   return (
     <div className="page">
       <PageHeader title={`New ${s.label.toLowerCase()}`} breadcrumbs={crumbs} />
