@@ -218,16 +218,135 @@ export interface ValuationRevision {
   item_name: string | null
   item_sku: string | null
   acknowledged: boolean
+  /* --- the line's own context and the job that revalued it. Optional: an API older
+     than the revisions screen's rebuild does not send them, and the detail panel
+     leaves the field out rather than inventing one. --- */
+  warehouse_id?: number | null
+  warehouse_name?: string | null
+  unit_symbol?: string | null
+  valuation_method_applied?: string | null
+  trigger_kind?: string | null
+  trigger_document_id?: number | null
+  dry_run?: boolean | null
+  job_status?: string | null
+  job_requested_by?: string | null
 }
+
+/**
+ * Where a revision has got to between the two products.
+ *
+ * Inventory generates it (`awaiting`), publishes it to Books (`published`), and marks it
+ * `acknowledged` once Books confirms the COGS was re-posted. The three are kept apart
+ * because only the middle one means "Books has it and has not answered" — collapsing them
+ * would hide a revision that never left Inventory at all.
+ */
+export type RevisionBooksState = 'awaiting' | 'published' | 'acknowledged'
+
+export type RevisionBooksFilter = '' | RevisionBooksState | 'unacknowledged'
+export type RevisionDeltaFilter = '' | 'increase' | 'decrease' | 'none'
 
 export interface RevisionFilters extends ListQuery {
   acknowledged?: 0 | 1 | '' | string
+  books?: RevisionBooksFilter | string
   job_id?: number | string
   document_id?: number | string
   item_id?: number | string
+  warehouse_id?: number | string
   source_app?: string
+  delta?: RevisionDeltaFilter | string
+  /** Minimum absolute valuation delta, in company base currency. */
+  min_abs_delta?: number | string
   from?: string
   to?: string
+}
+
+// ---- revision summary (KPIs, charts, insights) ---------------------------------------------------
+
+/** Totals over one set of revisions. Every field is a server aggregate, never a page sum. */
+export interface RevisionTotals {
+  revisions: number
+  net_delta: number
+  abs_delta: number
+  increased: number
+  decreased: number
+  unchanged: number
+  items_affected: number
+  items_increased: number
+  items_decreased: number
+  jobs: number
+  acknowledged: number
+  published_unacknowledged: number
+  awaiting_publish: number
+}
+
+export interface RevisionTimelinePoint {
+  day: string
+  revisions: number
+  increased: number
+  decreased: number
+  net_delta: number
+}
+
+/** Movement grouped by the KIND of document that caused it — a purchase, a stock journal. */
+export interface RevisionSourceSplit {
+  document_type: string | null
+  revisions: number
+  net_delta: number
+  abs_delta: number
+}
+
+export interface RevisionItemSplit {
+  item_id: number
+  item_name: string | null
+  item_sku: string | null
+  revisions: number
+  net_delta: number
+  abs_delta: number
+  /** Largest rate change on the item, as a percentage of the old valuation rate. */
+  peak_change_pct: number | null
+  /** The same measure averaged over the trailing baseline window. */
+  baseline_pct: number | null
+  baseline_samples: number
+}
+
+export interface RevisionTriggerSplit {
+  trigger_kind: string | null
+  jobs: number
+  revisions: number
+  net_delta: number
+  abs_delta: number
+}
+
+export interface RevisionSummary {
+  window: { from: string; to: string; days: number; explicit_range: boolean; previous_from: string; previous_to: string }
+  /** The filtered set — the rows the table is showing. */
+  filtered: RevisionTotals
+  /** The same filters over the window immediately before this one. */
+  previous: RevisionTotals
+  /** Company / branch state, with no screen filter applied. */
+  company: {
+    revisions: number
+    acknowledged: number
+    pending: number
+    pending_delta: number
+    awaiting_publish: number
+    published_unacknowledged: number
+    created_last_7d: number
+    created_prev_7d: number
+    acknowledged_today: number
+    acknowledged_yesterday: number
+  }
+  jobs: { queued: number; running: number; failed: number }
+  timeline: RevisionTimelinePoint[]
+  by_source: RevisionSourceSplit[]
+  top_items: RevisionItemSplit[]
+  baseline_days: number
+  triggers: RevisionTriggerSplit[]
+}
+
+export interface RevisionSummaryQuery extends RevisionFilters {
+  /** Length of the timeline window when the filters carry no explicit date range. */
+  days?: number
 }
 
 export interface AckResult {
@@ -277,6 +396,22 @@ export const valuationApi = {
 
   revisions(filters: RevisionFilters = {}, signal?: AbortSignal): Promise<ListResponse<ValuationRevision>> {
     return api.list<ValuationRevision>('v1/valuation/revisions', filters, { signal })
+  },
+
+  /**
+   * The screen's cards, charts and insights, as server aggregates over the same filters.
+   *
+   * Paging parameters are dropped deliberately: a summary of "page 2" is not a summary.
+   */
+  async revisionsSummary(query: RevisionSummaryQuery = {}, signal?: AbortSignal): Promise<RevisionSummary> {
+    const { page, limit, offset, sort, order, ...filters } = query
+    void page
+    void limit
+    void offset
+    void sort
+    void order
+    const res = await api.get<ItemResponse<RevisionSummary>>('v1/valuation/revisions/summary', { query: filters, signal })
+    return res.data
   },
 
   async ackRevisions(revisionIds: number[]): Promise<AckResult> {

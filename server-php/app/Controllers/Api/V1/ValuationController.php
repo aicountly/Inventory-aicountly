@@ -35,6 +35,52 @@ class ValuationController extends BaseController
     private const JOB_STATUSES = ['QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED'];
 
     /**
+     * The aggregates behind `GET /valuation/revisions/summary`.
+     *
+     * Constants rather than strings inlined in the method, so the integration suite can run the
+     * REAL SQL against PostgreSQL. `COUNT(DISTINCT CASE … END)`, a `::date` bucket and a ratio
+     * guarded by `NULLIF` are precisely what a rewritten copy in a test gets subtly wrong, and a
+     * summary that disagrees with the table under it is worse than no summary.
+     *
+     * Every one of them is selected over `revisionQuery()`, which is also what the list runs, so
+     * a card can never describe a different set of rows than the rows beneath it.
+     */
+    public const REVISION_TOTALS_SELECT = 'COUNT(*) AS revisions'
+        . ', COALESCE(SUM(r.delta_amount),0) AS net_delta'
+        . ', COALESCE(SUM(ABS(r.delta_amount)),0) AS abs_delta'
+        . ', SUM(CASE WHEN r.delta_amount > 0 THEN 1 ELSE 0 END) AS increased'
+        . ', SUM(CASE WHEN r.delta_amount < 0 THEN 1 ELSE 0 END) AS decreased'
+        . ', SUM(CASE WHEN r.delta_amount = 0 THEN 1 ELSE 0 END) AS unchanged'
+        . ', COUNT(DISTINCT l.item_id) AS items_affected'
+        . ', COUNT(DISTINCT CASE WHEN r.delta_amount > 0 THEN l.item_id END) AS items_increased'
+        . ', COUNT(DISTINCT CASE WHEN r.delta_amount < 0 THEN l.item_id END) AS items_decreased'
+        . ', COUNT(DISTINCT r.job_id) AS jobs'
+        . ', SUM(CASE WHEN r.acknowledged_at IS NOT NULL THEN 1 ELSE 0 END) AS acknowledged'
+        . ', SUM(CASE WHEN r.acknowledged_at IS NULL AND r.published_at IS NOT NULL THEN 1 ELSE 0 END) AS published_unacknowledged'
+        . ', SUM(CASE WHEN r.acknowledged_at IS NULL AND r.published_at IS NULL THEN 1 ELSE 0 END) AS awaiting_publish';
+
+    public const REVISION_TIMELINE_SELECT = 'r.created_at::date AS revision_day, COUNT(*) AS revisions'
+        . ', SUM(CASE WHEN r.delta_amount > 0 THEN 1 ELSE 0 END) AS increased'
+        . ', SUM(CASE WHEN r.delta_amount < 0 THEN 1 ELSE 0 END) AS decreased'
+        . ', COALESCE(SUM(r.delta_amount),0) AS net_delta';
+
+    public const REVISION_SOURCE_SELECT = 'd.document_type, COUNT(*) AS revisions'
+        . ', COALESCE(SUM(r.delta_amount),0) AS net_delta, COALESCE(SUM(ABS(r.delta_amount)),0) AS abs_delta';
+
+    /**
+     * The rate move is a percentage OF THE OLD VALUATION RATE. A zero old rate yields NULL
+     * through the NULLIF rather than an infinity dressed up as a number — there is no
+     * meaningful "percent change" from nothing, and the insight panel says nothing at all
+     * about an item whose baseline is null.
+     */
+    public const REVISION_TOP_ITEM_SELECT = 'l.item_id, i.item_name, i.item_sku, COUNT(*) AS revisions'
+        . ', COALESCE(SUM(r.delta_amount),0) AS net_delta, COALESCE(SUM(ABS(r.delta_amount)),0) AS abs_delta'
+        . ', MAX(ABS(r.new_valuation_rate - r.old_valuation_rate) / NULLIF(ABS(r.old_valuation_rate),0)) * 100 AS peak_change_pct';
+
+    public const REVISION_TRIGGER_SELECT = 'jb.trigger_kind, COUNT(DISTINCT r.job_id) AS jobs, COUNT(*) AS revisions'
+        . ', COALESCE(SUM(r.delta_amount),0) AS net_delta, COALESCE(SUM(ABS(r.delta_amount)),0) AS abs_delta';
+
+    /**
      * GET /valuation?as_of=&method=FIFO|LIFO|WAC|AS_PER_MASTER&item_id=&warehouse_id=
      * Closing quantity per item as at `as_of`, valued at the cost the method resolves.
      */
@@ -363,7 +409,11 @@ class ValuationController extends BaseController
     }
 
     /**
-     * GET /valuation/revisions?acknowledged=0|1&job_id=&document_id=&source_app=&from=&to=
+     * GET /valuation/revisions
+     *
+     * Filters: acknowledged=0|1, books=awaiting|published|acknowledged|unacknowledged,
+     * job_id, document_id, item_id, warehouse_id, source_app, document_type,
+     * delta=increase|decrease|none, min_abs_delta, q (item name / SKU / document no), from, to.
      */
     public function revisions()
     {
@@ -372,18 +422,88 @@ class ValuationController extends BaseController
             return $a['response'];
         }
         $cmpId = (int) $a['ctx']['cmp_id'];
+        $boId = (int) ($a['ctx']['bo_id'] ?? 0);
         $p = $this->listParams(50, 500, 'revision_id');
         if (!$this->request->getGet('order')) {
             $p['order'] = 'DESC';
         }
+        $b = $this->revisionQuery($cmpId, $boId);
+        $total = (clone $b)->countAllResults(false);
+        $sort = in_array($p['sort'], ['revision_id', 'created_at', 'delta_amount', 'document_id', 'acknowledged_at'], true) ? 'r.' . $p['sort'] : 'r.revision_id';
+        $rows = $b
+            ->join('inv_warehouses w', 'w.warehouse_id = l.warehouse_id', 'left')
+            ->join('inv_uom u', 'u.unit_id = l.unit_id', 'left')
+            ->join('inv_valuation_recalc_jobs jb', 'jb.job_id = r.job_id', 'left')
+            ->select('r.revision_id, r.revision_uuid, r.job_id, r.document_id, r.line_id, r.source_app, r.source_document_type, r.source_document_id, r.source_document_uuid, r.old_valuation_rate, r.new_valuation_rate, r.old_valuation_amount, r.new_valuation_amount, r.delta_amount, r.published_at, r.acknowledged_at, r.acknowledged_by_app, r.created_at, d.document_no, d.document_type, d.document_date, d.status AS document_status, d.source_document_no, l.item_id, l.direction, l.base_qty, l.warehouse_id, l.valuation_method_applied, i.item_name, i.item_sku, w.warehouse_name, u.unit_symbol, jb.trigger_kind, jb.trigger_document_id, jb.dry_run, jb.status AS job_status, jb.requested_by AS job_requested_by')
+            ->orderBy($sort, $p['order'])->orderBy('r.revision_id', $p['order'])->limit($p['limit'], $p['offset'])->get()->getResultArray();
+        foreach ($rows as &$r) {
+            foreach (['revision_id', 'job_id', 'document_id', 'line_id', 'source_document_id', 'item_id', 'warehouse_id', 'trigger_document_id'] as $k) {
+                $r[$k] = $r[$k] === null ? null : (int) $r[$k];
+            }
+            foreach (['old_valuation_rate', 'new_valuation_rate', 'old_valuation_amount', 'new_valuation_amount', 'delta_amount', 'base_qty'] as $k) {
+                $r[$k] = $r[$k] === null ? null : round((float) $r[$k], 4);
+            }
+            $r['dry_run'] = $r['dry_run'] === null ? null : (bool) $r['dry_run'];
+            $r['acknowledged'] = $r['acknowledged_at'] !== null;
+        }
+        unset($r);
+
+        return $this->respondList($rows, $total, $p['limit'], $p['offset']);
+    }
+
+    /**
+     * The revisions query with every filter applied.
+     *
+     * Shared by the list and by the summary below, and that sharing is the point: a KPI card
+     * or a chart slice that described a different set of rows than the table underneath it
+     * would be a figure nobody could reconcile, and on a costing screen that is worse than no
+     * figure at all.
+     *
+     * `$range` overrides the request's own from / to — the summary uses it to measure the
+     * period before the one on screen without loosening any of the other filters.
+     *
+     * @param array{from: ?string, to: ?string}|null $range
+     */
+    private function revisionQuery(int $cmpId, int $boId, ?array $range = null): \CodeIgniter\Database\BaseBuilder
+    {
         $b = \Config\Database::connect()->table('inv_valuation_revisions r')
             ->join('inv_documents d', 'd.document_id = r.document_id', 'left')
             ->join('inv_document_lines l', 'l.line_id = r.line_id', 'left')
             ->join('inv_items i', 'i.item_id = l.item_id', 'left')
             ->where('r.cmp_id', $cmpId);
+        // Branch scope, applied the way every register applies it: 0 is consolidated. The
+        // revision itself has no branch — the document line it revalued does.
+        if ($boId > 0) {
+            $b->where('l.bo_id', $boId);
+        }
         $ack = $this->request->getGet('acknowledged');
         if ($ack !== null && $ack !== '') {
             (int) $ack === 1 ? $b->where('r.acknowledged_at IS NOT NULL', null, false) : $b->where('r.acknowledged_at', null);
+        }
+        /*
+         * The Books lifecycle, as three states rather than two.
+         *
+         * A revision is generated by a recalculation (awaiting), then published to Books
+         * (published_at), then acknowledged once Books has re-posted the COGS
+         * (acknowledged_at). Collapsing the first two into one "pending" would hide exactly
+         * the case an operator is looking for: a revision Inventory never managed to hand over.
+         */
+        switch (strtolower(trim((string) ($this->request->getGet('books') ?? '')))) {
+            case 'awaiting':
+                $b->where('r.acknowledged_at', null)->where('r.published_at', null);
+                break;
+
+            case 'published':
+                $b->where('r.acknowledged_at', null)->where('r.published_at IS NOT NULL', null, false);
+                break;
+
+            case 'acknowledged':
+                $b->where('r.acknowledged_at IS NOT NULL', null, false);
+                break;
+
+            case 'unacknowledged':
+                $b->where('r.acknowledged_at', null);
+                break;
         }
         if ($jobId = (int) ($this->request->getGet('job_id') ?? 0)) {
             $b->where('r.job_id', $jobId);
@@ -394,31 +514,49 @@ class ValuationController extends BaseController
         if ($itemId = (int) ($this->request->getGet('item_id') ?? 0)) {
             $b->where('l.item_id', $itemId);
         }
+        if ($warehouseId = (int) ($this->request->getGet('warehouse_id') ?? 0)) {
+            $b->where('l.warehouse_id', $warehouseId);
+        }
         if ($src = trim((string) ($this->request->getGet('source_app') ?? ''))) {
             $b->where('r.source_app', strtolower($src));
         }
-        if ($from = $this->dateParam('from')) {
+        // The document type is what an operator means by "source": a purchase, a stock
+        // journal, an adjustment. `source_app` is a different question — which product the
+        // paperwork came from — and both are filterable because both get asked.
+        if ($docType = trim((string) ($this->request->getGet('document_type') ?? ''))) {
+            $b->where('d.document_type', $docType);
+        }
+        switch (strtolower(trim((string) ($this->request->getGet('delta') ?? '')))) {
+            case 'increase':
+                $b->where('r.delta_amount >', 0);
+                break;
+
+            case 'decrease':
+                $b->where('r.delta_amount <', 0);
+                break;
+
+            case 'none':
+                $b->where('r.delta_amount', 0);
+                break;
+        }
+        $minAbs = trim((string) ($this->request->getGet('min_abs_delta') ?? ''));
+        if ($minAbs !== '' && is_numeric($minAbs)) {
+            // Formatted from a float, so the literal cannot carry anything but digits.
+            $b->where('ABS(r.delta_amount) >= ' . sprintf('%.4F', abs((float) $minAbs)), null, false);
+        }
+        if ($q = trim((string) ($this->request->getGet('q') ?? ''))) {
+            $b->groupStart()->like('i.item_name', $q)->orLike('i.item_sku', $q)->orLike('d.document_no', $q)->groupEnd();
+        }
+        $from = $range === null ? $this->dateParam('from') : ($range['from'] ?? null);
+        $to = $range === null ? $this->dateParam('to') : ($range['to'] ?? null);
+        if ($from !== null) {
             $b->where('r.created_at >=', $from . ' 00:00:00');
         }
-        if ($to = $this->dateParam('to')) {
+        if ($to !== null) {
             $b->where('r.created_at <=', $to . ' 23:59:59');
         }
-        $total = (clone $b)->countAllResults(false);
-        $sort = in_array($p['sort'], ['revision_id', 'created_at', 'delta_amount', 'document_id', 'acknowledged_at'], true) ? 'r.' . $p['sort'] : 'r.revision_id';
-        $rows = $b->select('r.revision_id, r.revision_uuid, r.job_id, r.document_id, r.line_id, r.source_app, r.source_document_type, r.source_document_id, r.source_document_uuid, r.old_valuation_rate, r.new_valuation_rate, r.old_valuation_amount, r.new_valuation_amount, r.delta_amount, r.published_at, r.acknowledged_at, r.acknowledged_by_app, r.created_at, d.document_no, d.document_type, d.document_date, d.status AS document_status, d.source_document_no, l.item_id, l.direction, l.base_qty, i.item_name, i.item_sku')
-            ->orderBy($sort, $p['order'])->orderBy('r.revision_id', $p['order'])->limit($p['limit'], $p['offset'])->get()->getResultArray();
-        foreach ($rows as &$r) {
-            foreach (['revision_id', 'job_id', 'document_id', 'line_id', 'source_document_id', 'item_id'] as $k) {
-                $r[$k] = $r[$k] === null ? null : (int) $r[$k];
-            }
-            foreach (['old_valuation_rate', 'new_valuation_rate', 'old_valuation_amount', 'new_valuation_amount', 'delta_amount', 'base_qty'] as $k) {
-                $r[$k] = $r[$k] === null ? null : round((float) $r[$k], 4);
-            }
-            $r['acknowledged'] = $r['acknowledged_at'] !== null;
-        }
-        unset($r);
 
-        return $this->respondList($rows, $total, $p['limit'], $p['offset']);
+        return $b;
     }
 
     /**
@@ -474,6 +612,212 @@ class ValuationController extends BaseController
             'acknowledged_by_app'  => $app,
             'acknowledged_at'      => $now,
         ]]);
+    }
+
+    /**
+     * GET /valuation/revisions/summary?days=10 + every filter the list itself takes.
+     *
+     * The figures the revisions screen puts on its cards, its charts and its insight panel,
+     * computed as SQL aggregates over the SAME filtered set as the list.
+     *
+     * None of it is derived from the page of rows a browser happens to be holding: a KPI that
+     * counted the visible 25 revisions would understate a company's exposure by whatever the
+     * reader had not scrolled to yet, and a "net impact" that moved when somebody changed the
+     * page size is a number no one can reconcile.
+     */
+    public function revisionsSummary()
+    {
+        $a = $this->authorizeAny(['reports.valuation.read', 'valuation.recalculate']);
+        if (isset($a['response'])) {
+            return $a['response'];
+        }
+        $cmpId = (int) $a['ctx']['cmp_id'];
+        $boId = (int) ($a['ctx']['bo_id'] ?? 0);
+        $db = \Config\Database::connect();
+
+        // The window the timeline draws and the trend compares against. An explicit date
+        // filter owns it; otherwise it is the last `days` days ending today.
+        $days = max(1, min(90, (int) ($this->request->getGet('days') ?? 10)));
+        $filterFrom = $this->dateParam('from');
+        $filterTo = $this->dateParam('to');
+        $to = $filterTo ?? date('Y-m-d');
+        $from = $filterFrom ?? date('Y-m-d', strtotime($to . ' -' . ($days - 1) . ' days'));
+        if (strtotime($from) > strtotime($to)) {
+            $from = $to;
+        }
+        $span = max(1, (int) round((strtotime($to) - strtotime($from)) / 86400) + 1);
+        $prevTo = date('Y-m-d', strtotime($from . ' -1 day'));
+        $prevFrom = date('Y-m-d', strtotime($prevTo . ' -' . ($span - 1) . ' days'));
+
+        $filtered = $this->revisionQuery($cmpId, $boId)->select(self::REVISION_TOTALS_SELECT, false)->get()->getRowArray() ?: [];
+        $previous = $this->revisionQuery($cmpId, $boId, ['from' => $prevFrom, 'to' => $prevTo])
+            ->select(self::REVISION_TOTALS_SELECT, false)->get()->getRowArray() ?: [];
+
+        // Company-wide (branch-scoped) state and recent activity: what the acknowledgement
+        // progress ring and the "vs yesterday" captions describe. Filters do not apply — a
+        // backlog does not shrink because somebody narrowed a date range.
+        $today = date('Y-m-d');
+        $yesterday = date('Y-m-d', strtotime('-1 day'));
+        $week = date('Y-m-d', strtotime('-6 days'));
+        $prevWeek = date('Y-m-d', strtotime('-13 days'));
+        $company = $this->companyRevisionScope($cmpId, $boId)->select(
+            'COUNT(*) AS revisions'
+            . ', SUM(CASE WHEN r.acknowledged_at IS NOT NULL THEN 1 ELSE 0 END) AS acknowledged'
+            . ', SUM(CASE WHEN r.acknowledged_at IS NULL THEN 1 ELSE 0 END) AS pending'
+            . ", COALESCE(SUM(CASE WHEN r.acknowledged_at IS NULL THEN r.delta_amount ELSE 0 END),0) AS pending_delta"
+            . ', SUM(CASE WHEN r.acknowledged_at IS NULL AND r.published_at IS NULL THEN 1 ELSE 0 END) AS awaiting_publish'
+            . ', SUM(CASE WHEN r.acknowledged_at IS NULL AND r.published_at IS NOT NULL THEN 1 ELSE 0 END) AS published_unacknowledged'
+            . ", SUM(CASE WHEN r.created_at >= '{$week} 00:00:00' THEN 1 ELSE 0 END) AS created_last_7d"
+            . ", SUM(CASE WHEN r.created_at >= '{$prevWeek} 00:00:00' AND r.created_at < '{$week} 00:00:00' THEN 1 ELSE 0 END) AS created_prev_7d"
+            . ", SUM(CASE WHEN r.acknowledged_at >= '{$today} 00:00:00' THEN 1 ELSE 0 END) AS acknowledged_today"
+            . ", SUM(CASE WHEN r.acknowledged_at >= '{$yesterday} 00:00:00' AND r.acknowledged_at < '{$today} 00:00:00' THEN 1 ELSE 0 END) AS acknowledged_yesterday",
+            false,
+        )->get()->getRowArray() ?: [];
+
+        // Per-day counts for the timeline, over the resolved window and the screen's filters.
+        $timelineRows = $this->revisionQuery($cmpId, $boId, ['from' => $from, 'to' => $to])
+            ->select(self::REVISION_TIMELINE_SELECT, false)
+            ->groupBy('r.created_at::date', false)->orderBy('r.created_at::date', 'ASC', false)
+            ->get()->getResultArray();
+
+        $bySource = $this->revisionQuery($cmpId, $boId)
+            ->select(self::REVISION_SOURCE_SELECT, false)
+            ->groupBy('d.document_type')->orderBy('abs_delta', 'DESC', false)->limit(12)->get()->getResultArray();
+
+        // Which items carry the movement, and the biggest rate change each of them saw. The
+        // percentage is of the OLD valuation rate, and a zero old rate yields NULL rather
+        // than an infinity dressed up as a number.
+        $topItems = $this->revisionQuery($cmpId, $boId)
+            ->select(self::REVISION_TOP_ITEM_SELECT, false)
+            ->where('l.item_id IS NOT NULL', null, false)
+            ->groupBy('l.item_id')->groupBy('i.item_name')->groupBy('i.item_sku')
+            ->orderBy('abs_delta', 'DESC', false)->limit(8)->get()->getResultArray();
+
+        // What produced the revisions: the recalculation's own trigger. This is the only
+        // honest answer to "why did the valuation change" this screen can give, because it is
+        // the reason the engine recorded when it queued the job.
+        $triggers = $this->revisionQuery($cmpId, $boId)
+            ->join('inv_valuation_recalc_jobs jb', 'jb.job_id = r.job_id', 'left')
+            ->select(self::REVISION_TRIGGER_SELECT, false)
+            ->groupBy('jb.trigger_kind')->orderBy('revisions', 'DESC', false)->limit(6)->get()->getResultArray();
+
+        $jobRows = $db->table('inv_valuation_recalc_jobs')->select('status, COUNT(*) AS jobs', false)
+            ->where('cmp_id', $cmpId)->groupBy('status')->get()->getResultArray();
+        $jobs = ['queued' => 0, 'running' => 0, 'failed' => 0];
+        foreach ($jobRows as $row) {
+            $key = strtolower((string) $row['status']);
+            if (isset($jobs[$key])) {
+                $jobs[$key] = (int) $row['jobs'];
+            }
+        }
+
+        // The 30-day baseline the anomaly check compares against, for the top items only.
+        $itemIds = array_values(array_filter(array_map(static fn ($r) => (int) $r['item_id'], $topItems)));
+        $baseline = [];
+        $baselineDays = 30;
+        $baselineFrom = date('Y-m-d', strtotime($to . ' -' . ($baselineDays - 1) . ' days'));
+        if ($itemIds !== []) {
+            $rows = $this->companyRevisionScope($cmpId, $boId)
+                ->select('l.item_id, AVG(ABS(r.new_valuation_rate - r.old_valuation_rate) / NULLIF(ABS(r.old_valuation_rate),0)) * 100 AS baseline_pct, COUNT(*) AS samples', false)
+                ->whereIn('l.item_id', $itemIds)
+                ->where('r.created_at >=', $baselineFrom . ' 00:00:00')
+                ->where('r.created_at <=', $to . ' 23:59:59')
+                ->groupBy('l.item_id')->get()->getResultArray();
+            foreach ($rows as $row) {
+                $baseline[(int) $row['item_id']] = [
+                    'baseline_pct' => $row['baseline_pct'] === null ? null : round((float) $row['baseline_pct'], 2),
+                    'samples'      => (int) $row['samples'],
+                ];
+            }
+        }
+
+        $castTotals = static function (array $t): array {
+            $out = [];
+            foreach (['revisions', 'increased', 'decreased', 'unchanged', 'items_affected', 'items_increased', 'items_decreased', 'jobs', 'acknowledged', 'published_unacknowledged', 'awaiting_publish'] as $k) {
+                $out[$k] = (int) ($t[$k] ?? 0);
+            }
+            foreach (['net_delta', 'abs_delta'] as $k) {
+                $out[$k] = round((float) ($t[$k] ?? 0), 4);
+            }
+
+            return $out;
+        };
+
+        return $this->respond(['data' => [
+            'window' => [
+                'from'           => $from,
+                'to'             => $to,
+                'days'           => $span,
+                'explicit_range' => $filterFrom !== null || $filterTo !== null,
+                'previous_from'  => $prevFrom,
+                'previous_to'    => $prevTo,
+            ],
+            'filtered' => $castTotals($filtered),
+            'previous' => $castTotals($previous),
+            'company'  => [
+                'revisions'               => (int) ($company['revisions'] ?? 0),
+                'acknowledged'            => (int) ($company['acknowledged'] ?? 0),
+                'pending'                 => (int) ($company['pending'] ?? 0),
+                'pending_delta'           => round((float) ($company['pending_delta'] ?? 0), 4),
+                'awaiting_publish'        => (int) ($company['awaiting_publish'] ?? 0),
+                'published_unacknowledged' => (int) ($company['published_unacknowledged'] ?? 0),
+                'created_last_7d'         => (int) ($company['created_last_7d'] ?? 0),
+                'created_prev_7d'         => (int) ($company['created_prev_7d'] ?? 0),
+                'acknowledged_today'      => (int) ($company['acknowledged_today'] ?? 0),
+                'acknowledged_yesterday'  => (int) ($company['acknowledged_yesterday'] ?? 0),
+            ],
+            'jobs'     => $jobs,
+            'timeline' => array_map(static fn ($r) => [
+                'day'       => substr((string) $r['revision_day'], 0, 10),
+                'revisions' => (int) $r['revisions'],
+                'increased' => (int) $r['increased'],
+                'decreased' => (int) $r['decreased'],
+                'net_delta' => round((float) $r['net_delta'], 4),
+            ], $timelineRows),
+            'by_source' => array_map(static fn ($r) => [
+                'document_type' => $r['document_type'],
+                'revisions'     => (int) $r['revisions'],
+                'net_delta'     => round((float) $r['net_delta'], 4),
+                'abs_delta'     => round((float) $r['abs_delta'], 4),
+            ], $bySource),
+            'top_items' => array_map(static fn ($r) => [
+                'item_id'         => (int) $r['item_id'],
+                'item_name'       => $r['item_name'],
+                'item_sku'        => $r['item_sku'],
+                'revisions'       => (int) $r['revisions'],
+                'net_delta'       => round((float) $r['net_delta'], 4),
+                'abs_delta'       => round((float) $r['abs_delta'], 4),
+                'peak_change_pct' => $r['peak_change_pct'] === null ? null : round((float) $r['peak_change_pct'], 2),
+                'baseline_pct'    => $baseline[(int) $r['item_id']]['baseline_pct'] ?? null,
+                'baseline_samples' => $baseline[(int) $r['item_id']]['samples'] ?? 0,
+            ], $topItems),
+            'baseline_days' => $baselineDays,
+            'triggers'      => array_map(static fn ($r) => [
+                'trigger_kind' => $r['trigger_kind'],
+                'jobs'         => (int) $r['jobs'],
+                'revisions'    => (int) $r['revisions'],
+                'net_delta'    => round((float) $r['net_delta'], 4),
+                'abs_delta'    => round((float) $r['abs_delta'], 4),
+            ], $triggers),
+        ]]);
+    }
+
+    /**
+     * Company (and branch) scoped revisions, with NO screen filter applied.
+     *
+     * The backlog and the acknowledgement progress are company facts: they must not move
+     * because somebody narrowed a date range on the screen in front of them.
+     */
+    private function companyRevisionScope(int $cmpId, int $boId): \CodeIgniter\Database\BaseBuilder
+    {
+        $b = \Config\Database::connect()->table('inv_valuation_revisions r')
+            ->join('inv_document_lines l', 'l.line_id = r.line_id', 'left')
+            ->where('r.cmp_id', $cmpId);
+        if ($boId > 0) {
+            $b->where('l.bo_id', $boId);
+        }
+
+        return $b;
     }
 
     /**
