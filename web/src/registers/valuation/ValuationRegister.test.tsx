@@ -189,12 +189,26 @@ describe('valuation register', () => {
     expect(within(warehouses).getByText('Whole company')).toBeTruthy()
   })
 
+  /**
+   * The register's own grid.
+   *
+   * `getByRole('table')` cannot be used here: the trend chart renders an
+   * accessible data table of its own, and it arrives on a separate request, so
+   * an unscoped lookup passed or threw "found multiple elements" depending on
+   * which response won the race. The register's grid is the one with a totals
+   * row, which the chart's table never has.
+   */
+  function registerGrid(): HTMLElement {
+    const tables = screen.getAllByRole('table')
+    return tables.find((t) => t.querySelector('tfoot')) ?? tables[0]
+  }
+
   it('renders the item code and the row figures', async () => {
     renderRegister()
     expect(await screen.findByText('TEST-001')).toBeTruthy()
     // Scoped to the table: an item name also appears in the donut's legend, so
     // an unscoped lookup matches twice as soon as the analytics have loaded.
-    const table = within(screen.getByRole('table'))
+    const table = within(registerGrid())
     expect(table.getByText('DIM-001')).toBeTruthy()
     expect(table.getByText('Test Item')).toBeTruthy()
     expect(table.getByText('523')).toBeTruthy()
@@ -203,8 +217,8 @@ describe('valuation register', () => {
 
   it('totals from the server summary, not from the rows on screen', async () => {
     renderRegister()
-    const table = await screen.findByRole('table')
-    const foot = table.querySelector('tfoot')
+    await screen.findByText('TEST-001')
+    const foot = registerGrid().querySelector('tfoot')
     expect(foot).toBeTruthy()
     expect(within(foot as HTMLElement).getByText('Total (2 items)')).toBeTruthy()
     expect(within(foot as HTMLElement).getByText('965')).toBeTruthy()

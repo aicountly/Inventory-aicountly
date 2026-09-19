@@ -77,6 +77,15 @@ export interface CostLayerConsumption {
   document_status: string | null
 }
 
+/**
+ * The four states a layer can be in. The server derives it (ValuationController
+ * ::layerStatus) so the screen, the SQL filter and the distribution all agree
+ * on what "partially consumed" means; `layerStatusOf` below is the fallback for
+ * a response that predates it.
+ */
+export type CostLayerStatus = 'open' | 'partial' | 'closed' | 'negative'
+export const COST_LAYER_STATUSES: CostLayerStatus[] = ['open', 'partial', 'closed', 'negative']
+
 export interface CostLayerRow {
   layer_id: number
   fy_id: number | null
@@ -98,19 +107,93 @@ export interface CostLayerRow {
   qty_consumed: number | null
   remaining_value: number
   consumptions: CostLayerConsumption[]
+  /* Added with the cost-layers screen; optional so a client deployed ahead of
+     the API renders a dash rather than `undefined`. */
+  batch_no?: string | null
+  lot_no?: string | null
+  expiry_date?: string | null
+  batch_status?: string | null
+  /** What the layer was worth when it opened — qty received x unit cost. */
+  layer_value?: number
+  layer_status?: CostLayerStatus | string
+}
+
+export interface CostLayersSummary {
+  open_qty: number
+  open_value: number
+  backorder_qty: number
+  /** Layers matching the filters — including the ones a state filter removed. */
+  layer_count?: number
+  received_qty?: number
+  received_value?: number
+  unit_cost_min?: number | null
+  unit_cost_max?: number | null
+  /** Weighted by received quantity, not the mean of the rates. */
+  unit_cost_avg?: number | null
+  first_received_at?: string | null
+  last_received_at?: string | null
+}
+
+export interface CostLayerDistributionBucket {
+  status: CostLayerStatus
+  layer_count: number
+  qty: number
+  value: number
+}
+
+/**
+ * The item's layers split BY state, at opening value.
+ *
+ * Deliberately blind to `open_only` and `status`: a split computed over a set
+ * already narrowed to one state would report that state as the whole item.
+ */
+export interface CostLayerDistribution {
+  layer_count: number
+  total_qty: number
+  total_value: number
+  buckets: CostLayerDistributionBucket[]
+}
+
+export interface CostLayerItem {
+  item_id: number
+  item_name: string
+  item_alias: string | null
+  item_sku: string | null
+  unit_id: number | null
+  valuation_method: string | null
 }
 
 export interface CostLayersResponse extends ListResponse<CostLayerRow> {
-  item: { item_id: number; item_name: string; item_alias: string | null; item_sku: string | null; unit_id: number | null; valuation_method: string | null }
-  summary: { open_qty: number; open_value: number; backorder_qty: number }
+  item: CostLayerItem
+  summary: CostLayersSummary
+  distribution?: CostLayerDistribution
 }
 
 export interface CostLayersQuery extends ListQuery {
   item_id: number | string
   warehouse_id?: number | string
+  batch_id?: number | string
   open_only?: boolean | number | string
   layer_kind?: string
+  status?: CostLayerStatus | string
+  /** `received_at` window — the period the screen's period picker writes. */
+  from?: string
+  to?: string
   all_fy?: boolean | number | string
+}
+
+/**
+ * The state of one layer, for a response that did not carry `layer_status`.
+ *
+ * `qty_received === null` is a layer migrated from Books, which recorded no
+ * opening quantity: untouched stock, not an exhausted layer.
+ */
+export function layerStatusOf(row: Pick<CostLayerRow, 'qty_received' | 'qty_remaining' | 'layer_status'>): CostLayerStatus {
+  const declared = row.layer_status
+  if (declared === 'open' || declared === 'partial' || declared === 'closed' || declared === 'negative') return declared
+  if (row.qty_remaining < 0) return 'negative'
+  if (row.qty_remaining === 0) return 'closed'
+  return row.qty_received === null || row.qty_remaining >= row.qty_received ? 'open' : 'partial'
 }
 
 // ---- recalculation jobs --------------------------------------------------------------------------
