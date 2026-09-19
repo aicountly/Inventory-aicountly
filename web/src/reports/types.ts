@@ -18,6 +18,11 @@ export type FilterKind =
   | 'date_range'
   /** Select of every document type the company has, loaded once and cached. */
   | 'document_type'
+  /**
+   * Select of the parties Inventory's documents reference (registers/usePartyOptions).
+   * A picker over `inv_documents.party_ref` — Inventory owns no party master.
+   */
+  | 'party'
   | 'select'
   | 'number'
   | 'toggle'

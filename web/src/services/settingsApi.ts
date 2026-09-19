@@ -68,6 +68,12 @@ export interface DocumentTypeInfo {
   legacy_vch_type: number | null
 }
 
+export interface DocumentPartyInfo {
+  party_ref: number
+  /** The name captured on the document; null when it was raised without one. */
+  party_name: string | null
+}
+
 export const settingsApi = {
   async get(signal?: AbortSignal): Promise<CompanySettings> {
     const res = await api.get<ItemResponse<CompanySettings>>('v1/settings', { signal })
@@ -106,6 +112,16 @@ export const settingsApi = {
 
   async documentTypes(signal?: AbortSignal): Promise<DocumentTypeInfo[]> {
     const res = await api.get<{ data: DocumentTypeInfo[] }>('v1/document-types', { signal })
+    return Array.isArray(res.data) ? res.data : []
+  },
+
+  /**
+   * The parties Inventory's own documents reference, for a register's party
+   * filter. A picker over `inv_documents.party_ref`, not a party master —
+   * customers, suppliers and job workers belong to Books.
+   */
+  async documentParties(signal?: AbortSignal): Promise<DocumentPartyInfo[]> {
+    const res = await api.get<{ data: DocumentPartyInfo[] }>('v1/document-parties', { signal })
     return Array.isArray(res.data) ? res.data : []
   },
 }
