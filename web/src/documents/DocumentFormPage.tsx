@@ -6,6 +6,7 @@ import { useQuery } from '../hooks/useQuery'
 import { errorMessage } from '../services/api'
 import { documentsApi } from '../services/documentsApi'
 import { DocumentForm } from './DocumentForm'
+import { InwardChallanForm } from './grn/InwardChallanForm'
 import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS } from './actions'
 import { draftFromDocument } from './formModel'
 import { specForCode, specForSlug, UNAVAILABLE_TYPES } from './registry'
@@ -93,6 +94,20 @@ export function DocumentFormPage() {
       )
     }
     const initial = draftFromDocument(doc, spec)
+    // Receiving has its own screen (see grn/InwardChallanForm): it brings its own page shell,
+    // breadcrumbs and sticky action bar, so it is returned whole rather than wrapped here.
+    if (spec.formKind === 'inward_challan') {
+      return (
+        <InwardChallanForm
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          status={doc.status}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
     return (
       <div className="page">
         <PageHeader title={`Edit ${spec.label.toLowerCase()} ${doc.document_no ?? `#${doc.document_id}`}`} subtitle={`Version ${doc.version} · ${STATUS_LABELS[doc.status as DocumentStatus] ?? doc.status}`} breadcrumbs={[...crumbs, { label: doc.document_no ?? `#${doc.document_id}`, to: `/documents/${doc.document_id}` }]} />
@@ -103,6 +118,9 @@ export function DocumentFormPage() {
   }
 
   const s = spec as NonNullable<typeof spec>
+  if (s.formKind === 'inward_challan') {
+    return <InwardChallanForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
   return (
     <div className="page">
       <PageHeader title={`New ${s.label.toLowerCase()}`} breadcrumbs={crumbs} />

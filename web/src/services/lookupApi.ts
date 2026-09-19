@@ -3,7 +3,7 @@
  * serials and bills of materials.
  */
 
-import { api } from './api'
+import { api, isApiError } from './api'
 import type { ItemResponse, ListQuery, ListResponse } from './api'
 import type { BomHeader } from '../documents/bom'
 import type { CreateDocumentPayload } from '../documents/types'
@@ -94,6 +94,27 @@ export const lookupApi = {
       signal: options.signal,
     })
     return res.data
+  },
+
+  /**
+   * `GET /v1/items/by-barcode/{code}` — one item by scanned barcode (item_upc) or SKU.
+   *
+   * Resolves to null when nothing matches, because "this barcode is not one of ours" is an
+   * ordinary outcome at a receiving bench, not a failure the caller should have to catch.
+   */
+  async itemByBarcode(code: string, options: { warehouseId?: number | null; signal?: AbortSignal } = {}): Promise<ItemSearchRow | null> {
+    const trimmed = code.trim()
+    if (!trimmed) return null
+    try {
+      const res = await api.get<ItemResponse<ItemSearchRow>>(`v1/items/by-barcode/${encodeURIComponent(trimmed)}`, {
+        query: { warehouse_id: options.warehouseId ?? undefined },
+        signal: options.signal,
+      })
+      return res.data
+    } catch (err) {
+      if (isApiError(err) && err.status === 404) return null
+      throw err
+    }
   },
 
   async itemsByIds(ids: number[], signal?: AbortSignal): Promise<ItemSearchRow[]> {
