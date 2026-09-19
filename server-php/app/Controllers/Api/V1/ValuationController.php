@@ -32,10 +32,20 @@ class ValuationController extends BaseController
         'item_id'     => 'numeric',
     ];
 
+    /**
+     * Values `?qty_sign=` accepts — the snapshot narrowed to one side of zero.
+     *
+     * There is no `all` member because that is the absence of the parameter,
+     * and no `on_hand` one because the snapshot is already only the items that
+     * hold stock: ValuationReplayService drops everything under 0.0001 before
+     * it costs a single item.
+     */
+    public const SNAPSHOT_QTY_SIGNS = ['positive', 'negative'];
+
     private const JOB_STATUSES = ['QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED'];
 
     /**
-     * GET /valuation?as_of=&method=FIFO|LIFO|WAC|AS_PER_MASTER&item_id=&warehouse_id=
+     * GET /valuation?as_of=&method=FIFO|LIFO|WAC|AS_PER_MASTER&item_id=&warehouse_id=&qty_sign=
      * Closing quantity per item as at `as_of`, valued at the cost the method resolves.
      */
     public function snapshot()
@@ -50,6 +60,14 @@ class ValuationController extends BaseController
         if ($method === null) {
             return $this->failStructured(422, 'validation_failed', 'method must be one of ' . implode(', ', self::REPORT_METHODS), ['allowed' => self::REPORT_METHODS]);
         }
+        $qtySign = $this->qtySignParam();
+        if ($qtySign === false) {
+            // Deliberately a rejection rather than a silent ignore: the summary
+            // below is computed over whatever rows survive this filter, so a
+            // misspelt scope that was quietly dropped would put the whole
+            // company's total on screen under the label "negative stock only".
+            return $this->failStructured(422, 'validation_failed', 'qty_sign must be one of ' . implode(', ', self::SNAPSHOT_QTY_SIGNS), ['allowed' => self::SNAPSHOT_QTY_SIGNS]);
+        }
         $itemId = (int) ($this->request->getGet('item_id') ?? 0) ?: null;
         $warehouseId = (int) ($this->request->getGet('warehouse_id') ?? 0) ?: null;
         $p = $this->listParams(500, 5000, 'item_name');
@@ -58,6 +76,7 @@ class ValuationController extends BaseController
         } catch (\Throwable $e) {
             return $this->failFromException($e);
         }
+        $snap = self::filterSnapshotByQtySign($snap, $qtySign);
         $rows = self::sortSnapshotRows($snap['rows'], $p['sort'], $p['order']);
         $total = count($rows);
         $page = array_slice($rows, $p['offset'], $p['limit']);
@@ -69,6 +88,47 @@ class ValuationController extends BaseController
             'total_value' => $snap['total_value'],
             'item_count'  => $total,
         ]]);
+    }
+
+    /**
+     * Narrow a snapshot to the items whose closing quantity falls on one side
+     * of zero, and re-total what is left.
+     *
+     * It has to happen here rather than in the caller's browser. The `summary`
+     * this endpoint returns is computed over the rows it returns, and a client
+     * that filtered the page it was handed would print a company-wide total
+     * under the heading "negative stock only" — a figure that counts rows it is
+     * not showing. Filtering before the totals keeps the two describing the
+     * same set.
+     *
+     * Only the rows and their totals move: the method is the caller's, and the
+     * item count is derived downstream from the rows.
+     *
+     * @param array{rows: list<array<string, mixed>>, total_qty: float, total_value: float, method: string} $snap
+     * @param 'positive'|'negative'|null $sign
+     * @return array{rows: list<array<string, mixed>>, total_qty: float, total_value: float, method: string}
+     */
+    public static function filterSnapshotByQtySign(array $snap, ?string $sign): array
+    {
+        if ($sign === null) {
+            return $snap;
+        }
+        $keep = $sign === 'negative'
+            ? static fn (array $r): bool => (float) ($r['closing_qty'] ?? 0) < 0
+            : static fn (array $r): bool => (float) ($r['closing_qty'] ?? 0) > 0;
+        $rows = array_values(array_filter($snap['rows'], $keep));
+        $totalQty = 0.0;
+        $totalValue = 0.0;
+        foreach ($rows as $r) {
+            $totalQty += (float) ($r['closing_qty'] ?? 0);
+            $totalValue += (float) ($r['stock_value'] ?? 0);
+        }
+
+        return array_merge($snap, [
+            'rows'        => $rows,
+            'total_qty'   => round($totalQty, 4),
+            'total_value' => round($totalValue, 4),
+        ]);
     }
 
     /**
@@ -603,6 +663,25 @@ class ValuationController extends BaseController
         }
 
         return null;
+    }
+
+    /**
+     * Scope from ?qty_sign= : null when absent (the whole snapshot), the value
+     * when it names a side of zero, and `false` when it is anything else.
+     *
+     * Three outcomes rather than two because "not asked for" and "asked for
+     * wrongly" must not collapse into the same answer — see snapshot().
+     *
+     * @return 'positive'|'negative'|false|null
+     */
+    private function qtySignParam(): string|false|null
+    {
+        $raw = strtolower(trim((string) ($this->request->getGet('qty_sign') ?? '')));
+        if ($raw === '') {
+            return null;
+        }
+
+        return in_array($raw, self::SNAPSHOT_QTY_SIGNS, true) ? $raw : false;
     }
 
     private function dateParam(string $name): ?string

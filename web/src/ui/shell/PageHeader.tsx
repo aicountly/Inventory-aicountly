@@ -47,7 +47,12 @@ export function PageHeader({
         className,
       )}
     >
-      <div className="min-w-0 flex-1 basis-72 flex items-start gap-3">
+      {/* `basis-72` is a WIDTH floor, so it may only apply once this header is a
+          row. Below `md` the container is a column and flex-basis addresses the
+          main axis, which made the title block 288px TALL on a phone — a blank
+          half-screen between the subtitle and everything under it, on every
+          page that uses this header. */}
+      <div className="min-w-0 flex-1 md:basis-72 flex items-start gap-3">
         {backTo ? (
           <Link
             to={backTo}
