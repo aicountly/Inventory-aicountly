@@ -171,6 +171,11 @@
 .dark .bg-amber-50 {
   background-color: rgb(120 53 15 / 0.22);
 }
+/* The track an indeterminate progress sliver travels along (the recalculation
+   register's running rows). Same step as bg-emerald-100 above. */
+.dark .bg-amber-100 {
+  background-color: rgb(120 53 15 / 0.3);
+}
 .dark .bg-red-50,
 .dark .hover\:bg-red-50:hover,
 .dark .focus\:bg-red-50:focus {
@@ -206,6 +211,20 @@
 .dark .bg-red-50\/40 {
   background-color: rgb(127 29 29 / 0.09);
 }
+/* The guidance panels under the recalculation register, and the faint tint that
+   marks a failed row in it. Same fractions as their light counterparts. */
+.dark .bg-sky-50\/40 {
+  background-color: rgb(12 74 110 / 0.09);
+}
+.dark .bg-emerald-50\/40 {
+  background-color: rgb(6 78 59 / 0.09);
+}
+.dark .bg-violet-50\/40 {
+  background-color: rgb(76 29 149 / 0.09);
+}
+.dark .bg-red-50\/30 {
+  background-color: rgb(127 29 29 / 0.07);
+}
 
 .dark .border-emerald-100,
 .dark .border-emerald-200 {
@@ -226,6 +245,7 @@
 .dark .border-sky-200 {
   border-color: rgb(7 89 133 / 0.5);
 }
+.dark .border-violet-100,
 .dark .border-violet-200 {
   border-color: rgb(91 33 182 / 0.5);
 }

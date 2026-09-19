@@ -136,8 +136,11 @@ $routes->group('', ['namespace' => 'App\Controllers\Api', 'filter' => 'cors'], s
         $routes->get('valuation/cost-layers', 'ValuationController::costLayers');
         $routes->get('valuation/recalculations', 'ValuationController::recalcJobs');
         $routes->post('valuation/recalculations', 'ValuationController::enqueueRecalc');
+        // Before the (:num) route so the literal segment cannot be read as an id.
+        $routes->get('valuation/recalculations/summary', 'ValuationController::recalcSummary');
         $routes->get('valuation/recalculations/(:num)', 'ValuationController::recalcJob/$1');
         $routes->post('valuation/recalculations/(:num)/run', 'ValuationController::runRecalc/$1');
+        $routes->post('valuation/recalculations/(:num)/cancel', 'ValuationController::cancelRecalc/$1');
         $routes->get('valuation/revisions', 'ValuationController::revisions');
         $routes->post('valuation/revisions/ack', 'ValuationController::ackRevisions');
         $routes->get('valuation/carry-forward', 'ValuationController::carryForwardPreview');
