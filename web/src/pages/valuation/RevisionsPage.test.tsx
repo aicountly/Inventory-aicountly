@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import type { ValuationRevision } from '../../services/valuationApi'
+import type { AckResult, RevisionSummary, ValuationRevision } from '../../services/valuationApi'
 
 interface SheetPayload {
   title: string
@@ -9,11 +9,14 @@ interface SheetPayload {
   columns: { key: string; label: string }[]
   rows: Record<string, { text: string; value: unknown }>[]
   footerNotes?: string[]
+  metaLines?: string[]
 }
 
 const printTabular = vi.fn((_p: SheetPayload) => true)
 const exportTabularExcel = vi.fn(async (_p: SheetPayload) => {})
 const downloadCsv = vi.fn((_filename: string, _csv: string) => {})
+const toastSuccess = vi.fn()
+const toastError = vi.fn()
 
 vi.mock('../../export/documentExport', () => ({
   exportTabularExcel: (p: SheetPayload) => exportTabularExcel(p),
@@ -46,14 +49,46 @@ vi.mock('../../access/AccessContext', () => ({
 }))
 
 vi.mock('../../ui/ToastContext', () => ({
-  useToast: () => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }),
+  useToast: () => ({ success: toastSuccess, error: toastError, info: vi.fn() }),
+}))
+
+vi.mock('../../documents/useReferenceData', () => ({
+  useReferenceData: () => ({
+    warehouses: [{ warehouse_id: 4, warehouse_name: 'Main store', bo_id: 0, is_default: 1 }],
+    units: [],
+    defaultWarehouseId: 4,
+    warehouseName: () => 'Main store',
+    unitSymbol: () => 'KG',
+    loading: false,
+    error: null,
+    reload: vi.fn(),
+  }),
+}))
+
+vi.mock('../../services/settingsApi', () => ({
+  settingsApi: {
+    get: async () => ({ base_currency_code: 'INR' }),
+    documentTypes: async () => [
+      { code: 'purchase', label: 'Purchase', line_mode: 'in', valuation: true, cogs: false, native: true, legacy_vch_type: null },
+    ],
+  },
 }))
 
 const revisions = vi.fn()
+const revisionsSummary = vi.fn()
+const ackRevisions = vi.fn()
 
 vi.mock('../../services/valuationApi', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../services/valuationApi')>()
-  return { ...actual, valuationApi: { ...actual.valuationApi, revisions: (...args: unknown[]) => revisions(...args) } }
+  return {
+    ...actual,
+    valuationApi: {
+      ...actual.valuationApi,
+      revisions: (...args: unknown[]) => revisions(...args),
+      revisionsSummary: (...args: unknown[]) => revisionsSummary(...args),
+      ackRevisions: (...args: unknown[]) => ackRevisions(...args),
+    },
+  }
 })
 
 const { RevisionsPage } = await import('./RevisionsPage')
@@ -92,29 +127,105 @@ function revision(id: number): ValuationRevision {
   }
 }
 
-/** 30 revisions: more than one page of 25. */
-const ALL = Array.from({ length: 30 }, (_, i) => revision(i + 1))
+/** 30 revisions: more than one page of 25. #2 has already been applied in Books. */
+const ALL = Array.from({ length: 30 }, (_, i) => {
+  const r = revision(i + 1)
+  if (r.revision_id === 2) {
+    return { ...r, acknowledged: true, acknowledged_at: '2026-09-01 12:00:00', acknowledged_by_app: 'books' }
+  }
+  return r
+})
+
+function summary(over: Partial<RevisionSummary> = {}): RevisionSummary {
+  const totals = {
+    revisions: 30,
+    net_delta: 3525,
+    abs_delta: 3525,
+    increased: 30,
+    decreased: 0,
+    unchanged: 0,
+    items_affected: 1,
+    items_increased: 1,
+    items_decreased: 0,
+    jobs: 1,
+    acknowledged: 1,
+    published_unacknowledged: 29,
+    awaiting_publish: 0,
+  }
+  return {
+    window: { from: '2026-08-23', to: '2026-09-01', days: 10, explicit_range: false, previous_from: '2026-08-13', previous_to: '2026-08-22' },
+    filtered: totals,
+    previous: { ...totals, revisions: 10 },
+    company: {
+      revisions: 40,
+      acknowledged: 28,
+      pending: 12,
+      pending_delta: 4800,
+      awaiting_publish: 0,
+      published_unacknowledged: 12,
+      created_last_7d: 9,
+      created_prev_7d: 6,
+      acknowledged_today: 28,
+      acknowledged_yesterday: 16,
+    },
+    jobs: { queued: 2, running: 1, failed: 0 },
+    timeline: [{ day: '2026-09-01', revisions: 30, increased: 30, decreased: 0, net_delta: 3525 }],
+    by_source: [{ document_type: 'delivery_note', revisions: 30, net_delta: 3525, abs_delta: 3525 }],
+    top_items: [
+      {
+        item_id: 12,
+        item_name: 'Widget A',
+        item_sku: 'W-A',
+        revisions: 30,
+        net_delta: 3525,
+        abs_delta: 3525,
+        peak_change_pct: 11,
+        baseline_pct: 10,
+        baseline_samples: 12,
+      },
+    ],
+    baseline_days: 30,
+    triggers: [{ trigger_kind: 'backdated_document', jobs: 1, revisions: 30, net_delta: 3525, abs_delta: 3525 }],
+    ...over,
+  }
+}
+
+const ACK_OK: AckResult = {
+  acknowledged: 1,
+  already_acknowledged: 0,
+  unknown_revision_ids: [],
+  acknowledged_by_app: 'inventory',
+  acknowledged_at: '2026-09-01 13:00:00',
+}
 
 beforeEach(() => {
   printTabular.mockClear()
   exportTabularExcel.mockClear()
   downloadCsv.mockClear()
+  toastSuccess.mockClear()
+  toastError.mockClear()
   revisions.mockReset()
+  revisionsSummary.mockReset()
+  ackRevisions.mockReset()
   revisions.mockImplementation(async (query: Record<string, unknown> = {}) => {
     const limit = Number(query.limit ?? 100)
     const page = Number(query.page ?? 1)
     const offset = (page - 1) * limit
     return { data: ALL.slice(offset, offset + limit), meta: { total: ALL.length, limit, offset } }
   })
+  revisionsSummary.mockImplementation(async () => summary())
+  ackRevisions.mockResolvedValue(ACK_OK)
 })
 
-function renderPage() {
+function renderPage(entry = '/valuation/revisions?limit=25') {
   render(
-    <MemoryRouter initialEntries={['/valuation/revisions?limit=25']}>
+    <MemoryRouter initialEntries={[entry]}>
       <RevisionsPage />
     </MemoryRouter>,
   )
 }
+
+const ready = () => waitFor(() => expect(screen.getByText('DN-1')).toBeTruthy())
 
 describe('RevisionsPage exports', () => {
   /**
@@ -124,7 +235,7 @@ describe('RevisionsPage exports', () => {
    */
   it('names every money column as a valuation figure, on screen and in the file', async () => {
     renderPage()
-    await waitFor(() => expect(screen.getByText('DN-1')).toBeTruthy())
+    await ready()
     for (const header of ['Old valuation rate', 'New valuation rate', 'Old valuation amount', 'New valuation amount', 'Valuation delta']) {
       expect(screen.getByRole('columnheader', { name: header }), header).toBeTruthy()
     }
@@ -145,7 +256,7 @@ describe('RevisionsPage exports', () => {
 
   it('writes every matching revision, not the page on screen, and says so on paper', async () => {
     renderPage()
-    await waitFor(() => expect(screen.getByText('DN-1')).toBeTruthy())
+    await ready()
     expect(screen.queryByText('DN-30')).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: /export/i }))
@@ -158,7 +269,7 @@ describe('RevisionsPage exports', () => {
 
   it('prints the letterheaded sheet from the Print button', async () => {
     renderPage()
-    await waitFor(() => expect(screen.getByText('DN-1')).toBeTruthy())
+    await ready()
     fireEvent.click(screen.getByRole('button', { name: /print/i }))
     await waitFor(() => expect(printTabular).toHaveBeenCalledOnce())
     const sheet = printTabular.mock.calls[0][0]
@@ -167,5 +278,199 @@ describe('RevisionsPage exports', () => {
     expect(sheet.rows).toHaveLength(30)
     // "Awaiting Books" is what the badge says; the sheet must not print `false`.
     expect(sheet.rows[0].books_state.text).toBe('Published to Books')
+  })
+
+  it('prints the filters the figures were read under', async () => {
+    renderPage()
+    await ready()
+    fireEvent.click(screen.getByRole('button', { name: /print/i }))
+    await waitFor(() => expect(printTabular).toHaveBeenCalledOnce())
+    expect(printTabular.mock.calls[0][0].metaLines).toContain('Books: Awaiting Books')
+  })
+})
+
+describe('RevisionsPage summary', () => {
+  it('reads its KPIs from the server aggregate, not from the rows on screen', async () => {
+    renderPage()
+    await ready()
+    // 12 company-wide pending, though only 25 rows were fetched and 30 match.
+    expect(screen.getByText('Pending revisions')).toBeTruthy()
+    expect(screen.getByText('12')).toBeTruthy()
+    expect(screen.getByText('Acknowledged today')).toBeTruthy()
+    const [call] = revisionsSummary.mock.calls[0] as [Record<string, unknown>]
+    // A summary of "page 2" is not a summary.
+    expect(call.page).toBeUndefined()
+    expect(call.limit).toBeUndefined()
+  })
+
+  it('keeps the table usable when the summary fails', async () => {
+    revisionsSummary.mockRejectedValue(new Error('boom'))
+    renderPage()
+    await ready()
+    expect(screen.getByText(/summary figures could not be loaded/i)).toBeTruthy()
+    // The rows are unaffected.
+    expect(screen.getByText('DN-3')).toBeTruthy()
+  })
+
+  it('never claims a trend it cannot measure', async () => {
+    renderPage()
+    await ready()
+    // With no explicit date range the net-impact card states the gross movement instead of
+    // comparing two periods that are not comparable.
+    expect(screen.getByText('3,525.00 gross movement')).toBeTruthy()
+  })
+})
+
+describe('RevisionsPage acknowledgement', () => {
+  it('offers no checkbox for a revision Books has already applied', async () => {
+    renderPage()
+    await ready()
+    expect(screen.getByLabelText('Select revision 1')).toBeTruthy()
+    expect(screen.queryByLabelText('Select revision 2')).toBeNull()
+  })
+
+  it('counts only eligible rows when everything on the page is selected', async () => {
+    renderPage()
+    await ready()
+    fireEvent.click(screen.getByLabelText(/Select every revision on this page/))
+    // 25 rows on the page, one of them already applied.
+    expect(screen.getByRole('button', { name: 'Acknowledge selected (24)' })).toBeTruthy()
+  })
+
+  it('confirms before acknowledging, and posts only the eligible ids', async () => {
+    renderPage()
+    await ready()
+    fireEvent.click(screen.getByLabelText('Select revision 1'))
+    fireEvent.click(screen.getByRole('button', { name: 'Acknowledge selected (1)' }))
+
+    await waitFor(() => expect(screen.getByText('Acknowledge selected revisions?')).toBeTruthy())
+    expect(ackRevisions).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: /^Acknowledge 1 revision$/ }))
+    await waitFor(() => expect(ackRevisions).toHaveBeenCalledWith([1]))
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled())
+  })
+
+  it('reports a partial acknowledgement as a failure rather than a success', async () => {
+    ackRevisions.mockResolvedValue({ ...ACK_OK, acknowledged: 0, unknown_revision_ids: [1] })
+    renderPage()
+    await ready()
+    fireEvent.click(screen.getByLabelText('Select revision 1'))
+    fireEvent.click(screen.getByRole('button', { name: 'Acknowledge selected (1)' }))
+    await waitFor(() => expect(screen.getByText('Acknowledge selected revisions?')).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: /^Acknowledge 1 revision$/ }))
+
+    await waitFor(() => expect(toastError).toHaveBeenCalled())
+    expect(toastSuccess).not.toHaveBeenCalled()
+    expect(String(toastError.mock.calls[0][0])).toContain('could not be found')
+    // The row is still on screen: nothing is hidden on the strength of a half-known outcome.
+    expect(screen.getByText('DN-1')).toBeTruthy()
+  })
+
+  it('keeps the dialog open and says why when the API refuses', async () => {
+    ackRevisions.mockRejectedValue(new Error('Period is locked'))
+    renderPage()
+    await ready()
+    fireEvent.click(screen.getByLabelText('Select revision 1'))
+    fireEvent.click(screen.getByRole('button', { name: 'Acknowledge selected (1)' }))
+    await waitFor(() => expect(screen.getByText('Acknowledge selected revisions?')).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: /^Acknowledge 1 revision$/ }))
+
+    await waitFor(() => expect(screen.getByText('Period is locked')).toBeTruthy())
+    expect(screen.getByText('Acknowledge selected revisions?')).toBeTruthy()
+  })
+
+  it('cannot post the same acknowledgement twice', async () => {
+    let release: (v: AckResult) => void = () => {}
+    ackRevisions.mockImplementation(() => new Promise<AckResult>((resolve) => {
+      release = resolve
+    }))
+    renderPage()
+    await ready()
+    fireEvent.click(screen.getByLabelText('Select revision 1'))
+    fireEvent.click(screen.getByRole('button', { name: 'Acknowledge selected (1)' }))
+    await waitFor(() => expect(screen.getByText('Acknowledge selected revisions?')).toBeTruthy())
+
+    const confirm = screen.getByRole('button', { name: /Acknowledge 1 revision/ })
+    fireEvent.click(confirm)
+    fireEvent.click(confirm)
+    fireEvent.click(confirm)
+    expect(ackRevisions).toHaveBeenCalledTimes(1)
+    release(ACK_OK)
+  })
+
+  it('acknowledging one row from its detail panel leaves the rest of the selection alone', async () => {
+    renderPage()
+    await ready()
+    fireEvent.click(screen.getByLabelText('Select revision 3'))
+    expect(screen.getByRole('button', { name: 'Acknowledge selected (1)' })).toBeTruthy()
+
+    const row = screen.getByText('DN-1').closest('tr')
+    expect(row).toBeTruthy()
+    fireEvent.doubleClick(row as HTMLElement)
+    await waitFor(() => expect(screen.getByText('Revision #1')).toBeTruthy())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Acknowledge revision' }))
+    await waitFor(() => expect(screen.getByText('Acknowledge selected revisions?')).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: /^Acknowledge 1 revision$/ }))
+
+    await waitFor(() => expect(ackRevisions).toHaveBeenCalledWith([1]))
+    // Revision 3 was never part of this acknowledgement and is still ticked.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Acknowledge selected (1)' })).toBeTruthy())
+  })
+
+  it('warns when a selected revision has never been published to Books', async () => {
+    revisions.mockImplementation(async () => ({
+      data: [{ ...revision(1), published_at: null }],
+      meta: { total: 1, limit: 25, offset: 0 },
+    }))
+    renderPage()
+    await ready()
+    fireEvent.click(screen.getByLabelText('Select revision 1'))
+    fireEvent.click(screen.getByRole('button', { name: 'Acknowledge selected (1)' }))
+    await waitFor(() => expect(screen.getByText(/have never been sent|has never been sent/i)).toBeTruthy())
+  })
+})
+
+describe('RevisionsPage empty states', () => {
+  it('distinguishes "nothing matches" from "nothing exists"', async () => {
+    revisions.mockImplementation(async () => ({ data: [], meta: { total: 0, limit: 25, offset: 0 } }))
+    renderPage()
+    await waitFor(() => expect(screen.getByText('No revisions match these filters')).toBeTruthy())
+    expect(screen.getByText(/Try widening the Books status/)).toBeTruthy()
+    expect(screen.queryByText('No valuation revisions yet')).toBeNull()
+  })
+
+  it('offers a recalculation when the company has no revisions at all', async () => {
+    revisions.mockImplementation(async () => ({ data: [], meta: { total: 0, limit: 25, offset: 0 } }))
+    revisionsSummary.mockImplementation(async () =>
+      summary({
+        company: { ...summary().company, revisions: 0, acknowledged: 0, pending: 0 },
+      }),
+    )
+    renderPage()
+    await waitFor(() => expect(screen.getByText('No valuation revisions yet')).toBeTruthy())
+    expect(screen.getByText(/generated by a back-dated recalculation/)).toBeTruthy()
+    expect(screen.queryByText('No revisions match these filters')).toBeNull()
+  })
+})
+
+describe('RevisionsPage filters', () => {
+  it('asks the API for the books state the reader chose, with the legacy flag alongside', async () => {
+    renderPage()
+    await ready()
+    const [first] = revisions.mock.calls[0] as [Record<string, unknown>]
+    expect(first.books).toBe('unacknowledged')
+    expect(first.acknowledged).toBe('0')
+  })
+
+  it('drops a selection when the filters change under it', async () => {
+    renderPage()
+    await ready()
+    fireEvent.click(screen.getByLabelText('Select revision 1'))
+    expect(screen.getByRole('button', { name: 'Acknowledge selected (1)' })).toBeTruthy()
+
+    fireEvent.change(screen.getByLabelText('Movement'), { target: { value: 'increase' } })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Acknowledge selected (0)' })).toBeTruthy())
   })
 })

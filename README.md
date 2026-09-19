@@ -56,7 +56,14 @@ Manage through the API's read-only relay (`/api/manage/...`).
   list.
 - **Valuation** — the valuation snapshot at any method, cost layers with the
   issues that consumed them, back-dated recalculation jobs (dry run or live)
-  and the COGS revisions Books acknowledges.
+  and the COGS revisions Books acknowledges. The revisions screen carries its
+  own workspace: KPI cards, a filter panel (Books state, item, warehouse,
+  source document, movement, value threshold, date range), bulk
+  acknowledgement behind a confirmation that states what is being claimed, a
+  detail drawer showing the Books handover, and a timeline / source split /
+  acknowledgement progress band. Every figure on it is a server aggregate over
+  the same filters as the table (`GET /v1/valuation/revisions/summary`), never
+  a sum of the page on screen.
 - **Reports** — stock summary, warehouse stock, batch stock, serial numbers,
   stock ageing, movement analysis, near expiry and replenishment, each with
   URL-persisted filters and CSV export (`src/reports/configs`).
