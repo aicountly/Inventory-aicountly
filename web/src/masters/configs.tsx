@@ -1,6 +1,6 @@
 import { ActiveBadge, StatusBadge, statusBadgeLabel } from '../components/StatusBadge'
-import { batchesApi, brandsApi, itemGroupsApi, locationsApi, stockCategoriesApi, uomApi, warehouseGroupsApi, warehousesApi, BATCH_STATUSES, LOCATION_TYPES, WAREHOUSE_TYPES } from '../services/masters'
-import type { Batch, Brand, ItemGroup, Location, StockCategory, Uom, Warehouse, WarehouseGroup } from '../services/masters'
+import { batchesApi, itemGroupsApi, locationsApi, stockCategoriesApi, uomApi, warehouseGroupsApi, warehousesApi, BATCH_STATUSES, LOCATION_TYPES, WAREHOUSE_TYPES } from '../services/masters'
+import type { Batch, ItemGroup, Location, StockCategory, Uom, Warehouse, WarehouseGroup } from '../services/masters'
 import { formatDate, formatDateTime, formatInt, formatQty, humanize } from '../utils/format'
 import { isPickedItem } from './formValues'
 import { buildTree, descendantIds } from './tree'
@@ -100,28 +100,16 @@ export const stockCategoriesConfig: MasterConfig<StockCategory> = {
   ],
 }
 
-export const brandsConfig: MasterConfig<Brand> = {
-  slug: 'brands',
-  permissionSlug: 'brands',
-  title: 'Brands',
-  singular: 'Brand',
-  idKey: 'brand_id',
-  nameOf: (r) => r.brand_name,
-  api: brandsApi,
-  defaultSort: 'brand_name',
-  needsFormOptions: false,
-  columns: [
-    { key: 'brand_name', header: 'Brand', sortKey: 'brand_name', render: (r) => <strong>{r.brand_name}</strong> },
-    { key: 'brand_alias', header: 'Alias', sortKey: 'brand_alias' },
-    activeColumn<Brand>(),
-    updatedAt<Brand>(),
-  ],
-  fields: [
-    { name: 'brand_name', label: 'Brand name', type: 'text', required: true, maxLength: 255, span: 2 },
-    { name: 'brand_alias', label: 'Alias', type: 'text', maxLength: 64 },
-    { name: 'is_active', label: 'Active', type: 'checkbox' },
-  ],
-}
+/*
+ * No brandsConfig.
+ *
+ * Brands outgrew the generic master screen — an item count worth clicking
+ * through, a revenue column owned by another product, a create form with more
+ * than three fields — and is rendered by `pages/masters/brands/BrandsPage.tsx`.
+ * A config left here would be a second, silent definition of that screen: a
+ * column added to it would change nothing, which is exactly the kind of edit
+ * that gets made twice before anyone notices.
+ */
 
 export const uomConfig: MasterConfig<Uom> = {
   slug: 'uom',

@@ -46,7 +46,13 @@ Manage through the API's read-only relay (`/api/manage/...`).
 - **Masters** — item groups (tree), stock categories, brands, units of measure,
   warehouse groups (tree), warehouses, locations, bills of materials
   (components, by-products, scrap), batches and serial numbers (single and
-  bulk registration).
+  bulk registration). **Brands** has its own workspace: company-wide figures
+  from `/v1/brands/metrics`, search across name / alias / code / description,
+  status, period and item-linkage filters, item counts that open the filtered
+  item list, bulk activate / deactivate / delete, CSV import with a validation
+  preview, and a contextual rail whose suggestions apply real filters. Per-brand
+  turnover is read live from Books through `/v1/brands/sales` and is simply not
+  shown until that service is connected — nothing of Books' is stored here.
 
 - **Documents** — list, detail (lines with valuation, accounting effects,
   approvals, print snapshot) and create / edit forms for every native type;
