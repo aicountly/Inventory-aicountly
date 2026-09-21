@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useLocation, useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   Activity,
   ClipboardList,
@@ -58,6 +58,8 @@ import { ItemViewDrawer } from './ItemViewDrawer'
 import { ItemWizardBar } from './ItemWizardBar'
 import { fieldId } from './ItemWorkspaceKit'
 import {
+  duplicateDraft,
+  duplicateItemForm,
   emptyItemForm,
   itemPayload,
   itemToForm,
@@ -77,7 +79,14 @@ interface Loaded {
   openings: ItemOpeningsResponse
 }
 
-/** Duplicating an item hands the next page a draft through router state. */
+/**
+ * Duplicating an item hands the next page a draft through router state.
+ *
+ * That works from the item form, which already holds the draft. The items list
+ * does not — it holds a row, not a form — so it names the source with
+ * `/items/new?from=<id>` instead and this page fetches it. Two doors, one rule:
+ * both seed the form through `duplicateDraft`.
+ */
 interface ItemRouteState {
   duplicate?: ItemFormState
 }
@@ -109,6 +118,7 @@ export function ItemFormPage() {
   const itemId = id && /^\d+$/.test(id) ? Number(id) : null
   const navigate = useNavigate()
   const location = useLocation()
+  const [searchParams] = useSearchParams()
   const toast = useToast()
   const { scope, fy } = useCompany()
   const { can, loading: accessLoading } = useAccess()
@@ -180,14 +190,36 @@ export function ItemFormPage() {
     setInsights(null)
   }
 
+  /*
+   * `/items/new?from=7214` — Duplicate, from the items list.
+   *
+   * Read only when creating: on an edit route the id in the path is the record,
+   * and a stray `from` in the query string must not quietly reshape it. Its
+   * openings are deliberately not fetched — a copied opening would be stock
+   * that was never physically received.
+   */
+  const fromParam = searchParams.get('from')
+  const duplicateOf = itemId === null && fromParam && /^\d+$/.test(fromParam) ? Number(fromParam) : null
+  const source = useQuery(
+    (signal) => itemsApi.get(duplicateOf as number, signal),
+    [duplicateOf, scope?.cmp_id],
+    { enabled: !!scope && duplicateOf !== null, keepData: false },
+  )
+
   const effectiveFyId = loaded.data?.openings.effective_fy_id ?? 0
 
   useEffect(() => {
     if (initialised) return
     if (itemId === null) {
       if (!options) return
-      // A duplicate arrives as a draft on the router state; anything else starts empty.
-      const duplicate = (location.state as ItemRouteState | null)?.duplicate
+      // A duplicate arrives either as a draft on the router state (from the item
+      // form) or as a source id in the query string (from the items list). Wait
+      // for the fetch rather than filling a blank form the copy would then
+      // overwrite under the reader's cursor.
+      if (duplicateOf !== null && !source.data) return
+      const duplicate =
+        (location.state as ItemRouteState | null)?.duplicate ??
+        (source.data ? duplicateItemForm(source.data) : null)
       const next = duplicate ?? emptyItemForm(options.default_valuation_method)
       setForm(next)
       setBaseline(JSON.stringify(next))
@@ -202,7 +234,7 @@ export function ItemFormPage() {
       setManageConversions(next.unitLines.length > 0)
       setInitialised(true)
     }
-  }, [itemId, loaded.data, options, initialised, location.state])
+  }, [itemId, loaded.data, options, initialised, location.state, duplicateOf, source.data])
 
   const formJson = useMemo(() => JSON.stringify(form), [form])
   const dirty = initialised && baseline !== null && formJson !== baseline
@@ -560,16 +592,9 @@ export function ItemFormPage() {
   }
 
   const duplicate = () => {
-    const draft: ItemFormState = {
-      ...form,
-      item_name: `${form.item_name} (copy)`.trim(),
-      // Both are unique per company; carrying them over guarantees a conflict on the first save.
-      item_sku: '',
-      item_upc: '',
-      // Opening stock belongs to the item it was counted for, not to a copy of its settings.
-      openings: [],
-      unitLines: form.unitLines.map((l) => ({ ...l })),
-    }
+    // `duplicateDraft` owns what a copy keeps and what it drops — the same rule
+    // the items list's Duplicate goes through.
+    const draft = duplicateDraft(form)
     setBaseline(formJson)
     navigate('/items/new', { state: { duplicate: draft } satisfies ItemRouteState })
   }

@@ -81,7 +81,11 @@ Manage through the API's read-only relay (`/api/manage/...`).
   a sum of the page on screen.
 - **Reports** — stock summary, warehouse stock, batch stock, serial numbers,
   stock ageing, movement analysis, near expiry and replenishment, each with
-  URL-persisted filters and CSV export (`src/reports/configs`).
+  URL-persisted filters and CSV export (`src/reports/configs`). Warehouse stock
+  is the worked example of the full register treatment
+  (`src/registers/warehouse/`): KPI cards, saved views, a stock-health verdict
+  per row from the item's own levels, the live reserved / available buckets, and
+  an intelligence rail — all off the one response the rows came from.
 - **Reconciliation** — Inventory's closing valuation against the Books
   Stock-in-Hand ledger: the headline figures for the latest completed run, the
   run history with its trend, the bucket breakdown that explains a gap
