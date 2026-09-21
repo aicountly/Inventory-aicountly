@@ -1,195 +1,253 @@
-import { useRef, useState } from 'react'
-import { AlertTriangle, Download, Upload } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Download, Upload } from 'lucide-react'
 import { Modal } from '../components/Modal'
 import { Notice } from '../components/Notice'
-import { errorMessage } from '../services/api'
-import { lookupApi, pickExactMatch } from '../services/lookupApi'
+import type { FormOptionWarehouse } from '../services/items'
 import type { ItemSearchRow } from '../services/lookupApi'
+import { lookupApi } from '../services/lookupApi'
+import { Badge } from '../ui/Badge'
+import type { BadgeTone } from '../ui/Badge'
 import { Button } from '../ui/Button'
-import { cx } from '../ui/cx'
-import { downloadCsv, parseCsv, toCsv } from '../utils/csv'
-
-export interface ImportedLine {
-  row: ItemSearchRow
-  qty: string
-}
+import { EmptyState } from '../ui/EmptyState'
+import { csvFilename, csvRecords, downloadCsv, parseCsv } from '../utils/csv'
+import { formatMoney, formatQty } from '../utils/format'
+import { LineItemPicker } from './LineItemPicker'
+import type { LineDraft } from './formModel'
+import {
+  buildImportRow,
+  buildImportTemplateCsv,
+  importRowNotes,
+  importRowStatus,
+  lineFromImportRow,
+  matchItemFromSearch,
+} from './openingStock/openingStockHelpers'
+import type { ImportRow, ImportRowStatus } from './openingStock/openingStockHelpers'
+import type { DocumentTypeSpec } from './registry'
 
 interface ImportLinesModalProps {
   open: boolean
   onClose: () => void
-  warehouseId: number | null
-  onImport: (rows: ImportedLine[]) => void
+  spec: DocumentTypeSpec
+  warehouses: FormOptionWarehouse[]
+  defaultWarehouseId: number | null
+  onConfirm: (lines: LineDraft[]) => void
 }
 
-const SKU_HEADERS = ['sku', 'item_sku', 'code', 'barcode', 'item_code']
-const QTY_HEADERS = ['qty', 'quantity', 'qty_out', 'write_off_qty']
-const MAX_ROWS = 300
-const CONCURRENCY = 8
+/** Files larger than this are still parsed, but only the first N rows are offered for import. */
+const MAX_IMPORT_ROWS = 300
 
-function findColumn(header: string[], candidates: string[]): number {
-  const lower = header.map((h) => h.trim().toLowerCase())
-  for (const c of candidates) {
-    const idx = lower.indexOf(c)
-    if (idx !== -1) return idx
-  }
-  return -1
-}
-
-async function resolveInBatches(codes: string[], warehouseId: number | null): Promise<Map<string, ItemSearchRow | null>> {
-  const out = new Map<string, ItemSearchRow | null>()
-  for (let i = 0; i < codes.length; i += CONCURRENCY) {
-    const batch = codes.slice(i, i + CONCURRENCY)
-    const results = await Promise.all(
-      batch.map(async (code) => {
-        try {
-          const rows = await lookupApi.searchItems(code, { warehouseId, limit: 5 })
-          return pickExactMatch(rows, code) ?? null
-        } catch {
-          return null
-        }
-      }),
-    )
-    batch.forEach((code, i2) => out.set(code, results[i2]))
-  }
-  return out
+const STATUS_BADGE: Record<ImportRowStatus, { label: string; tone: BadgeTone }> = {
+  ok: { label: 'Ready', tone: 'success' },
+  unresolved: { label: 'Pick item', tone: 'warning' },
+  error: { label: 'Error', tone: 'danger' },
 }
 
 /**
- * A first, real CSV import: two columns (`sku`, `qty`), each SKU resolved through the same
- * `items/search` the rest of the form uses. There is no server-side import job to hand this off
- * to, so matching happens here, in the browser, before the rows ever become draft lines.
+ * Upload → parse → resolve each row's item against the live item search API → preview → confirm.
+ * Nothing is added to the draft, nothing is created in the item/batch/serial masters, until the
+ * user explicitly confirms — see openingStockHelpers.importRowNotes for what a batch/serial/expiry
+ * column cannot do automatically.
  */
-export function ImportLinesModal({ open, onClose, warehouseId, onImport }: ImportLinesModalProps) {
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [matched, setMatched] = useState<ImportedLine[]>([])
-  const [unmatched, setUnmatched] = useState<string[]>([])
+export function ImportLinesModal({ open, onClose, spec, warehouses, defaultWarehouseId, onConfirm }: ImportLinesModalProps) {
   const [fileName, setFileName] = useState<string | null>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const [rows, setRows] = useState<ImportRow[]>([])
+  const [truncated, setTruncated] = useState(false)
+  const [resolving, setResolving] = useState(false)
+  const [parseError, setParseError] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const runId = useRef(0)
 
-  const reset = () => {
-    setError(null)
-    setMatched([])
-    setUnmatched([])
+  useEffect(() => {
+    if (!open) return
     setFileName(null)
+    setRows([])
+    setTruncated(false)
+    setParseError(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }, [open])
+
+  const resolveAll = async (built: ImportRow[], myRun: number) => {
+    setResolving(true)
+    const cache = new Map<string, ItemSearchRow[]>()
+    const next = [...built]
+    for (let i = 0; i < next.length; i++) {
+      if (runId.current !== myRun) return
+      const row = next[i]
+      if (row.errors.length > 0) continue
+      const key = `${row.itemCode.trim().toLowerCase()}|${row.itemName.trim().toLowerCase()}`
+      try {
+        let found = cache.get(key)
+        if (!found) {
+          found = await lookupApi.searchItems(row.itemCode || row.itemName, { limit: 8 })
+          cache.set(key, found)
+        }
+        next[i] = { ...row, item: matchItemFromSearch(found, row.itemCode, row.itemName) }
+      } catch {
+        // Leave unresolved — the row's own item picker lets the user find it by hand.
+      }
+      if (runId.current === myRun) setRows([...next])
+    }
+    if (runId.current === myRun) setResolving(false)
   }
 
   const handleFile = async (file: File) => {
-    reset()
+    runId.current += 1
+    const myRun = runId.current
     setFileName(file.name)
-    setBusy(true)
+    setParseError(null)
+    setRows([])
+    setTruncated(false)
+    let text: string
     try {
-      const text = await file.text()
-      const rows = parseCsv(text)
-      if (rows.length === 0) throw new Error('That file has no rows.')
-      const header = rows[0]
-      const looksLikeHeader = findColumn(header, SKU_HEADERS) !== -1 || findColumn(header, QTY_HEADERS) !== -1
-      const skuCol = looksLikeHeader ? findColumn(header, SKU_HEADERS) : 0
-      const qtyCol = looksLikeHeader ? findColumn(header, QTY_HEADERS) : 1
-      const dataRows = (looksLikeHeader ? rows.slice(1) : rows).slice(0, MAX_ROWS)
-      if (skuCol === -1) throw new Error('Could not find a "sku" column. Expected a header like sku,qty.')
-
-      const entries = dataRows.map((r) => ({ sku: (r[skuCol] ?? '').trim(), qty: (r[qtyCol >= 0 ? qtyCol : 1] ?? '1').trim() || '1' })).filter((e) => e.sku)
-      const codes = [...new Set(entries.map((e) => e.sku))]
-      const resolved = await resolveInBatches(codes, warehouseId)
-
-      const ok: ImportedLine[] = []
-      const bad: string[] = []
-      for (const entry of entries) {
-        const row = resolved.get(entry.sku)
-        if (row) ok.push({ row, qty: entry.qty })
-        else bad.push(entry.sku)
-      }
-      setMatched(ok)
-      setUnmatched(bad)
-    } catch (err) {
-      setError(errorMessage(err, 'Could not read that file.'))
-    } finally {
-      setBusy(false)
+      text = await file.text()
+    } catch {
+      setParseError('Could not read that file.')
+      return
     }
+    const parsed = parseCsv(text)
+    if (parsed.headers.length === 0) {
+      setParseError('That file has no header row. Use Download Template to see the expected columns.')
+      return
+    }
+    const records = csvRecords(parsed)
+    const capped = records.slice(0, MAX_IMPORT_ROWS)
+    setTruncated(records.length > MAX_IMPORT_ROWS)
+    const built = capped.map((record, i) => buildImportRow(record, i + 1, warehouses, defaultWarehouseId))
+    setRows(built)
+    void resolveAll(built, myRun)
   }
+
+  const setRow = (index: number, patch: Partial<ImportRow>) => setRows((rs) => rs.map((r, i) => (i === index ? { ...r, ...patch } : r)))
+
+  const readyRows = rows.filter((r) => importRowStatus(r) === 'ok')
 
   const confirm = () => {
-    if (matched.length === 0) return
-    onImport(matched)
+    const lines = readyRows.map((r) => lineFromImportRow(spec, defaultWarehouseId, r)).filter((l): l is LineDraft => l !== null)
+    if (lines.length === 0) return
+    onConfirm(lines)
     onClose()
-  }
-
-  const downloadTemplate = () => {
-    downloadCsv('write-off-import-template.csv', toCsv([{ sku: 'SKU-0001', qty: 1 }], [{ header: 'sku', value: (r) => r.sku }, { header: 'qty', value: (r) => r.qty }]))
   }
 
   return (
     <Modal
       open={open}
-      title="Import lines from CSV"
-      description="Two columns: sku, qty. Each SKU is matched against the item master before anything is added."
       onClose={onClose}
-      busy={busy}
-      size="md"
+      title="Import items from CSV"
+      description="Upload a file in the template's column layout — you'll review every row before anything is added."
+      size="xl"
       footer={
         <>
-          <Button variant="secondary" onClick={onClose} disabled={busy}>
+          <Button type="button" variant="secondary" icon={Download} onClick={() => downloadCsv(csvFilename(`${spec.slug}-import-template`), buildImportTemplateCsv())}>
+            Download template
+          </Button>
+          <span className="flex-1" />
+          <Button type="button" variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="primary" onClick={confirm} disabled={busy || matched.length === 0}>
-            Add {matched.length || ''} matched line{matched.length === 1 ? '' : 's'}
+          <Button type="button" variant="primary" onClick={confirm} disabled={resolving || readyRows.length === 0}>
+            Import {readyRows.length} line{readyRows.length === 1 ? '' : 's'}
           </Button>
         </>
       }
     >
-      <div className="flex flex-col gap-3">
-        <div className="flex items-center justify-between gap-2 rounded-lg border border-dashed border-gray-300 bg-gray-50/60 px-3 py-3">
-          <div className="flex min-w-0 items-center gap-2">
-            <Upload className="h-4 w-4 shrink-0 text-gray-400" aria-hidden />
-            <span className="truncate text-sm text-gray-600">{fileName ?? 'Choose a .csv file to import'}</span>
+      <label className="flex cursor-pointer flex-col items-center gap-2 rounded-xl border-2 border-dashed border-gray-200 px-4 py-6 text-center transition-colors hover:border-primary/40 hover:bg-primary-light/30">
+        <Upload className="h-6 w-6 text-gray-400" aria-hidden />
+        <span className="text-sm font-medium text-gray-700">{fileName ?? 'Choose a CSV file'}</span>
+        <span className="text-xs text-gray-400">Item Code, Warehouse, Quantity and Rate columns — see Download Template.</span>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".csv,text/csv"
+          className="sr-only"
+          onChange={(e) => {
+            const file = e.target.files?.[0]
+            if (file) void handleFile(file)
+          }}
+        />
+      </label>
+
+      {parseError ? (
+        <Notice kind="error" className="mt-3">
+          {parseError}
+        </Notice>
+      ) : null}
+      {truncated ? (
+        <Notice kind="warning" className="mt-3">
+          This file has more than {MAX_IMPORT_ROWS} rows — only the first {MAX_IMPORT_ROWS} are shown. Import in batches.
+        </Notice>
+      ) : null}
+
+      {rows.length > 0 ? (
+        <div className="mt-4">
+          <p className="mb-2 text-xs text-gray-500">
+            {readyRows.length} of {rows.length} row{rows.length === 1 ? '' : 's'} ready{resolving ? ' — matching items…' : '.'}
+          </p>
+          <div className="max-h-96 overflow-y-auto rounded-lg border border-gray-200">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-gray-50 text-left text-[11px] uppercase tracking-wide text-gray-500">
+                <tr>
+                  <th className="px-2 py-2">#</th>
+                  <th className="px-2 py-2">Item</th>
+                  <th className="px-2 py-2 text-right">Qty</th>
+                  <th className="px-2 py-2 text-right">Rate</th>
+                  <th className="px-2 py-2">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, i) => {
+                  const status = importRowStatus(row)
+                  const notes = [...row.warnings, ...importRowNotes(row)]
+                  return (
+                    <tr key={row.rowNumber} className="border-t border-gray-100 align-top">
+                      <td className="px-2 py-2 text-gray-400">{row.rowNumber}</td>
+                      <td className="min-w-[16rem] px-2 py-2">
+                        {row.item ? (
+                          <div>
+                            <div className="font-medium text-gray-900">{row.item.print_name || row.item.item_name}</div>
+                            <div className="text-xs text-gray-400">{row.item.item_sku ?? row.itemCode}</div>
+                          </div>
+                        ) : status === 'error' ? (
+                          <div className="text-gray-500">{row.itemCode || row.itemName || <span className="italic text-gray-400">no item named</span>}</div>
+                        ) : (
+                          <LineItemPicker
+                            itemId={null}
+                            itemName=""
+                            itemSku={null}
+                            warehouseId={row.warehouseId}
+                            onPick={(picked) => setRow(i, { item: picked })}
+                            onClear={() => setRow(i, { item: null })}
+                          />
+                        )}
+                        {row.errors.map((e) => (
+                          <div key={e} className="mt-0.5 text-xs text-red-600">
+                            {e}
+                          </div>
+                        ))}
+                        {notes.map((n) => (
+                          <div key={n} className="mt-0.5 text-xs text-amber-600">
+                            {n}
+                          </div>
+                        ))}
+                      </td>
+                      <td className="px-2 py-2 text-right tabular-nums">{row.quantity !== null ? formatQty(row.quantity) : '—'}</td>
+                      <td className="px-2 py-2 text-right tabular-nums">{row.rate !== null ? formatMoney(row.rate) : '—'}</td>
+                      <td className="px-2 py-2">
+                        <Badge tone={STATUS_BADGE[status].tone} size="xs">
+                          {STATUS_BADGE[status].label}
+                        </Badge>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
           </div>
-          <Button variant="secondary" size="sm" onClick={() => inputRef.current?.click()} disabled={busy}>
-            Browse
-          </Button>
-          <input
-            ref={inputRef}
-            type="file"
-            accept=".csv,text/csv"
-            className="sr-only"
-            onChange={(e) => {
-              const file = e.target.files?.[0]
-              if (file) void handleFile(file)
-              e.target.value = ''
-            }}
-          />
         </div>
-        <button type="button" onClick={downloadTemplate} className="inline-flex w-fit items-center gap-1 text-xs font-medium text-primary hover:underline">
-          <Download className="h-3 w-3" aria-hidden />
-          Download a template
-        </button>
-
-        {error ? <Notice kind="error">{error}</Notice> : null}
-
-        {matched.length > 0 || unmatched.length > 0 ? (
-          <div className="flex flex-col gap-2">
-            {matched.length > 0 ? (
-              <div className="max-h-48 overflow-y-auto rounded-lg border border-gray-200">
-                {matched.map((m, i) => (
-                  <div key={`${m.row.item_id}-${i}`} className={cx('flex items-center justify-between gap-2 px-3 py-1.5 text-sm', i > 0 && 'border-t border-gray-100')}>
-                    <span className="truncate text-gray-800">{m.row.print_name || m.row.item_name}</span>
-                    <span className="shrink-0 tabular-nums text-gray-500">qty {m.qty}</span>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-            {unmatched.length > 0 ? (
-              <Notice kind="warning" title={`${unmatched.length} row${unmatched.length === 1 ? '' : 's'} could not be matched`}>
-                <span className="inline-flex items-start gap-1.5">
-                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-                  {unmatched.slice(0, 12).join(', ')}
-                  {unmatched.length > 12 ? `, +${unmatched.length - 12} more` : ''}
-                </span>
-              </Notice>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
+      ) : !parseError ? (
+        <EmptyState size="sm" className="mt-2" title="No file selected yet" description="Choose a CSV file above to see a preview here." />
+      ) : null}
     </Modal>
   )
 }
+
+export default ImportLinesModal

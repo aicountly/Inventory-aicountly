@@ -206,10 +206,19 @@ describe('the register engine renders a config', () => {
 
   it('leaves a row with nothing to open alone', async () => {
     renderRegister()
-    await screen.findByText('GRN-001')
-    const rows = screen.getAllByRole('row')
-    // The second data row has no document; activating it must not navigate.
-    const orphan = rows[rows.length - 2]
+    // The second BODY row has no document; activating it must not navigate.
+    //
+    // Found from a cell inside the register's own table rather than counted
+    // back from the end of every row on the page. `getAllByRole('row')` is
+    // document-wide and includes the pinned totals row, so `length - 2` was
+    // the orphan only while the footer was there and nothing else on the page
+    // had rows — and when either changed it silently addressed the row ABOVE,
+    // which does have a document, so the test failed by navigating exactly as
+    // it is asserting the register must not. That made it fail about one run
+    // in seven with a message about the wrong thing.
+    const grid = (await screen.findByText('GRN-001')).closest('table') as HTMLElement
+    const body = grid.querySelector('tbody') as HTMLElement
+    const orphan = within(body).getAllByRole('row')[1]
     fireEvent.click(orphan)
     fireEvent.keyDown(orphan, { key: 'Enter' })
     expect(screen.queryByText('Document screen')).toBeNull()

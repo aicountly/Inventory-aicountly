@@ -3,6 +3,7 @@ import { ArrowRight, Sparkles } from 'lucide-react'
 import { isAbortError } from '../services/api'
 import { aiApi } from '../services/aiApi'
 import type { WriteOffReasonSuggestion } from '../services/aiApi'
+import { aiAssistantApi } from '../services/aiAssistantApi'
 import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
 import { cx } from '../ui/cx'
@@ -38,6 +39,12 @@ export function AIReasonAssistant({ warehouseId, onApply, disabled }: AIReasonAs
   const ask = async () => {
     const text = description.trim()
     if (!text) return
+    // Same seam OpeningStockHeaderExtras checks — the Aicountly AI service isn't wired into
+    // any build yet, so this never even attempts the request when status() says so.
+    if (!aiAssistantApi.status().available) {
+      setStatus('unavailable')
+      return
+    }
     controllerRef.current?.abort()
     const controller = new AbortController()
     controllerRef.current = controller
@@ -100,7 +107,7 @@ export function AIReasonAssistant({ warehouseId, onApply, disabled }: AIReasonAs
         </Button>
       </div>
 
-      {status === 'unavailable' ? <p className="text-[11px] text-gray-500">Aicountly AI suggestions aren&rsquo;t available in this workspace yet — pick a reason above.</p> : null}
+      {status === 'unavailable' ? <p className="text-[11px] text-gray-500">{aiAssistantApi.status().message}</p> : null}
 
       {status === 'ready' && result ? (
         <div className="rounded-lg border border-violet-200 bg-white p-2.5 text-xs">

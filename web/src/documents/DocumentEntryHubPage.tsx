@@ -1,13 +1,45 @@
 import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { FilePlus2 } from 'lucide-react'
+import {
+  ArrowLeftRight,
+  Coins,
+  FilePlus2,
+  FlaskConical,
+  PackageCheck,
+  PackageMinus,
+  SlidersHorizontal,
+  Wrench,
+} from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { useAccess } from '../access/AccessContext'
 import { useScopeLabel } from '../company/useScopeLabel'
 import { BreadcrumbHeader } from '../ui/shell/BreadcrumbHeader'
 import { HubSections } from '../ui/shell/HubSections'
 import type { HubSectionSpec, HubTileItem } from '../ui/shell/HubSections'
 import { PageShell } from '../ui/shell/PageShell'
-import { GROUP_ICON, GROUP_TONE, allowedTypeCount, buildEntryHub } from './entryHub'
+import type { IconTone } from '../ui/IconTile'
+import { allowedTypeCount, buildEntryHub } from './entryHub'
+import type { EntryGroupKey } from './entryHub'
+
+const GROUP_ICON: Record<EntryGroupKey, LucideIcon> = {
+  receipts: PackageCheck,
+  issues: PackageMinus,
+  transfers: ArrowLeftRight,
+  adjustments: SlidersHorizontal,
+  production: FlaskConical,
+  job_work: Wrench,
+  valuation: Coins,
+}
+
+const GROUP_TONE: Record<EntryGroupKey, IconTone> = {
+  receipts: 'success',
+  issues: 'warning',
+  transfers: 'info',
+  adjustments: 'violet',
+  production: 'primary',
+  job_work: 'teal',
+  valuation: 'slate',
+}
 
 /**
  * `/documents/new` — the document entry hub.

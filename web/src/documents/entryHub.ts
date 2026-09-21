@@ -27,21 +27,10 @@
  * the page below it only has to render what this returns.
  */
 
-import {
-  ArrowLeftRight,
-  Coins,
-  FlaskConical,
-  PackageCheck,
-  PackageMinus,
-  SlidersHorizontal,
-  Wrench,
-} from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
 import type { Can } from './actions'
 import { canCreate } from './actions'
 import { HIDDEN_FROM_NEW_MENU, NATIVE_DOCUMENT_TYPES, UNAVAILABLE_TYPES } from './registry'
 import type { DocumentTypeSpec } from './registry'
-import type { IconTone } from '../ui/IconTile'
 
 export type EntryGroupKey =
   | 'receipts'
@@ -51,27 +40,6 @@ export type EntryGroupKey =
   | 'production'
   | 'job_work'
   | 'valuation'
-
-/** One glyph + tone per group — the entry hub tile and the create-form hero agree on both. */
-export const GROUP_ICON: Record<EntryGroupKey, LucideIcon> = {
-  receipts: PackageCheck,
-  issues: PackageMinus,
-  transfers: ArrowLeftRight,
-  adjustments: SlidersHorizontal,
-  production: FlaskConical,
-  job_work: Wrench,
-  valuation: Coins,
-}
-
-export const GROUP_TONE: Record<EntryGroupKey, IconTone> = {
-  receipts: 'success',
-  issues: 'warning',
-  transfers: 'info',
-  adjustments: 'violet',
-  production: 'primary',
-  job_work: 'teal',
-  valuation: 'slate',
-}
 
 export interface EntryGroupSpec {
   key: EntryGroupKey
@@ -193,26 +161,4 @@ export function buildEntryHub(can: Can): EntryGroup[] {
 /** How many types this user may actually raise — drives the "why" line. */
 export function allowedTypeCount(groups: readonly EntryGroup[]): number {
   return groups.reduce((n, g) => n + g.entries.filter((e) => e.allowed).length, 0)
-}
-
-/** Which group a native code belongs to, if any. */
-export function groupForCode(code: string): EntryGroupSpec | null {
-  return ENTRY_GROUPS.find((g) => g.codes.includes(code)) ?? null
-}
-
-/**
- * Tone overrides for the create-form hero only — never the register glyph
- * (documentTypeIcon.tsx is deliberately judgement-free there). A write-off is
- * a loss, not a routine issue, and the one thing every version of the approved
- * mock agrees on is that it reads as red, not amber.
- */
-const HERO_TONE_OVERRIDE: Partial<Record<string, IconTone>> = {
-  WRITE_OFF: 'danger',
-}
-
-/** Icon + tone for a create-form hero: the same glyph as its entry-hub tile, tone overridable. */
-export function heroPresentation(code: string): { icon: LucideIcon; tone: IconTone } {
-  const group = groupForCode(code)
-  const key = group?.key ?? 'issues'
-  return { icon: GROUP_ICON[key], tone: HERO_TONE_OVERRIDE[code] ?? GROUP_TONE[key] }
 }

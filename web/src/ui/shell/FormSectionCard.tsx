@@ -31,7 +31,9 @@ export function FormSectionCard({
     <Card padding={padding} className={className}>
       {hasHeader ? (
         <div className="flex flex-wrap items-start justify-between gap-3 mb-3 border-b border-gray-100 pb-3">
-          <div className="flex items-start gap-3 min-w-0">
+          {/* `basis-56` with wrap: the action row drops to a line of its own
+              rather than squeezing the heading into a column of single words. */}
+          <div className="flex items-start gap-3 min-w-0 flex-1 basis-56">
             {Icon ? (
               <span className="w-9 h-9 rounded-lg bg-primary-light flex items-center justify-center shrink-0">
                 <Icon className="w-4 h-4 text-primary" aria-hidden />
@@ -44,13 +46,7 @@ export function FormSectionCard({
               {description ? <p className="text-xs text-gray-500 mt-0.5">{description}</p> : null}
             </div>
           </div>
-          {/* Shrinkable below `md`: once it wraps to its own line (the row
-              above just became `flex-wrap`), a wide action — a multi-button
-              toolbar — needs to fit that line's width instead of overflowing
-              it, and relies on its own content wrapping (e.g. flex-wrap) to
-              do so. From `md` up it always shares the line with a title that
-              has room, so it goes back to holding its natural width. */}
-          {action ? <div className="shrink md:shrink-0">{action}</div> : null}
+          {action ? <div className="shrink-0">{action}</div> : null}
         </div>
       ) : null}
       <div className={bodyClassName}>{children}</div>

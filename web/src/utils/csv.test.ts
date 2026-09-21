@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { csvEscape, csvFilename, parseCsv, toCsv } from './csv'
+import { csvEscape, csvFilename, csvRecords, parseCsv, toCsv } from './csv'
 
 describe('csvEscape', () => {
   it('leaves plain values alone and blanks null / undefined', () => {
@@ -47,33 +47,62 @@ describe('toCsv', () => {
 })
 
 describe('parseCsv', () => {
-  it('splits plain rows on commas', () => {
-    expect(parseCsv('sku,qty\nABC-1,5\nABC-2,10')).toEqual([
-      ['sku', 'qty'],
-      ['ABC-1', '5'],
-      ['ABC-2', '10'],
+  it('splits a header and its data rows', () => {
+    const parsed = parseCsv('Item,Qty\r\nBolt,10\r\nNut,5\r\n')
+    expect(parsed.headers).toEqual(['Item', 'Qty'])
+    expect(parsed.rows).toEqual([
+      ['Bolt', '10'],
+      ['Nut', '5'],
     ])
   })
 
-  it('handles quoted fields with embedded commas and escaped quotes', () => {
-    expect(parseCsv('sku,qty\n"Nut, M8",3\n"say ""hi""",1')).toEqual([
-      ['sku', 'qty'],
-      ['Nut, M8', '3'],
-      ['say "hi"', '1'],
+  it('round-trips what toCsv writes, including a quoted comma and an escaped quote', () => {
+    const csv = toCsv(
+      [
+        { name: 'Nut, M8', note: 'say "hi"' },
+        { name: 'Bolt', note: 'plain' },
+      ],
+      [
+        { header: 'Item', value: (r) => r.name },
+        { header: 'Note', value: (r) => r.note },
+      ],
+    )
+    const parsed = parseCsv(csv)
+    expect(parsed.headers).toEqual(['Item', 'Note'])
+    expect(parsed.rows).toEqual([
+      ['Nut, M8', 'say "hi"'],
+      ['Bolt', 'plain'],
     ])
   })
 
-  it('accepts CRLF line endings and drops blank rows', () => {
-    expect(parseCsv('sku,qty\r\nABC-1,5\r\n\r\nABC-2,10\r\n')).toEqual([
-      ['sku', 'qty'],
-      ['ABC-1', '5'],
-      ['ABC-2', '10'],
+  it('strips a leading BOM and tolerates a missing trailing newline', () => {
+    const parsed = parseCsv('﻿Item,Qty\nBolt,10')
+    expect(parsed.headers).toEqual(['Item', 'Qty'])
+    expect(parsed.rows).toEqual([['Bolt', '10']])
+  })
+
+  it('drops blank lines', () => {
+    const parsed = parseCsv('Item,Qty\n\nBolt,10\n\n\nNut,5\n')
+    expect(parsed.rows).toEqual([
+      ['Bolt', '10'],
+      ['Nut', '5'],
     ])
   })
 
-  it('returns an empty array for blank input', () => {
-    expect(parseCsv('')).toEqual([])
-    expect(parseCsv('\n\n')).toEqual([])
+  it('keeps a newline embedded in a quoted field', () => {
+    const parsed = parseCsv('Item,Note\nBolt,"line one\nline two"\n')
+    expect(parsed.rows).toEqual([['Bolt', 'line one\nline two']])
+  })
+
+  it('returns no rows for header-only input', () => {
+    expect(parseCsv('Item,Qty\n')).toEqual({ headers: ['Item', 'Qty'], rows: [] })
+  })
+})
+
+describe('csvRecords', () => {
+  it('keys each row by header, padding a short row with empty strings', () => {
+    const parsed = parseCsv('Item,Qty,Rate\nBolt,10\n')
+    expect(csvRecords(parsed)).toEqual([{ Item: 'Bolt', Qty: '10', Rate: '' }])
   })
 })
 

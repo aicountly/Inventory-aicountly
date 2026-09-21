@@ -1,7 +1,6 @@
 import {
   BookmarkCheck,
   Boxes,
-  Clock,
   Coins,
   Package,
   Scale,
@@ -11,17 +10,16 @@ import { Link } from 'react-router-dom'
 import { P } from '../../services/access'
 import { reconciliationApi } from '../../services/reconciliationApi'
 import type { ReconciliationRun } from '../../services/reconciliationApi'
-import { pendingApi, reservationsApi } from '../../services/stockApi'
-import type { PendingRow, Reservation } from '../../services/stockApi'
+import { reservationsApi } from '../../services/stockApi'
+import type { Reservation } from '../../services/stockApi'
 import { METHOD_LABELS, REPORT_METHODS, valuationApi } from '../../services/valuationApi'
 import type {
   ReportMethod,
   ValuationSnapshotRow,
   ValuationSnapshotSummary,
 } from '../../services/valuationApi'
-import { labelForCode } from '../../documents/registry'
 import { StatusBadge } from '../../ui/StatusBadge'
-import { formatInt, formatMoney, formatQty, humanize } from '../../utils/format'
+import { formatInt, formatMoney, formatQty } from '../../utils/format'
 import {
   DASH,
   dateColumn,
@@ -477,186 +475,6 @@ export const reservationRegister = defineRegister<Reservation, PageSummary>({
   ],
   rowClassName: (r) => (r.is_expired ? 'bg-red-50/60' : undefined),
   emptyMessage: 'No reservations match these filters.',
-})
-
-/* ------------------------------------------------------- pending register */
-
-const PENDING_SUM_KEYS = ['qty_original', 'qty_settled', 'qty_open'] as const
-
-interface PendingSummary extends PageSummary {
-  /** The server's own total over the whole filtered set. */
-  qtyOpenAll: number
-}
-
-/**
- * Goods out on challan, in on inward challan, with a job worker, or invoiced
- * and not yet received.
- *
- * Unlike the other plain list endpoints this one does send a real aggregate
- * (`summary.qty_open` over the whole filtered set), so the open-quantity KPI is
- * the true figure and only the two supporting columns are page sums.
- */
-export const pendingRegister = defineRegister<PendingRow, PendingSummary>({
-  slug: 'pending_quantities',
-  path: 'pending-quantities',
-  title: 'Pending quantity register',
-  description:
-    'Goods out on challan, in on inward challan, with a job worker, or invoiced but not received',
-  shortDescription: 'Everything issued or expected and not yet settled',
-  group: 'compliance',
-  icon: Clock,
-  permission: P.documentsRead,
-  // listOpen() is deliberately not FY-scoped — see PendingQuantityService.
-  scopePeriod: 'All financial years',
-  defaultSort: 'document_date',
-  minWidth: 1300,
-  rowNoun: 'line',
-  filenameBase: 'pending-quantities',
-  fetch: async ({ query, signal }) => {
-    const res = await pendingApi.list(query, signal)
-    const base = withPageSummary(res, 'pending_quantities', PENDING_SUM_KEYS)
-    return { ...base, summary: { ...base.summary, qtyOpenAll: res.summary?.qty_open ?? base.summary.sums.qty_open } }
-  },
-  // The server's open-quantity total is already the whole set; only the two
-  // supporting page sums are re-totalled for an export.
-  summaryForRows: (s, rows) => summaryOverRows(s, rows, PENDING_SUM_KEYS),
-  filters: [
-    {
-      key: 'kind',
-      kind: 'select',
-      label: 'Kind',
-      placeholder: 'All kinds',
-      options: [
-        { value: 'challan', label: 'Challan' },
-        { value: 'deferred_purchase', label: 'Deferred purchase' },
-        { value: 'job_work', label: 'Job work' },
-      ],
-    },
-    {
-      key: 'direction',
-      kind: 'select',
-      label: 'Direction',
-      placeholder: 'In and out',
-      options: [
-        { value: 'out', label: 'Out' },
-        { value: 'in', label: 'In' },
-      ],
-    },
-    itemFilter,
-    warehouseFilter,
-    { key: 'party_ref', kind: 'number', label: 'Party ledger', placeholder: 'id' },
-  ],
-  columns: [
-    {
-      key: 'document_no',
-      header: 'Document',
-      alwaysVisible: true,
-      render: (r) => documentCell(r.document_id, r.document_no),
-      csv: (r) => r.document_no ?? `#${r.document_id}`,
-    },
-    {
-      key: 'document_type',
-      header: 'Type',
-      render: (r) => r.document_type_label ?? labelForCode(r.document_type),
-      csv: (r) => r.document_type_label ?? r.document_type,
-    },
-    dateColumn<PendingRow>('document_date', 'Date'),
-    {
-      key: 'pending_kind',
-      header: 'Kind',
-      render: (r) => humanize(r.pending_kind),
-      csv: (r) => r.pending_kind,
-    },
-    {
-      key: 'direction',
-      header: 'Dir.',
-      render: (r) => <StatusBadge value={r.direction} tone={r.direction === 'in' ? 'good' : 'warning'} />,
-      csv: (r) => r.direction,
-    },
-    {
-      key: 'item_name',
-      header: 'Item',
-      alwaysVisible: true,
-      minWidth: 180,
-      render: (r) => (
-        <Link
-          to={`/registers/stock-ledger?item_id=${r.item_id}`}
-          className="font-semibold text-gray-900 hover:text-primary"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {r.item_name ?? `Item #${r.item_id}`}
-        </Link>
-      ),
-      csv: (r) => r.item_name ?? `Item #${r.item_id}`,
-    },
-    textColumn<PendingRow>('warehouse_name', 'Warehouse', false),
-    {
-      key: 'party_ref',
-      header: 'Party',
-      render: (r) => (r.party_ref ? `#${r.party_ref}` : DASH),
-      csv: (r) => r.party_ref,
-    },
-    qtyColumn<PendingRow>('qty_original', 'Original'),
-    qtyColumn<PendingRow>('qty_settled', 'Settled'),
-    {
-      ...qtyColumn<PendingRow>('qty_open', 'Open', { strong: true }),
-      alwaysVisible: true,
-      render: (r) => (
-        <strong className="font-semibold text-gray-900">
-          {formatQty(r.qty_open)} {r.unit_symbol ?? ''}
-        </strong>
-      ),
-      csv: (r) => r.qty_open,
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      render: (r) => <StatusBadge value={r.status} tone={r.status === 'partial' ? 'info' : 'warning'} />,
-      csv: (r) => r.status,
-    },
-  ],
-  rowKey: (r) => r.pending_id,
-  drillTo: (r) => (r.document_id ? `/documents/${r.document_id}` : null),
-  totals: (s) =>
-    buildTotalsRow(
-      [
-        { key: 'document_no' },
-        { key: 'qty_original', align: 'right' },
-        { key: 'qty_settled', align: 'right' },
-        { key: 'qty_open', align: 'right' },
-      ],
-      {
-        qty_original: formatQty(s.sums.qty_original),
-        qty_settled: formatQty(s.sums.qty_settled),
-        // The one figure on this row that covers the whole filtered set.
-        qty_open: formatQty(s.qtyOpenAll),
-      },
-      { label: totalsLabel(s.total, 'line'), labelKey: 'document_no' },
-    ),
-  kpis: (s) => [
-    { key: 'rows', label: 'Open lines', value: formatInt(s.total), icon: Clock, tone: 'primary' },
-    {
-      key: 'open',
-      label: 'Open quantity',
-      value: formatQty(s.qtyOpenAll),
-      hint: 'all matching rows',
-      icon: Clock,
-      tone: 'warning',
-    },
-    {
-      key: 'settled',
-      label: 'Settled so far',
-      value: formatQty(s.sums.qty_settled),
-      hint: pageHint(s),
-      icon: Clock,
-      tone: 'success',
-    },
-  ],
-  summary: (s) => [
-    { label: 'Open lines', value: formatInt(s.total) },
-    { label: 'Open quantity', value: formatQty(s.qtyOpenAll), tone: 'warning' },
-  ],
-  emptyMessage: 'Nothing is pending.',
 })
 
 /* ------------------------------------------------ reconciliation register */
