@@ -33,6 +33,80 @@ export function toCsv<T>(rows: readonly T[], columns: readonly CsvColumn<T>[]): 
   return `${lines.join('\r\n')}\r\n`
 }
 
+// ---- CSV import (parsing) --------------------------------------------------
+
+export interface ParsedCsv {
+  headers: string[]
+  rows: string[][]
+}
+
+/**
+ * Parses CSV text into a header row and data rows. Handles quoted fields
+ * (embedded commas, newlines and doubled `""` escapes), a leading BOM, and
+ * both `\n` and `\r\n` line endings. Blank lines are dropped.
+ *
+ * The counterpart to `toCsv`: that one writes what this one reads, so a file
+ * downloaded from "Download Template" round-trips through this parser.
+ */
+export function parseCsv(text: string): ParsedCsv {
+  const rows: string[][] = []
+  let row: string[] = []
+  let field = ''
+  let inQuotes = false
+  const src = text.replace(/^﻿/, '')
+
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i]
+    if (inQuotes) {
+      if (c === '"') {
+        if (src[i + 1] === '"') {
+          field += '"'
+          i++
+        } else {
+          inQuotes = false
+        }
+      } else {
+        field += c
+      }
+      continue
+    }
+    if (c === '"') {
+      inQuotes = true
+    } else if (c === ',') {
+      row.push(field)
+      field = ''
+    } else if (c === '\r') {
+      // swallow; \n (bare or in \r\n) ends the row
+    } else if (c === '\n') {
+      row.push(field)
+      rows.push(row)
+      row = []
+      field = ''
+    } else {
+      field += c
+    }
+  }
+  if (field.length > 0 || row.length > 0) {
+    row.push(field)
+    rows.push(row)
+  }
+
+  const nonBlank = rows.filter((r) => r.length > 1 || r[0]?.trim() !== '')
+  const [headerRow, ...dataRows] = nonBlank
+  return { headers: (headerRow ?? []).map((h) => h.trim()), rows: dataRows }
+}
+
+/** `parseCsv`'s rows as header-keyed, trimmed records. A short row leaves the missing columns ''. */
+export function csvRecords(parsed: ParsedCsv): Record<string, string>[] {
+  return parsed.rows.map((cells) => {
+    const record: Record<string, string> = {}
+    parsed.headers.forEach((header, i) => {
+      record[header] = (cells[i] ?? '').trim()
+    })
+    return record
+  })
+}
+
 /** `stock-summary-acme-2025-04-01.csv` from free-form parts. */
 export function csvFilename(base: string, scopeLabel = '', date = todayIso()): string {
   const slug = [base, scopeLabel]
