@@ -320,6 +320,18 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
     return analytics({ summary, rows, values, query: apiFilters, loading: result.loading })
   }, [analytics, summary, rows, values, apiFilters, result.loading])
 
+  // ---- the intelligence rail ----------------------------------------------
+  // Same inputs as the analytics band, for the same reason: a card beside the table
+  // must not be able to answer a differently-filtered question from the table.
+  const asideOf = config.aside
+  const asideRail = useMemo(() => {
+    if (!asideOf || summary === undefined) return null
+    return asideOf({ summary, rows, values, query: apiFilters, loading: result.loading })
+  }, [asideOf, summary, rows, values, apiFilters, result.loading])
+  // A rail and a viewport-locked table cannot share one height, exactly as with the
+  // chart band: the page scrolls as a whole and the table takes a bounded scroll box.
+  const bounded = Boolean(analyticsBand) || Boolean(asideOf)
+
   // The same Configure Columns dialog is offered from the toolbar and from over
   // the table, so the open flag lives here rather than inside either trigger.
   const [columnsOpen, setColumnsOpen] = useState(false)
@@ -767,9 +779,10 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
       description={headerDescription}
       icon={config.icon ?? FileSearch}
       headerVariant={panel ? 'page' : 'compact'}
-      // A chart band and a viewport-locked table cannot share one flex column:
-      // the band takes its height and the table's `flex-1` resolves to nothing.
-      fill={!analyticsBand}
+      // A chart band or an intelligence rail and a viewport-locked table cannot share
+      // one flex column: the sibling takes its height and the table's `flex-1` resolves
+      // to nothing.
+      fill={!bounded}
       headerAside={
         config.headerAside ?? (
           <LiveDataBadge
@@ -854,6 +867,11 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
           <RegisterKpis cards={kpiCards} layout={panel ? 'metric' : 'stacked'} />
         ) : undefined
       }
+      // The column is reserved from the first paint: a rail that appeared only once the
+      // response landed would shove the table sideways under the reader's cursor.
+      aside={
+        asideOf ? (asideRail ?? <div aria-hidden className="skeleton h-72 rounded-xl" />) : undefined
+      }
       insights={
         config.insights || analyticsBand ? (
           <>
@@ -900,8 +918,14 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
         ) : (
           <SmartTable
             {...REPORT_TABLE_PROPS}
-            fillAvailable={!analyticsBand}
-            className={analyticsBand ? 'max-h-[min(34rem,58vh)]' : undefined}
+            fillAvailable={!bounded}
+            className={
+              analyticsBand
+                ? 'max-h-[min(34rem,58vh)]'
+                : asideOf
+                  ? 'max-h-[min(44rem,66vh)]'
+                  : undefined
+            }
             columns={tableColumns}
             rows={tableRows}
             rowKey={config.rowKey}
@@ -929,7 +953,7 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
             empty={
               emptyUnfiltered ?? (
                 <EmptyState
-                  title="No rows match these filters"
+                  title={config.emptyTitle ?? 'No rows match these filters'}
                   description={
                     activeView?.emptyMessage ??
                     config.emptyMessage ??
