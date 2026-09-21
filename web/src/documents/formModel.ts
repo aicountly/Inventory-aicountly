@@ -94,7 +94,13 @@ export function defaultDirection(spec: DocumentTypeSpec): 'in' | 'out' | null {
     case 'fixed_out':
       return 'out'
     case 'by_line':
-      return spec.formKind === 'physical_count' ? null : 'out'
+      if (spec.formKind === 'physical_count') return null
+      // A fresh line on a job-work receipt is the finished goods coming back.
+      // The material the job worker consumed is generated from the settlement
+      // and already carries `out`, so defaulting to `out` here only ever made
+      // the operator change the direction of every line they typed themselves.
+      if (spec.formKind === 'job_work_in') return 'in'
+      return 'out'
     default:
       return null
   }

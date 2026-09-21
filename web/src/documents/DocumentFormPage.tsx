@@ -1,3 +1,4 @@
+import { useCallback, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useAccess } from '../access/AccessContext'
 import { Notice } from '../components/Notice'
@@ -12,7 +13,9 @@ import { DocumentForm } from './DocumentForm'
 import { BatchAdjustmentPage } from './batch/BatchAdjustmentPage'
 import { ConsumptionForm } from './consumption/ConsumptionForm'
 import { InwardChallanForm } from './grn/InwardChallanForm'
+import { JobWorkPage } from './jobwork/JobWorkPage'
 import { MaterialIssuePage } from './materialIssue/MaterialIssuePage'
+import { ProductionWorkspace } from './production/ProductionWorkspace'
 import { MaterialReceiptForm } from './receipt/MaterialReceiptForm'
 import { StockTransferWorkspace } from './transfer/StockTransferWorkspace'
 import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS, statusTone } from './actions'
@@ -20,10 +23,26 @@ import type { StatusTone } from './actions'
 import { documentTypeGlyph } from './documentTypeIcon'
 import { draftFromDocument } from './formModel'
 import { specForCode, specForSlug, UNAVAILABLE_TYPES } from './registry'
+import type { FormKind } from './registry'
 import type { DocumentStatus } from './types'
 import './documents.css'
 
 const STATUS_BADGE_TONE: Record<StatusTone, BadgeTone> = { neutral: 'neutral', info: 'info', success: 'success', warning: 'warning', danger: 'danger' }
+
+/**
+ * Job work has its own screen.
+ *
+ * The generic editor renders every native type from one spec, which is right
+ * for the types whose entry is "a header and some lines". A job-work document
+ * is not one of those: it is half of a two-document workflow, and what an
+ * operator needs in front of them — what is still with the worker, how late it
+ * is, what this receipt settles — has no place in a form every other type
+ * shares. Consumption below is here for the same reason.
+ * See documents/jobwork/JobWorkPage.
+ */
+function isJobWork(formKind: FormKind): boolean {
+  return formKind === 'job_work_in' || formKind === 'job_work_out'
+}
 
 /** `/documents/new/:slug` and `/documents/:id/edit`. */
 export function DocumentFormPage() {
@@ -32,6 +51,13 @@ export function DocumentFormPage() {
   const { can } = useAccess()
   const documentId = id ? Number(id) : null
   const editing = documentId !== null && Number.isFinite(documentId)
+  /*
+   * "Save, post & new" starts a second run without leaving the screen. Bumping this remounts the
+   * editor with a fresh draft, which is what a storekeeper entering a shift's worth of runs wants;
+   * navigating to the same route would not remount anything.
+   */
+  const [freshKey, setFreshKey] = useState(0)
+  const startAnother = useCallback(() => setFreshKey((n) => n + 1), [])
 
   const existing = useQuery((signal) => documentsApi.get(documentId as number, signal), [documentId], { enabled: editing, keepData: false })
 
@@ -155,9 +181,22 @@ export function DocumentFormPage() {
         </>
       )
     }
-    // Some types have a screen of their own — transfer, consumption, receiving. Each brings its
-    // own page shell, breadcrumbs and header, so it is returned whole rather than wrapped by the
-    // one below. Every other native type still uses the shared DocumentForm.
+    // Some types have a screen of their own — transfer, consumption, receiving, issue, production.
+    // Each brings its own page shell, breadcrumbs and header, so it is returned whole rather than
+    // wrapped by the one below. Every other native type still uses the shared DocumentForm.
+    if (spec.formKind === 'production') {
+      return (
+        <ProductionWorkspace
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          document={doc}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+          onNew={() => navigate('/documents/new/production')}
+        />
+      )
+    }
     if (spec.code === 'STOCK_TRANSFER') {
       return (
         <StockTransferWorkspace
@@ -222,6 +261,18 @@ export function DocumentFormPage() {
         />
       )
     }
+    if (isJobWork(spec.formKind)) {
+      return (
+        <JobWorkPage
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          existing={doc}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
     if (isReceipt) {
       return (
         <MaterialReceiptForm
@@ -254,6 +305,21 @@ export function DocumentFormPage() {
   if (s.formKind === 'packing') {
     return <DocumentForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
   }
+  /*
+   * Production has its own screen. Same route, same spec, same draft shape and the same
+   * create / post calls — what differs is that the editor reads live availability, cost, batch
+   * and serial stock while the run is being built.
+   */
+  if (s.formKind === 'production') {
+    return (
+      <ProductionWorkspace
+        key={`production-${freshKey}`}
+        spec={s}
+        onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        onNew={startAnother}
+      />
+    )
+  }
   if (s.code === 'STOCK_TRANSFER') {
     return <StockTransferWorkspace key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
   }
@@ -268,6 +334,9 @@ export function DocumentFormPage() {
   }
   if (s.formKind === 'inward_challan') {
     return <InwardChallanForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
+  if (isJobWork(s.formKind)) {
+    return <JobWorkPage key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
   }
   if (isReceipt) return <MaterialReceiptForm key={s.code} spec={s} />
   return (
