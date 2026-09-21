@@ -96,6 +96,19 @@ export const lookupApi = {
     return res.data
   },
 
+  /**
+   * One item by the code on the label: `GET /v1/items/by-barcode/{code}` matches item_upc OR
+   * item_sku. 404 when nothing matches — the caller falls back to the search typeahead rather
+   * than guessing, because a scanner that reads one digit wrong must not select a neighbour.
+   */
+  async itemByBarcode(code: string, warehouseId?: number | null, signal?: AbortSignal): Promise<ItemSearchRow> {
+    const res = await api.get<ItemResponse<ItemSearchRow>>(`v1/items/by-barcode/${encodeURIComponent(code)}`, {
+      query: { warehouse_id: warehouseId ?? undefined },
+      signal,
+    })
+    return res.data
+  },
+
   async itemsByIds(ids: number[], signal?: AbortSignal): Promise<ItemSearchRow[]> {
     if (ids.length === 0) return []
     const res = await api.post<ItemResponse<ItemSearchRow[]>>('v1/items/bulk-lookup', { item_ids: ids }, { signal })
@@ -142,6 +155,11 @@ export const lookupApi = {
 
   boms(q = '', signal?: AbortSignal): Promise<ListResponse<BomListRow>> {
     return api.list<BomListRow>('v1/bill-of-materials', { q, status: 'active', limit: 100 }, { signal })
+  },
+
+  /** Active bills of materials that BUILD this item — `?finished_item_id=` (BomController::index). */
+  bomsForItem(itemId: number, signal?: AbortSignal): Promise<ListResponse<BomListRow>> {
+    return api.list<BomListRow>('v1/bill-of-materials', { finished_item_id: itemId, status: 'active', limit: 50 }, { signal })
   },
 
   async bom(id: number, signal?: AbortSignal): Promise<BomHeader> {

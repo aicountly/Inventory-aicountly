@@ -218,8 +218,17 @@
 
 /* An opacity modifier asks for a weaker wash, so scale the dark one by the same
    fraction rather than letting `/60` fall back to the light pastel. */
+.dark .bg-amber-50\/50 {
+  background-color: rgb(120 53 15 / 0.11);
+}
 .dark .bg-amber-50\/60 {
   background-color: rgb(120 53 15 / 0.13);
+}
+.dark .bg-emerald-50\/70 {
+  background-color: rgb(6 78 59 / 0.15);
+}
+.dark .bg-sky-50\/70 {
+  background-color: rgb(12 74 110 / 0.15);
 }
 .dark .bg-red-50\/60 {
   background-color: rgb(127 29 29 / 0.13);
@@ -325,6 +334,7 @@
 .dark .text-sky-600,
 .dark .text-sky-700,
 .dark .text-sky-800,
+.dark .text-sky-900,
 .dark .hover\:text-sky-700:hover,
 .dark .hover\:text-sky-900:hover {
   color: rgb(125 211 252);

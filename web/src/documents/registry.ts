@@ -11,6 +11,8 @@ export type LineMode = 'fixed_in' | 'fixed_out' | 'by_line' | 'transfer' | 'stat
 export type FormKind =
   | 'lines'
   | 'transfer'
+  /** The two-sided disassembly workspace (documents/disassembly). */
+  | 'disassembly'
   | 'physical_count'
   | 'production'
   | 'job_work_out'
@@ -88,7 +90,10 @@ export const NATIVE_DOCUMENT_TYPES: DocumentTypeSpec[] = [
   spec({ code: 'MATERIAL_RECEIPT', label: 'Material Receipt', description: 'Receive material into stores at a cost.', lineMode: 'fixed_in', formKind: 'lines', valuation: true, cogs: false, rate: true }),
   spec({ code: 'PRODUCTION', label: 'Production', description: 'Consume components from a bill of materials and receive finished goods.', lineMode: 'by_line', formKind: 'production', valuation: true, cogs: true, valuationRate: true }),
   spec({ code: 'ASSEMBLY', label: 'Assembly', description: 'Assemble a kit: components out, assembled item in.', lineMode: 'by_line', formKind: 'lines', valuation: true, cogs: false, valuationRate: true }),
-  spec({ code: 'DISASSEMBLY', label: 'Disassembly', description: 'Break a kit back into its components.', lineMode: 'by_line', formKind: 'lines', valuation: true, cogs: false, valuationRate: true }),
+  // formKind 'disassembly', not 'lines': the type stays `by_line` on the wire (each stored line
+  // carries its own direction, exactly as before) but the screen is the two-sided workspace —
+  // finished product consumed, components produced — instead of a grid with a Dir. dropdown.
+  spec({ code: 'DISASSEMBLY', label: 'Disassembly', description: 'Break a finished product into its components and update stock instantly.', lineMode: 'by_line', formKind: 'disassembly', valuation: true, cogs: false, valuationRate: true }),
   // rate: the challan value of the goods sent. Not a valuation — the stock never leaves
   // ownership, so nothing is costed here — but Table 4 of ITC-04 declares the value each challan
   // went out at, and without the field the return can only ever be filed at 0.00.
