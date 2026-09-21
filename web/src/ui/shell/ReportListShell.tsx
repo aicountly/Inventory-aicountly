@@ -76,7 +76,14 @@ export function ReportListShell({
         </div>
       ) : null}
       {toolbar ? <div className="shrink-0 print:hidden">{toolbar}</div> : null}
-      {summary ? <div className={summaryClassName ?? SUMMARY_CARD_GRID}>{summary}</div> : null}
+      {summary ? (
+        // A named landmark, not a bare div: the KPI strip is the answer a reader came for,
+        // and on a register this long it is worth being able to jump to by region rather
+        // than tabbing past the whole filter panel to reach it.
+        <section aria-label="Key figures" className={summaryClassName ?? SUMMARY_CARD_GRID}>
+          {summary}
+        </section>
+      ) : null}
       {insights}
       {aside ? (
         <div className="flex flex-1 min-h-0 flex-col gap-3 xl:grid xl:grid-cols-[minmax(0,1fr)_17rem] xl:items-start xl:gap-3">

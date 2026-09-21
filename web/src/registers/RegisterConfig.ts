@@ -375,6 +375,15 @@ export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
    */
   aside?: (args: AnalyticsArgs<T, S>) => ReactNode
 
+  /**
+   * The analytics band's own geometry while the FIRST response is in flight.
+   *
+   * `analytics` is handed a summary, so it cannot render before one exists and the band
+   * would otherwise appear from nothing and shove the table down the page. Same contract
+   * as the KPI cards' skeleton: first load only — a refresh keeps the charts on screen
+   * and dims them rather than replacing a figure a reader is looking at with a grey bar.
+   */
+  analyticsSkeleton?: ReactNode
 
   /**
    * The operational strip under the KPI cards — what the rows on screen say
