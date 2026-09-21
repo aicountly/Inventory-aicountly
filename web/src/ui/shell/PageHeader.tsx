@@ -47,10 +47,12 @@ export function PageHeader({
         className,
       )}
     >
-      {/* `basis-72` is a width for the `md:flex-row` case. Unprefixed it is also
-          the flex basis of the column below 768px, where the main axis is
-          vertical — an 18rem-tall title block with a 100px title in it, on every
-          page that uses this header. It belongs to the row, so it is scoped to it. */}
+      {/*
+        `md:basis-72`, not a bare `basis-72`: flex-basis sizes the MAIN axis,
+        and below md this container is a column — so the unqualified class was
+        giving the title block an 18rem HEIGHT and leaving a blank half-screen
+        between the description and the actions on every phone-width page.
+      */}
       <div className="min-w-0 flex-1 md:basis-72 flex items-start gap-3">
         {backTo ? (
           <Link
@@ -82,7 +84,13 @@ export function PageHeader({
         </div>
       ) : null}
       {actions ? (
-        <div className="flex items-center flex-wrap gap-2 shrink-0 print:hidden">{actions}</div>
+        // `min-w-0` rather than `shrink-0`, for the reason BreadcrumbHeader's
+        // compact row already records: a shrink-proof row cannot fall below its
+        // max-content width, so a header carrying five or six buttons never
+        // wraps them and scrolls the whole page sideways on a tablet instead.
+        // Letting it shrink costs nothing where there is room — the row is
+        // max-content anyway.
+        <div className="flex items-center flex-wrap gap-2 min-w-0 print:hidden">{actions}</div>
       ) : null}
     </div>
   )

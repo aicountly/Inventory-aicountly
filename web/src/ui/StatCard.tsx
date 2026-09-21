@@ -41,6 +41,21 @@ export interface StatCardProps {
   /** Makes the whole card a link — the drill-down contract. */
   to?: string
   /**
+   * One extra row under the delta — a progress bar, a share, a second figure.
+   *
+   * Optional and unstyled on purpose: it is for a card that genuinely has a
+   * fourth thing to say (22 of 24 brands are active), not a slot to be filled
+   * on every card because it exists. Cards with and without it keep the same
+   * top three rows, so a strip of them still lines up.
+   */
+  footer?: ReactNode
+  /**
+   * A measured series behind the figure, drawn at the top-right in `metric`
+   * layout. Like `previous`, it is never invented: a card renders none when the
+   * endpoint sent none, and the layout does not move when it does.
+   */
+  sparkline?: ReactNode
+  /**
    * `stacked` (the default) is the dashboard tile: tile on top, then the label
    * and the figure. `metric` puts the tile beside them, which reads better in a
    * row of four wide cards over a table — the eye runs down one column of
@@ -82,6 +97,8 @@ export function StatCard({
   invertDelta = false,
   emphasizeNegative = false,
   to,
+  footer,
+  sparkline,
   layout = 'stacked',
   className,
 }: StatCardProps) {
@@ -142,8 +159,19 @@ export function StatCard({
               </Badge>
             ) : null}
           </div>
-          <p className={cx(METRIC_VALUE_CLASS, valueClass)}>{value}</p>
+          <div className="flex items-end justify-between gap-2">
+            <p className={cx(METRIC_VALUE_CLASS, valueClass, 'min-w-0')}>{value}</p>
+            {/* Takes the delta's colour when there is one, so the line and the
+                arrow above it tell the same story; grey when there is nothing
+                to compare against. Screen only — the sheet carries the figure. */}
+            {sparkline ? (
+              <span className={cx('shrink-0 pb-0.5 print:hidden', pct != null ? deltaCls : 'text-gray-300')} aria-hidden>
+                {sparkline}
+              </span>
+            ) : null}
+          </div>
           <div className={METRIC_DELTA_ROW_CLASS}>{delta}</div>
+          {footer ? <div className="mt-2">{footer}</div> : null}
         </div>
       </Card>
     )
@@ -175,6 +203,7 @@ export function StatCard({
         </p>
       </div>
       <div className={DELTA_ROW_CLASS}>{delta}</div>
+      {footer ? <div>{footer}</div> : null}
     </Card>
   )
 }

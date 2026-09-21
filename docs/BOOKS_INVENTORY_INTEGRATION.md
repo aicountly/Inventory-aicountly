@@ -75,6 +75,36 @@ their legacy row shapes (`source: "inventory"` in the response); the Trading Acc
 reads `GET /v1/valuation`; the year-end Items module previews and writes through
 `/v1/valuation/carry-forward`.
 
+## Brand sales (Inventory → Books, awaited)
+
+The Brands master screen shows each brand's turnover for the selected financial year beside its item
+count. The brand and the item count are Inventory's; the turnover is Books' — it owns the invoices it
+is summed from and the credit notes that reduce it — so the two are joined **at read time, over a
+live API**, and never by copying Books' figures into an `inv_*` table. There is no brand-sales table
+in Inventory, no cron that would fill one, and none is planned: a scheduled copy would be wrong
+within a minute of a back-dated credit note and would be a second place for the same truth to live.
+
+Inventory calls, with the shared service key and the same headers as every other Inventory → Books
+call (`App\Services\BrandSalesService` → `BooksApiClient`):
+
+```
+GET /api/integration/inventory/brand-sales?cmp_id=&fy_id=&bo_id=
+->  {"data": {"currency": "INR",
+              "rows": [{"brand_id": 41, "sales": 1245670.50, "trend": [11,13,9,14,18,21]}]}}
+```
+
+* `brand_id` is **Inventory's** brand id, which Books already carries on the item lines Inventory
+  hands it. No name matching.
+* `trend` is optional and is a plain series for a sparkline. Omit it rather than send a flat line —
+  Inventory draws nothing when it is absent and will not invent a shape.
+* A brand with no sales in the period is **omitted**, not sent as zero. Absent and zero are different
+  answers and the screen renders them differently (an em dash against a figure).
+
+Books does not serve this path yet, so the relay is **off by default**: with `BOOKS_BRAND_SALES`
+unset Inventory makes no outbound call at all and the Brands screen simply renders the master without
+a revenue column. Setting `BOOKS_BRAND_SALES = 1` in the Inventory `.env` is the only switch; a 404
+from Books is reported to the browser as `not_implemented` rather than as an outage.
+
 ## Reconciliation
 Inventory's `POST /v1/reconciliation/run` compares its closing stock value with Books' Stock-in-Hand ledger balance (`GET integration/inventory/stock-ledger-balance`) and explains the difference by bucket (opening, pending postings, failed postings, reversed documents, unacknowledged revisions, revaluations, manual journals, missing sources). See `INVENTORY_RECONCILIATION.md`.
 

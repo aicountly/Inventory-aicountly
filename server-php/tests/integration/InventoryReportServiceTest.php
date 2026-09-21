@@ -245,6 +245,132 @@ final class InventoryReportServiceTest extends IntegrationTestCase
         $this->assertEqualsWithDelta(13.0, $old['rows'][0]['buckets']['180_plus']['qty'], 0.0001);
     }
 
+    public function testStockAgeingSummaryCountsItemsPerBandAndScoresHealth(): void
+    {
+        $this->seedHistory();
+        $r = $this->reports->stockAgeing($this->cmpId, $this->fyId, 0, ['as_of' => '2026-05-31', 'sort' => 'item_name'], 50, 0);
+        $sum = $r['summary'];
+
+        // Widget's 8 @130 and Gadget's 20 @50 are both inside 30 days; only Widget's
+        // 5 @120 has reached 31-60. An item is counted in every band it holds stock in.
+        $this->assertSame(2, $sum['buckets']['0_30']['items']);
+        $this->assertSame(1, $sum['buckets']['31_60']['items']);
+        $this->assertSame(0, $sum['buckets']['61_90']['items']);
+        $this->assertSame(0, $sum['buckets']['180_plus']['items']);
+
+        // (8x26 + 5x51 + 20x26) / 33 = 29.8 days
+        $this->assertSame(30, $sum['weighted_age_days']);
+        $this->assertSame(51, $sum['oldest_days']);
+        $this->assertEqualsWithDelta(0.0, $sum['value_over_90'], 0.01);
+        $this->assertEqualsWithDelta(0.0, $sum['value_over_180'], 0.01);
+
+        // Nothing past 60 days, so nothing is penalised.
+        $this->assertSame(100, $sum['health_score']);
+        $this->assertSame('excellent', $sum['health_band']);
+        $this->assertSame(2, $sum['by_health']['fresh']);
+        $this->assertSame(0, $sum['by_health']['obsolete']);
+        foreach ($r['rows'] as $row) {
+            $this->assertSame('fresh', $row['health_status'], $row['item_name']);
+        }
+
+        // This company values stock at company scope, so its cost layers carry no
+        // warehouse and there is no warehouse story to tell. Nothing is invented to
+        // fill the card: the list is empty and the insight simply does not appear.
+        // testStockAgeingAttributesExposureWhenTheDataCarriesIt covers the other case.
+        $this->assertSame([], $sum['warehouses']);
+        $this->assertSame([], $sum['item_groups'], 'every item here is ungrouped');
+
+        // Everything is 180+ a year later: 100 - 60 = 40, the floor of "at risk".
+        $aged = $this->reports->stockAgeing($this->cmpId, $this->fyId, 0, ['as_of' => '2027-03-31'], 50, 0);
+        $this->assertSame(40, $aged['summary']['health_score']);
+        $this->assertSame('at_risk', $aged['summary']['health_band']);
+        $this->assertEqualsWithDelta(2640.0, $aged['summary']['value_over_180'], 0.01);
+        $this->assertSame(2, $aged['summary']['by_health']['obsolete']);
+        $this->assertSame(2, $aged['summary']['buckets']['180_plus']['items']);
+    }
+
+    public function testStockAgeingAttributesExposureWhenTheDataCarriesIt(): void
+    {
+        // Warehouse-scoped valuation puts a warehouse on every cost layer, which is what
+        // makes "where is the ageing problem" answerable at all.
+        $this->db->table('inv_company_settings')->where('cmp_id', $this->cmpId)->update(['valuation_scope' => 'warehouse']);
+        $s = $this->seedHistory();
+
+        $this->db->table('inv_item_groups')->insert(['cmp_id' => $this->cmpId, 'grp_name' => 'Electrical', 'is_active' => 1]);
+        $electrical = (int) $this->db->insertID();
+        $this->db->table('inv_item_groups')->insert(['cmp_id' => $this->cmpId, 'grp_name' => 'Plumbing', 'is_active' => 1]);
+        $plumbing = (int) $this->db->insertID();
+        $this->db->table('inv_items')->where('item_id', $s['widget'])->update(['item_grp_id' => $electrical]);
+        $this->db->table('inv_items')->where('item_id', $s['gadget'])->update(['item_grp_id' => $plumbing]);
+
+        $r = $this->reports->stockAgeing($this->cmpId, $this->fyId, 0, ['as_of' => '2026-05-31'], 50, 0);
+        $sum = $r['summary'];
+
+        // Under warehouse scope the engine holds Widget's remaining layer in Depot and
+        // Gadget's in Main. The figures are the valuation engine's, not this report's —
+        // what is asserted here is that the split names them and adds back up.
+        $byWarehouse = array_column($sum['warehouses'], null, 'warehouse_name');
+        $this->assertArrayHasKey('Main', $byWarehouse);
+        $this->assertArrayHasKey('Depot', $byWarehouse);
+        $this->assertEqualsWithDelta(1000.0, $byWarehouse['Main']['total_value'], 0.01);
+        $this->assertEqualsWithDelta(1040.0, $byWarehouse['Depot']['total_value'], 0.01);
+        $this->assertSame(
+            round(array_sum(array_column($sum['warehouses'], 'total_value')), 2),
+            round((float) $sum['total_value'], 2),
+            'the split has to add back up to the register total',
+        );
+        // Nothing is past 90 days yet, so the ranking falls back to size.
+        $this->assertSame('Depot', $sum['warehouses'][0]['warehouse_name']);
+
+        $byGroup = array_column($sum['item_groups'], null, 'grp_name');
+        $this->assertArrayHasKey('Electrical', $byGroup);
+        $this->assertArrayHasKey('Plumbing', $byGroup);
+        $this->assertEqualsWithDelta(1040.0, $byGroup['Electrical']['total_value'], 0.01);
+        $this->assertSame(
+            round(array_sum(array_column($sum['item_groups'], 'total_value')), 2),
+            round((float) $sum['total_value'], 2),
+        );
+
+        // A year on, everything is past 180 days and the ranking is by that exposure.
+        $aged = $this->reports->stockAgeing($this->cmpId, $this->fyId, 0, ['as_of' => '2027-03-31'], 50, 0);
+        $this->assertSame('Depot', $aged['summary']['warehouses'][0]['warehouse_name']);
+        $this->assertEqualsWithDelta(1040.0, $aged['summary']['warehouses'][0]['value_over_180'], 0.01);
+        $this->assertSame('Electrical', $aged['summary']['item_groups'][0]['grp_name']);
+    }
+
+    public function testStockAgeingNarrowsToOneBandOrOneHealthClass(): void
+    {
+        $this->seedHistory();
+
+        // The band keeps the whole row, not just the band: a drill-down on "31-60 days"
+        // asks which ITEMS are sitting there, and the rest of the item is the context.
+        $band = $this->reports->stockAgeing($this->cmpId, $this->fyId, 0, ['as_of' => '2026-05-31', 'age_bucket' => '31_60'], 50, 0);
+        $this->assertSame(1, $band['total']);
+        $this->assertSame('Widget', $band['rows'][0]['item_name']);
+        $this->assertSame(1, $band['summary']['items'], 'the summary describes the narrowed rows');
+        $this->assertEqualsWithDelta(1640.0, $band['summary']['total_value'], 0.01);
+        $this->assertSame('31_60', $band['summary']['age_bucket']);
+        // Withheld rather than described against a set the reader has filtered away.
+        $this->assertSame([], $band['summary']['warehouses']);
+        $this->assertSame([], $band['summary']['item_groups']);
+
+        $empty = $this->reports->stockAgeing($this->cmpId, $this->fyId, 0, ['as_of' => '2026-05-31', 'age_bucket' => '180_plus'], 50, 0);
+        $this->assertSame(0, $empty['total']);
+        $this->assertSame(0, $empty['summary']['items']);
+        $this->assertNull($empty['summary']['health_score'], 'no stock scores nothing, not 100');
+        $this->assertNull($empty['summary']['weighted_age_days']);
+
+        $fresh = $this->reports->stockAgeing($this->cmpId, $this->fyId, 0, ['as_of' => '2026-05-31', 'health_status' => 'fresh'], 50, 0);
+        $this->assertSame(2, $fresh['total']);
+        $this->assertSame('fresh', $fresh['summary']['health_status']);
+        $this->assertSame(0, $this->reports->stockAgeing($this->cmpId, $this->fyId, 0, ['as_of' => '2026-05-31', 'health_status' => 'obsolete'], 50, 0)['total']);
+
+        // An unknown band is ignored rather than silently emptying the register.
+        $bogus = $this->reports->stockAgeing($this->cmpId, $this->fyId, 0, ['as_of' => '2026-05-31', 'age_bucket' => 'whenever'], 50, 0);
+        $this->assertSame(2, $bogus['total']);
+        $this->assertNull($bogus['summary']['age_bucket']);
+    }
+
     public function testMovementAnalysisClassification(): void
     {
         $s = $this->seedHistory();

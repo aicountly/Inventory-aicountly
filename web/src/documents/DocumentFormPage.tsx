@@ -6,21 +6,13 @@ import { useQuery } from '../hooks/useQuery'
 import { errorMessage } from '../services/api'
 import { documentsApi } from '../services/documentsApi'
 import { DocumentForm } from './DocumentForm'
+import { ConsumptionForm } from './consumption/ConsumptionForm'
 import { MaterialIssuePage } from './materialIssue/MaterialIssuePage'
 import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS } from './actions'
 import { draftFromDocument } from './formModel'
 import { specForCode, specForSlug, UNAVAILABLE_TYPES } from './registry'
 import type { DocumentStatus } from './types'
 import './documents.css'
-
-/**
- * Types with a screen of their own instead of the generic lines form.
- *
- * Only the entry experience differs: the draft model, the validation, the
- * payload and the posting calls are the shared ones, so a type in this set
- * behaves exactly as it did — it is just laid out for the job it does.
- */
-const DEDICATED_FORMS = new Set(['MATERIAL_ISSUE'])
 
 /** `/documents/new/:slug` and `/documents/:id/edit`. */
 export function DocumentFormPage() {
@@ -106,7 +98,20 @@ export function DocumentFormPage() {
     const reapproval = doc.status === 'APPROVED' || doc.status === 'PENDING_APPROVAL'
       ? <Notice kind="info">Saving changes returns the document to draft; it will need approval again.</Notice>
       : null
-    if (DEDICATED_FORMS.has(spec.code)) {
+    if (spec.code === 'CONSUMPTION') {
+      return (
+        <ConsumptionForm
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          existingStatus={doc.status}
+          existingVersion={doc.version}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
+    if (spec.code === 'MATERIAL_ISSUE') {
       return (
         <MaterialIssuePage
           key={doc.document_id}
@@ -130,7 +135,10 @@ export function DocumentFormPage() {
   }
 
   const s = spec as NonNullable<typeof spec>
-  if (DEDICATED_FORMS.has(s.code)) {
+  if (s.code === 'CONSUMPTION') {
+    return <ConsumptionForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
+  if (s.code === 'MATERIAL_ISSUE') {
     return <MaterialIssuePage key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
   }
   return (
