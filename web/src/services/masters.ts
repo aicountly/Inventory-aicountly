@@ -64,6 +64,19 @@ export interface WarehouseGroup extends AuditFields {
 export type WarehouseType = 'standard' | 'transit' | 'damaged' | 'quarantine' | 'consignment' | 'job_worker' | 'virtual'
 export const WAREHOUSE_TYPES: WarehouseType[] = ['standard', 'transit', 'damaged', 'quarantine', 'consignment', 'job_worker', 'virtual']
 
+/** Floor-area units, mirroring WarehousesController::AREA_UNITS. */
+export type AreaUnit = 'sq_ft' | 'sq_m' | 'sq_yd' | 'acre' | 'hectare'
+export const AREA_UNITS: AreaUnit[] = ['sq_ft', 'sq_m', 'sq_yd', 'acre', 'hectare']
+
+/** Short label for an area unit — what the card prints after the figure. */
+export const AREA_UNIT_LABELS: Record<AreaUnit, string> = {
+  sq_ft: 'Sq. Ft.',
+  sq_m: 'Sq. M.',
+  sq_yd: 'Sq. Yd.',
+  acre: 'Acre',
+  hectare: 'Hectare',
+}
+
 export interface Warehouse extends AuditFields {
   warehouse_id: number
   warehouse_name: string
@@ -77,6 +90,37 @@ export interface Warehouse extends AuditFields {
   contact: Record<string, unknown> | null
   bo_id: number
   is_active: number
+  /**
+   * Operational ceiling in stock units, and the floor area beside it.
+   *
+   * All five are nullable and null means "the user has not set one" — never 0.
+   * A warehouse with a 0-unit ceiling would read as permanently full, so every
+   * screen tests for null and prints "Not configured" instead of dividing.
+   */
+  capacity_units: number | null
+  area: number | null
+  area_unit: AreaUnit | string | null
+  latitude: number | null
+  longitude: number | null
+}
+
+/** `GET /v1/warehouses/summary` — company-wide totals, computed in the database. */
+export interface WarehouseSummary {
+  total: number
+  active: number
+  inactive: number
+  defaults: number
+  capacity: {
+    /** null when no warehouse has a capacity: there is no company ceiling to report. */
+    units: number | null
+    configured: number
+    area: number | null
+    area_configured: number
+    area_by_unit: { unit: string; area: number; count: number }[]
+  }
+  geo: { with_coordinates: number }
+  by_type: { warehouse_type: string; count: number; active: number }[]
+  by_location: { country: string; state: string; city: string; count: number; active: number }[]
 }
 
 export type LocationType = 'zone' | 'rack' | 'shelf' | 'bin'
@@ -217,7 +261,18 @@ export const stockCategoriesApi = crud<StockCategory>('stock-categories')
 export const brandsApi = crud<Brand>('brands')
 export const uomApi = crud<Uom>('uom')
 export const warehouseGroupsApi = crud<WarehouseGroup>('warehouse-groups')
-export const warehousesApi = crud<Warehouse>('warehouses')
+export const warehousesApi = {
+  ...crud<Warehouse>('warehouses'),
+  /**
+   * The KPI strip's figures.
+   *
+   * Separate from `list()` on purpose: the list is paged, and adding up the
+   * fifty rows on screen would report page 1 of 9's capacity as the company's.
+   */
+  async summary(signal?: AbortSignal): Promise<WarehouseSummary> {
+    return (await api.get<ItemResponse<WarehouseSummary>>('v1/warehouses/summary', { signal })).data
+  },
+}
 export const locationsApi = crud<Location>('locations')
 export const bomApi = crud<Bom>('bill-of-materials')
 export const batchesApi = crud<Batch>('batches')

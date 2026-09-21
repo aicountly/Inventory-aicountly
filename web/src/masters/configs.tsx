@@ -1,7 +1,7 @@
 import { ActiveBadge, StatusBadge, statusBadgeLabel } from '../components/StatusBadge'
-import { batchesApi, brandsApi, itemGroupsApi, locationsApi, stockCategoriesApi, uomApi, warehouseGroupsApi, warehousesApi, BATCH_STATUSES, LOCATION_TYPES, WAREHOUSE_TYPES } from '../services/masters'
-import type { Batch, Brand, ItemGroup, Location, StockCategory, Uom, Warehouse, WarehouseGroup } from '../services/masters'
-import { formatDate, formatDateTime, formatInt, formatQty, humanize } from '../utils/format'
+import { batchesApi, brandsApi, itemGroupsApi, locationsApi, stockCategoriesApi, uomApi, warehouseGroupsApi, warehousesApi, AREA_UNITS, AREA_UNIT_LABELS, BATCH_STATUSES, LOCATION_TYPES, WAREHOUSE_TYPES } from '../services/masters'
+import type { AreaUnit, Batch, Brand, ItemGroup, Location, StockCategory, Uom, Warehouse, WarehouseGroup } from '../services/masters'
+import { formatDate, formatDateTime, formatInt, formatQty, humanize, toNumber } from '../utils/format'
 import { isPickedItem } from './formValues'
 import { buildTree, descendantIds } from './tree'
 import type { MasterConfig, SelectOption } from './types'
@@ -197,6 +197,101 @@ export const warehouseGroupsConfig: MasterConfig<WarehouseGroup> = {
 }
 
 const warehouseTypeOptions: SelectOption[] = WAREHOUSE_TYPES.map((t) => ({ value: t, label: humanize(t) }))
+const areaUnitOptions: SelectOption[] = AREA_UNITS.map((u) => ({ value: u, label: AREA_UNIT_LABELS[u] }))
+
+/*
+ * The warehouse form's five sections. Long enough to need them: without the
+ * headings, a capacity field and a pincode field sit in the same undifferentiated
+ * grid and the form reads as a list of twenty inputs.
+ */
+const BASIC = 'Basic information'
+const LOCATION = 'Location'
+const CAPACITY = 'Capacity'
+const CONTROLS = 'Inventory controls'
+const ADVANCED = 'Advanced'
+
+/*
+ * The label helpers below are shared by the table cell and the exported cell so
+ * the sheet cannot drift from the screen — the rule this repo already applies to
+ * every other master column.
+ */
+const branchLabel = (r: Warehouse): string => (Number(r.bo_id) > 0 ? `Branch #${r.bo_id}` : 'All branches')
+
+const placeLabel = (r: Warehouse): string | null => {
+  const address = (r.address ?? {}) as Record<string, unknown>
+  const parts = ['city', 'state', 'country']
+    .map((k) => (typeof address[k] === 'string' ? (address[k] as string).trim() : ''))
+    .filter((v) => v !== '')
+  return parts.length === 0 ? null : parts.slice(0, 2).join(', ')
+}
+
+/** "50,000 Units", or the honest answer when nobody has set a ceiling. */
+const capacityLabel = (r: Warehouse): string => {
+  const capacity = toNumber(r.capacity_units)
+  return capacity !== null && capacity > 0 ? `${formatQty(capacity)} Units` : 'Not configured'
+}
+
+const areaLabel = (r: Warehouse): string => {
+  const area = toNumber(r.area)
+  if (area === null || area <= 0) return 'Not configured'
+  const unit = r.area_unit ? (AREA_UNIT_LABELS[r.area_unit as AreaUnit] ?? String(r.area_unit)) : ''
+  return unit ? `${formatQty(area)} ${unit}` : formatQty(area)
+}
+
+const negativeStockLabel = (r: Warehouse): string =>
+  r.allow_negative === null || r.allow_negative === undefined ? 'Company policy' : Number(r.allow_negative) === 1 ? 'Allowed' : 'Blocked'
+
+/** A key of the warehouse's stored address, as form text. */
+const addressField = (row: Warehouse | null, key: string): string => {
+  const value = (row?.address as Record<string, unknown> | null)?.[key]
+  return typeof value === 'string' || typeof value === 'number' ? String(value) : ''
+}
+
+/** A stored number as form text; blank for null, so the input shows empty, not 0. */
+const numText = (value: unknown): string => (value === null || value === undefined || value === '' ? '' : String(value))
+
+const nullableText = (value: unknown): string | null => {
+  const text = String(value ?? '').trim()
+  return text === '' ? null : text
+}
+
+/**
+ * A number field's payload value.
+ *
+ * Blank means "not configured" and must reach the API as null, never 0: a
+ * warehouse whose capacity saved as 0 would read as permanently full on every
+ * screen that divides by it.
+ */
+const nullableNum = (value: unknown): number | null => {
+  const text = String(value ?? '').trim()
+  if (text === '') return null
+  const n = Number(text)
+  return Number.isFinite(n) ? n : null
+}
+
+const nonNegative = (value: unknown, label: string): string | null => {
+  const text = String(value ?? '').trim()
+  if (text === '') return null
+  const n = Number(text)
+  if (!Number.isFinite(n)) return `${label} must be a number`
+  return n < 0 ? `${label} cannot be negative` : null
+}
+
+/**
+ * A coordinate is valid alone only when its partner is blank too.
+ *
+ * Half a point plots nothing, so the API refuses it; catching it here means the
+ * message lands on the field rather than arriving as a form-level error after a
+ * round trip.
+ */
+const coordinateError = (value: unknown, partner: unknown, limit: number, label: string): string | null => {
+  const text = String(value ?? '').trim()
+  const partnerText = String(partner ?? '').trim()
+  if (text === '') return partnerText === '' ? null : `${label} is required when the other coordinate is set`
+  const n = Number(text)
+  if (!Number.isFinite(n)) return `${label} must be a number`
+  return n < -limit || n > limit ? `${label} must be between -${limit} and ${limit}` : null
+}
 
 export const warehousesConfig: MasterConfig<Warehouse> = {
   slug: 'warehouses',
@@ -224,16 +319,20 @@ export const warehousesConfig: MasterConfig<Warehouse> = {
     },
     { key: 'warehouse_code', header: 'Code', sortKey: 'warehouse_code', render: (r) => <span className="mono">{r.warehouse_code ?? '—'}</span> },
     { key: 'warehouse_type', header: 'Type', sortKey: 'warehouse_type', render: (r) => humanize(r.warehouse_type), exportValue: (r) => humanize(r.warehouse_type) },
-    { key: 'bo_id', header: 'Branch', sortKey: 'bo_id', render: (r) => (Number(r.bo_id) > 0 ? `Branch #${r.bo_id}` : 'All branches'), exportValue: (r) => (Number(r.bo_id) > 0 ? `Branch #${r.bo_id}` : 'All branches') },
-    { key: 'allow_negative', header: 'Negative stock', render: (r) => (r.allow_negative === null || r.allow_negative === undefined ? 'Company policy' : Number(r.allow_negative) === 1 ? 'Allowed' : 'Blocked'), exportValue: (r) => (r.allow_negative === null || r.allow_negative === undefined ? 'Company policy' : Number(r.allow_negative) === 1 ? 'Allowed' : 'Blocked') },
+    { key: 'bo_id', header: 'Branch', sortKey: 'bo_id', render: (r) => branchLabel(r), exportValue: (r) => branchLabel(r) },
+    { key: 'location', header: 'Location', render: (r) => placeLabel(r) ?? '—', exportValue: (r) => placeLabel(r) ?? '' },
+    { key: 'capacity_units', header: 'Capacity', sortKey: 'capacity_units', align: 'right', render: (r) => capacityLabel(r), exportValue: (r) => capacityLabel(r) },
+    { key: 'area', header: 'Area', sortKey: 'area', align: 'right', render: (r) => areaLabel(r), exportValue: (r) => areaLabel(r) },
+    { key: 'allow_negative', header: 'Negative stock', render: (r) => negativeStockLabel(r), exportValue: (r) => negativeStockLabel(r) },
     activeColumn<Warehouse>(),
     updatedAt<Warehouse>(),
   ],
   fields: [
-    { name: 'warehouse_name', label: 'Warehouse name', type: 'text', required: true, maxLength: 255, span: 2 },
-    { name: 'warehouse_code', label: 'Code', type: 'text', maxLength: 32, help: 'Unique within the company.' },
-    { name: 'warehouse_type', label: 'Type', type: 'select', required: true, options: warehouseTypeOptions },
+    { section: BASIC, name: 'warehouse_name', label: 'Warehouse name', type: 'text', required: true, maxLength: 255, span: 2 },
+    { section: BASIC, name: 'warehouse_code', label: 'Code', type: 'text', maxLength: 32, help: 'Unique within the company.' },
+    { section: BASIC, name: 'warehouse_type', label: 'Type', type: 'select', required: true, options: warehouseTypeOptions },
     {
+      section: BASIC,
       name: 'warehouse_group_id',
       label: 'Warehouse group',
       type: 'select',
@@ -243,15 +342,55 @@ export const warehousesConfig: MasterConfig<Warehouse> = {
       },
     },
     {
+      section: BASIC,
       name: 'parent_warehouse_id',
       label: 'Parent warehouse',
       type: 'select',
       options: (ctx) => (ctx.options?.warehouses ?? []).filter((w) => !ctx.row || w.warehouse_id !== ctx.row.warehouse_id).map((w) => ({ value: w.warehouse_id, label: w.warehouse_name })),
     },
-    { name: 'bo_id', label: 'Branch id', type: 'number', min: 0, step: 1, help: '0 = shared by all branches. Otherwise the Manage branch id.' },
-    { name: 'allow_negative', label: 'Negative stock', type: 'select', emptyLabel: 'Follow company policy', options: [{ value: 1, label: 'Allow' }, { value: 0, label: 'Block' }] },
-    { name: 'is_default', label: 'Default warehouse', type: 'checkbox', help: 'Used when a document does not name one.' },
-    { name: 'is_active', label: 'Active', type: 'checkbox' },
+    { section: BASIC, name: 'bo_id', label: 'Branch id', type: 'number', min: 0, step: 1, help: '0 = shared by all branches. Otherwise the Manage branch id.' },
+
+    { section: LOCATION, name: 'address_line1', label: 'Address', type: 'text', maxLength: 255, span: 2 },
+    { section: LOCATION, name: 'address_city', label: 'City', type: 'text', maxLength: 120 },
+    { section: LOCATION, name: 'address_state', label: 'State', type: 'text', maxLength: 120 },
+    { section: LOCATION, name: 'address_country', label: 'Country', type: 'text', maxLength: 120 },
+    { section: LOCATION, name: 'address_pincode', label: 'Pincode', type: 'text', maxLength: 16 },
+    {
+      section: LOCATION,
+      name: 'latitude',
+      label: 'Latitude',
+      type: 'number',
+      min: -90,
+      max: 90,
+      help: 'Optional. Set both coordinates to plot this warehouse on the map.',
+      validate: (value, ctx) => coordinateError(value, ctx.values.longitude, 90, 'Latitude'),
+    },
+    {
+      section: LOCATION,
+      name: 'longitude',
+      label: 'Longitude',
+      type: 'number',
+      min: -180,
+      max: 180,
+      validate: (value, ctx) => coordinateError(value, ctx.values.latitude, 180, 'Longitude'),
+    },
+
+    {
+      section: CAPACITY,
+      name: 'capacity_units',
+      label: 'Maximum stock units',
+      type: 'number',
+      min: 0,
+      help: 'Leave empty if this warehouse has no set ceiling — utilisation is then reported as not configured.',
+      validate: (value) => nonNegative(value, 'Maximum stock units'),
+    },
+    { section: CAPACITY, name: 'area', label: 'Area', type: 'number', min: 0, validate: (value) => nonNegative(value, 'Area') },
+    { section: CAPACITY, name: 'area_unit', label: 'Area unit', type: 'select', emptyLabel: '— None —', options: areaUnitOptions },
+
+    { section: CONTROLS, name: 'allow_negative', label: 'Negative stock', type: 'select', emptyLabel: 'Follow company policy', options: [{ value: 1, label: 'Allow' }, { value: 0, label: 'Block' }] },
+    { section: CONTROLS, name: 'is_default', label: 'Default warehouse', type: 'checkbox', help: 'Used when a document does not name one.' },
+
+    { section: ADVANCED, name: 'is_active', label: 'Active', type: 'checkbox' },
   ],
   toValues: (row) => ({
     warehouse_name: row?.warehouse_name ?? '',
@@ -260,17 +399,46 @@ export const warehousesConfig: MasterConfig<Warehouse> = {
     warehouse_group_id: row?.warehouse_group_id ? String(row.warehouse_group_id) : '',
     parent_warehouse_id: row?.parent_warehouse_id ? String(row.parent_warehouse_id) : '',
     bo_id: row ? String(row.bo_id ?? 0) : '0',
+    address_line1: addressField(row, 'line1'),
+    address_city: addressField(row, 'city'),
+    address_state: addressField(row, 'state'),
+    address_country: addressField(row, 'country'),
+    address_pincode: addressField(row, 'pincode'),
+    latitude: numText(row?.latitude),
+    longitude: numText(row?.longitude),
+    capacity_units: numText(row?.capacity_units),
+    area: numText(row?.area),
+    area_unit: row?.area_unit ? String(row.area_unit) : '',
     allow_negative: row && row.allow_negative !== null && row.allow_negative !== undefined ? String(Number(row.allow_negative)) : '',
     is_default: row ? Number(row.is_default) === 1 : false,
     is_active: row ? Number(row.is_active) === 1 : true,
   }),
-  toPayload: (values) => ({
+  toPayload: (values, row) => ({
     warehouse_name: String(values.warehouse_name ?? '').trim(),
     warehouse_code: String(values.warehouse_code ?? '').trim() || null,
     warehouse_type: String(values.warehouse_type || 'standard'),
     warehouse_group_id: idNum(values.warehouse_group_id),
     parent_warehouse_id: idNum(values.parent_warehouse_id),
     bo_id: Math.max(0, Number(values.bo_id) || 0),
+    /*
+     * Spread the stored address first so a key this form does not show — an
+     * address line 2 typed by an older build, a landmark imported from Books —
+     * survives a save made from this screen. Only the five fields below are
+     * ours to overwrite.
+     */
+    address: {
+      ...((row?.address as Record<string, unknown> | null) ?? {}),
+      line1: nullableText(values.address_line1),
+      city: nullableText(values.address_city),
+      state: nullableText(values.address_state),
+      country: nullableText(values.address_country),
+      pincode: nullableText(values.address_pincode),
+    },
+    latitude: nullableNum(values.latitude),
+    longitude: nullableNum(values.longitude),
+    capacity_units: nullableNum(values.capacity_units),
+    area: nullableNum(values.area),
+    area_unit: String(values.area_unit ?? '').trim() || null,
     allow_negative: values.allow_negative === '' || values.allow_negative === null || values.allow_negative === undefined ? null : Number(values.allow_negative),
     is_default: values.is_default ? 1 : 0,
     is_active: values.is_active ? 1 : 0,

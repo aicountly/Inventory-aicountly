@@ -1,5 +1,5 @@
 import { MasterPage } from '../../masters/MasterPage'
-import { batchesConfig, brandsConfig, itemGroupsConfig, locationsConfig, stockCategoriesConfig, uomConfig, warehouseGroupsConfig, warehousesConfig } from '../../masters/configs'
+import { batchesConfig, brandsConfig, itemGroupsConfig, locationsConfig, stockCategoriesConfig, uomConfig, warehouseGroupsConfig } from '../../masters/configs'
 
 /** Master screens that are entirely described by a config. */
 
@@ -23,10 +23,6 @@ export function UomPage() {
 
 export function WarehouseGroupsPage() {
   return <MasterPage config={warehouseGroupsConfig} breadcrumbs={crumbs} />
-}
-
-export function WarehousesPage() {
-  return <MasterPage config={warehousesConfig} breadcrumbs={crumbs} />
 }
 
 export function LocationsPage() {

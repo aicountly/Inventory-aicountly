@@ -133,10 +133,15 @@ const WAREHOUSE = {
   warehouse_type: 'bonded',
   is_default: 1,
   allow_negative: 0,
-  address: null,
+  address: { line1: '14 Industrial Estate', city: 'Pune', state: 'Maharashtra', country: 'India', pincode: '411019' },
   contact: null,
   bo_id: 2,
   is_active: 1,
+  capacity_units: 50000,
+  area: 2500,
+  area_unit: 'sq_ft',
+  latitude: 18.5204303,
+  longitude: 73.8567437,
   ...AUDIT,
 }
 

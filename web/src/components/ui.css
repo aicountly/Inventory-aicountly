@@ -214,6 +214,16 @@
   color: var(--muted);
 }
 
+/*
+ * A master form long enough to be split into sections (the warehouse form is
+ * the first) stacks bordered .form-section cards. Scoped to the modifier so the
+ * single-grid forms every other master renders are untouched.
+ */
+.master-form--sectioned {
+  display: grid;
+  gap: 0.875rem;
+}
+
 .form-actions {
   display: flex;
   flex-wrap: wrap;
