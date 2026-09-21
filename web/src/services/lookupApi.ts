@@ -77,6 +77,35 @@ export interface SerialRow {
   status: string
 }
 
+/**
+ * A serial as `GET /v1/serials` presents it (SerialsController::SELECT) — the whole context a
+ * scanned serial number carries: which item it belongs to, where it is and what state it is in.
+ *
+ * Wider than `SerialRow` on purpose. `SerialRow` backs the per-item picker, which already knows
+ * the item; a scan knows nothing but the number on the label.
+ */
+export interface SerialLookupRow {
+  serial_id: number
+  item_id: number
+  serial_no: string
+  batch_id: number | null
+  warehouse_id: number | null
+  location_id: number | null
+  status: string
+  unit_cost: number | null
+  received_document_id: number | null
+  issued_document_id: number | null
+  warranty_until: string | null
+  item_name: string | null
+  item_sku: string | null
+  warehouse_name: string | null
+  warehouse_code: string | null
+  batch_no: string | null
+  expiry_date: string | null
+  location_code: string | null
+  updated_at?: string | null
+}
+
 export interface BomListRow {
   bom_id: number
   bom_name: string
@@ -175,6 +204,44 @@ export const lookupApi = {
   async bulkCreateSerials(body: { item_id: number; serial_nos: string[]; warehouse_id?: number | null; batch_id?: number | null }): Promise<{ created: { serial_id: number; serial_no: string }[]; skipped: { serial_no: string; reason: string }[] }> {
     const res = await api.post<ItemResponse<{ created: { serial_id: number; serial_no: string }[]; skipped: { serial_no: string; reason: string }[] }>>('v1/serials/bulk', body)
     return res.data
+  },
+
+  /**
+   * Serials matching a scanned or typed number, across every item.
+   *
+   * The same `GET /v1/serials` the serial master reads — `item_id` is optional there and `q`
+   * already matches on `serial_no`, so a scan needs no new endpoint. `q_mode: 'prefix'` asks
+   * the server for a left-anchored LIKE, which is the index-friendly half of the filter and
+   * the only half a scanner ever needs.
+   */
+  async findSerials(q: string, options: { limit?: number; signal?: AbortSignal } = {}): Promise<SerialLookupRow[]> {
+    const value = q.trim()
+    if (value === '') return []
+    const res = await api.list<SerialLookupRow>('v1/serials', { q: value, q_mode: 'prefix', limit: options.limit ?? 20, sort: 'serial_no' }, { signal: options.signal })
+    return res.data
+  },
+
+  /**
+   * The one serial whose number is exactly `serialNo`, or null.
+   *
+   * Exact rather than "the first match": `SN-1` is a prefix of `SN-10`, and a scanner that
+   * silently attached the wrong serial to an adjustment would be worse than one that found
+   * nothing at all.
+   *
+   * The page is deliberately roomy. `q` no longer matches only the serial number —
+   * SerialsController::applyFilters fans the same needle out across the item name, SKU, UPC,
+   * batch, warehouse and location — and the rows come back ordered by serial_no. So a scan
+   * whose text also happens to prefix, say, a warehouse name shares its page with every serial
+   * in that warehouse, and on a short page the exact hit can fall off the end and be reported
+   * as "not registered". Fetching a wide page costs one request either way; a false "not found"
+   * costs the operator a re-scan and a doubt about the screen.
+   */
+  async findSerialExact(serialNo: string, signal?: AbortSignal): Promise<SerialLookupRow | null> {
+    const value = serialNo.trim()
+    if (value === '') return null
+    const rows = await lookupApi.findSerials(value, { limit: 200, signal })
+    const needle = value.toLowerCase()
+    return rows.find((r) => r.serial_no.trim().toLowerCase() === needle) ?? null
   },
 
   /**
