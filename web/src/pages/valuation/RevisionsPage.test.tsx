@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import type { AckResult, RevisionSummary, ValuationRevision } from '../../services/valuationApi'
 
@@ -254,6 +254,22 @@ describe('RevisionsPage exports', () => {
     expect(header).not.toContain('Amount')
   })
 
+  /**
+   * The revision number is the reference an operator quotes back to Books when a COGS
+   * re-posting is queried. It was on the screen this one replaced, and a rebuild that
+   * quietly dropped it would make that conversation impossible from the grid.
+   */
+  it('keeps the revision number on the grid, sortable, and opens the row from it', async () => {
+    renderPage()
+    await ready()
+    const header = screen.getByRole('columnheader', { name: '#' })
+    expect(header).toBeTruthy()
+    expect(within(header).getByRole('button')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open revision 1' }))
+    await waitFor(() => expect(screen.getByText('Revision #1')).toBeTruthy())
+  })
+
   it('writes every matching revision, not the page on screen, and says so on paper', async () => {
     renderPage()
     await ready()
@@ -293,10 +309,12 @@ describe('RevisionsPage summary', () => {
   it('reads its KPIs from the server aggregate, not from the rows on screen', async () => {
     renderPage()
     await ready()
-    // 12 company-wide pending, though only 25 rows were fetched and 30 match.
-    expect(screen.getByText('Pending revisions')).toBeTruthy()
-    expect(screen.getByText('12')).toBeTruthy()
-    expect(screen.getByText('Acknowledged today')).toBeTruthy()
+    // 12 company-wide pending, though only 25 rows were fetched and 30 match. Scoped to the
+    // KPI strip, because "12" is also a revision number down in the grid.
+    const kpis = screen.getByRole('region', { name: 'Valuation revision summary' })
+    expect(within(kpis).getByText('Pending revisions')).toBeTruthy()
+    expect(within(kpis).getByText('12')).toBeTruthy()
+    expect(within(kpis).getByText('Acknowledged today')).toBeTruthy()
     const [call] = revisionsSummary.mock.calls[0] as [Record<string, unknown>]
     // A summary of "page 2" is not a summary.
     expect(call.page).toBeUndefined()
