@@ -1,6 +1,8 @@
 import {
   Activity,
+  ArrowDownToLine,
   ArrowLeftRight,
+  ArrowUpFromLine,
   Barcode,
   BookOpen,
   ChartNoAxesCombined,
@@ -10,6 +12,7 @@ import {
   ClipboardList,
   Cog,
   FilePlus2,
+  Factory,
   FileText,
   FlaskConical,
   Gauge,
@@ -40,6 +43,13 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { MASTER_PERMISSION_SLUGS, P } from '../services/access'
+import { slugForCode } from '../documents/registry'
+
+/** `/documents/new/<slug>` — the create route DocumentFormPage owns. */
+const documentEntry = (code: string): string => `/documents/new/${slugForCode(code)}`
+
+/** The type's own create permission, or the blanket one (documents/actions.ts). */
+const documentCreate = (code: string): readonly string[] => [`documents.${slugForCode(code)}.create`, 'documents.create']
 
 /**
  * The one navigation model for the whole app.
@@ -345,9 +355,13 @@ export const REGISTER_NAV: readonly NavLeaf[] = [
     permissions: [P.report('valuation')],
   },
   {
-    label: 'Pending quantities',
+    // Named as the register names itself. Its siblings here are "Movement
+    // register" and "Valuation register", and the screen's own <h1> is
+    // "Pending quantity register" — three different names for one destination
+    // is how a reader stops trusting the nav.
+    label: 'Pending quantity register',
     path: '/registers/pending-quantities',
-    description: 'Everything issued or expected and not yet settled.',
+    description: 'Everything issued or expected and not yet settled, with what is overdue.',
     icon: Timer,
     permissions: [P.documentsRead],
   },
@@ -466,6 +480,27 @@ export const SIDEBAR_NAV: readonly SidebarNavItem[] = [
         ],
       },
       {
+        /*
+         * The adjustments, straight from the rail.
+         *
+         * The hub above lists all twenty-one types and stays the way in to the rest; these six are
+         * the ones a stores or finance user raises week in, week out, and reaching them was two
+         * clicks and a scan of a grouped list. Each one is a real create route
+         * (`/documents/new/<slug>`) gated on the type's own create permission, so a profile that
+         * cannot raise one never sees it.
+         */
+        label: 'Adjust stock',
+        icon: Scale,
+        items: [
+          { label: 'Stock revaluation', path: documentEntry('REVALUATION'), description: 'Re-price the cost of stock on hand without moving any of it.', icon: Coins, permissions: documentCreate('REVALUATION') },
+          { label: 'Stock transfer', path: documentEntry('STOCK_TRANSFER'), description: 'Move stock between two warehouses.', icon: ArrowLeftRight, permissions: documentCreate('STOCK_TRANSFER') },
+          { label: 'Stock journal', path: documentEntry('STOCK_JOURNAL'), description: 'Free-form in and out lines with a stock adjustment effect.', icon: ScrollText, permissions: documentCreate('STOCK_JOURNAL') },
+          { label: 'Batch adjustment', path: documentEntry('BATCH_ADJUSTMENT'), description: 'Correct batch allocations without changing value.', icon: Layers, permissions: documentCreate('BATCH_ADJUSTMENT') },
+          { label: 'Serial adjustment', path: documentEntry('SERIAL_ADJUSTMENT'), description: 'Correct serial numbers without changing value.', icon: Barcode, permissions: documentCreate('SERIAL_ADJUSTMENT') },
+          { label: 'Physical stock count', path: documentEntry('PHYSICAL_ADJUSTMENT'), description: 'Book quantity against counted quantity per item and warehouse.', icon: ClipboardList, permissions: documentCreate('PHYSICAL_ADJUSTMENT') },
+        ],
+      },
+      {
         label: 'Documents',
         icon: FileText,
         items: [
@@ -487,6 +522,40 @@ export const SIDEBAR_NAV: readonly SidebarNavItem[] = [
             path: '/documents?status=failed',
             description: 'Documents that could not be posted.',
             icon: ClipboardList,
+          },
+        ],
+      },
+      {
+        /*
+         * Job work is the one workflow in Documents that is two document types
+         * and one position. Until it had a column of its own, both halves were
+         * reachable only through the entry hub's long list, and the quantities
+         * sitting with job workers — the thing the workflow is actually about —
+         * appeared nowhere in the navigation at all.
+         */
+        label: 'Job work',
+        icon: Factory,
+        items: [
+          {
+            label: 'Job Work Inward',
+            path: '/documents/new/job_work_in',
+            description: 'Receive finished goods and settle what is pending with a job worker.',
+            icon: ArrowDownToLine,
+            permissions: ['documents.job_work_in.create', 'documents.create'],
+          },
+          {
+            label: 'Job Work Outward',
+            path: '/documents/new/job_work_out',
+            description: 'Send material out and track it until it is settled.',
+            icon: ArrowUpFromLine,
+            permissions: ['documents.job_work_out.create', 'documents.create'],
+          },
+          {
+            label: 'With job workers',
+            path: '/registers/pending-quantities?kind=job_work',
+            description: 'Every quantity still out on a job-work challan.',
+            icon: Timer,
+            permissions: [P.documentsRead],
           },
         ],
       },

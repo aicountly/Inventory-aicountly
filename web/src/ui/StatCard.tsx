@@ -41,12 +41,29 @@ export interface StatCardProps {
   /** Makes the whole card a link — the drill-down contract. */
   to?: string
   /**
+   * One extra row under the delta — a progress bar, a share, a second figure.
+   *
+   * Optional and unstyled on purpose: it is for a card that genuinely has a
+   * fourth thing to say (22 of 24 brands are active), not a slot to be filled
+   * on every card because it exists. Cards with and without it keep the same
+   * top three rows, so a strip of them still lines up.
+   */
+  footer?: ReactNode
+  /**
+   * A measured series behind the figure, drawn at the top-right in `metric`
+   * layout. Like `previous`, it is never invented: a card renders none when the
+   * endpoint sent none, and the layout does not move when it does.
+   */
+  sparkline?: ReactNode
+  /**
    * `stacked` (the default) is the dashboard tile: tile on top, then the label
    * and the figure. `metric` puts the tile beside them, which reads better in a
    * row of four wide cards over a table — the eye runs down one column of
    * figures instead of stepping around four icons.
    */
   layout?: 'stacked' | 'metric'
+  /** Fixed decorative bars in the corner. See CardOrnament — not a chart. */
+  ornament?: boolean
   className?: string
 }
 
@@ -66,6 +83,60 @@ const METRIC_DELTA_ROW_CLASS = 'mt-1.5 flex items-center gap-1.5 text-[11px] tex
 /** A line of shimmer that occupies exactly one line box of the text it replaces. */
 const BAR_CLASS = 'skeleton inline-block rounded text-transparent'
 
+/** The ornament's tint, matched to the card's own icon tile. */
+const ORNAMENT_TONE: Record<IconTone, string> = {
+  primary: 'text-primary',
+  success: 'text-emerald-600',
+  warning: 'text-amber-600',
+  danger: 'text-red-600',
+  info: 'text-sky-600',
+  violet: 'text-violet-600',
+  slate: 'text-slate-600',
+  rose: 'text-rose-600',
+  teal: 'text-teal-600',
+}
+
+/**
+ * Four bars in the card's bottom-right corner.
+ *
+ * DECORATION, and deliberately fixed: these heights are hard-coded and mean
+ * nothing. Inventory sends no series behind a stock bucket, and drawing one
+ * from the rows on screen would put a trend on a manager's card that no server
+ * ever computed — the same reason LiveDataBadge's sparkline is a constant path.
+ * It is `aria-hidden`, it sits under the figure at low opacity, and it must
+ * never be swapped for something data-shaped without a real series to plot.
+ */
+function CardOrnament({ tone }: { tone: IconTone }) {
+  return (
+    <svg
+      viewBox="0 0 46 24"
+      className={cx(
+        'pointer-events-none absolute bottom-3 right-3 h-6 w-12 opacity-[0.14]',
+        ORNAMENT_TONE[tone],
+      )}
+      aria-hidden
+      focusable="false"
+    >
+      {[
+        { x: 0, h: 11 },
+        { x: 12, h: 18 },
+        { x: 24, h: 13 },
+        { x: 36, h: 22 },
+      ].map((bar) => (
+        <rect
+          key={bar.x}
+          x={bar.x}
+          y={24 - bar.h}
+          width="6"
+          height={bar.h}
+          rx="2"
+          fill="currentColor"
+        />
+      ))}
+    </svg>
+  )
+}
+
 /**
  * The clickable KPI card. Ported from Books so a figure means the same thing
  * in both products: tile, label, value, and either a real delta or a hint.
@@ -82,7 +153,10 @@ export function StatCard({
   invertDelta = false,
   emphasizeNegative = false,
   to,
+  footer,
+  sparkline,
   layout = 'stacked',
+  ornament = false,
   className,
 }: StatCardProps) {
   const pct = pctChange(current, previous)
@@ -105,6 +179,20 @@ export function StatCard({
     emphasizeNegative && typeof current === 'number' && current < 0
       ? 'text-red-600'
       : 'text-gray-900'
+
+  /*
+   * Decoration yields to content.
+   *
+   * The ornament is pinned to the card's bottom-right corner, which is
+   * exactly where `footer` renders. A card carrying both would draw bars
+   * behind a real control — so a card with a footer simply does not get them.
+   * Nothing is lost: the bars mean nothing by design.
+   *
+   * It yields to `sparkline` for the stronger reason: that IS a measured
+   * series. Putting invented bars on the same card as a real plot invites the
+   * reader to take the bars for data too.
+   */
+  const showOrnament = ornament && !footer && !sparkline
 
   const delta = (
     <>
@@ -130,8 +218,9 @@ export function StatCard({
         aria-label={to ? `Open ${label}` : undefined}
         padding="sm"
         interactive={Boolean(to)}
-        className={cx(METRIC_SHELL_CLASS, className)}
+        className={cx(METRIC_SHELL_CLASS, showOrnament && 'relative overflow-hidden', className)}
       >
+        {showOrnament ? <CardOrnament tone={tone} /> : null}
         <IconTile icon={icon} tone={tone} size="lg" />
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
@@ -142,8 +231,21 @@ export function StatCard({
               </Badge>
             ) : null}
           </div>
-          <p className={cx(METRIC_VALUE_CLASS, valueClass)}>{value}</p>
-          <div className={METRIC_DELTA_ROW_CLASS}>{delta}</div>
+          <div className="flex items-end justify-between gap-2">
+            <p className={cx(METRIC_VALUE_CLASS, valueClass, 'min-w-0')}>{value}</p>
+            {/* Takes the delta's colour when there is one, so the line and the
+                arrow above it tell the same story; grey when there is nothing
+                to compare against. Screen only — the sheet carries the figure. */}
+            {sparkline ? (
+              <span className={cx('shrink-0 pb-0.5 print:hidden', pct != null ? deltaCls : 'text-gray-300')} aria-hidden>
+                {sparkline}
+              </span>
+            ) : null}
+          </div>
+          {/* The hint truncates against the card edge, which would run it
+              under the ornament. Reserve the corner the bars occupy. */}
+          <div className={cx(METRIC_DELTA_ROW_CLASS, showOrnament && 'pr-12')}>{delta}</div>
+          {footer ? <div className="mt-2">{footer}</div> : null}
         </div>
       </Card>
     )
@@ -175,6 +277,7 @@ export function StatCard({
         </p>
       </div>
       <div className={DELTA_ROW_CLASS}>{delta}</div>
+      {footer ? <div>{footer}</div> : null}
     </Card>
   )
 }

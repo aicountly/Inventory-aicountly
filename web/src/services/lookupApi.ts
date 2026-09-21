@@ -3,7 +3,7 @@
  * serials and bills of materials.
  */
 
-import { api } from './api'
+import { api, isApiError } from './api'
 import type { ItemResponse, ListQuery, ListResponse } from './api'
 import type { BomHeader } from '../documents/bom'
 import type { CreateDocumentPayload } from '../documents/types'
@@ -32,6 +32,9 @@ export interface ItemSearchRow {
   track_serial: number | boolean
   valuation_method: string | null
   default_warehouse_id: number | null
+  /** Item group / stock category names (ItemsController::SEARCH_COLUMNS). Absent on older API builds. */
+  grp_name?: string | null
+  cat_name?: string | null
   stock?: { on_hand: number; available: number; reserved: number }
   units: ItemUnitRow[]
 }
@@ -87,6 +90,26 @@ export interface BomListRow {
   line_count: number
 }
 
+export interface BarcodeLookupOptions {
+  warehouseId?: number | null
+  signal?: AbortSignal
+}
+
+/**
+ * The one `GET /v1/items/by-barcode/{code}` request both barcode helpers below issue.
+ *
+ * The endpoint answers with ItemsController::LIST_COLUMNS, which carries no alternate units and
+ * no default warehouse, so both are defaulted to the search row's shape rather than left
+ * undefined: a caller reading `row.units` must not have to know which endpoint the row came from.
+ */
+async function fetchByBarcode(code: string, options: BarcodeLookupOptions): Promise<ItemSearchRow> {
+  const res = await api.get<ItemResponse<Partial<ItemSearchRow> & { item_id: number }>>(`v1/items/by-barcode/${encodeURIComponent(code)}`, {
+    query: { warehouse_id: options.warehouseId ?? undefined },
+    signal: options.signal,
+  })
+  return { units: [], default_warehouse_id: null, ...res.data } as ItemSearchRow
+}
+
 export const lookupApi = {
   async searchItems(q: string, options: { warehouseId?: number | null; limit?: number; signal?: AbortSignal } = {}): Promise<ItemSearchRow[]> {
     const res = await api.get<ItemResponse<ItemSearchRow[]>>('v1/items/search', {
@@ -100,6 +123,29 @@ export const lookupApi = {
     if (ids.length === 0) return []
     const res = await api.post<ItemResponse<ItemSearchRow[]>>('v1/items/bulk-lookup', { item_ids: ids }, { signal })
     return res.data
+  },
+
+  /** Exact UPC / SKU match for a keyboard-wedge scan: `GET /v1/items/by-barcode/{code}`. 404 when nothing matches. */
+  byBarcode(code: string, options: BarcodeLookupOptions = {}): Promise<ItemSearchRow> {
+    return fetchByBarcode(code, options)
+  },
+
+  /**
+   * The same lookup, resolving to null instead of throwing when nothing matches.
+   *
+   * "This barcode is not one of ours" is an ordinary outcome at a receiving bench, not a failure
+   * the caller should have to tell apart from a network error inside a catch block. The consumption
+   * scan bar wants the throw; the receiving screens want the null. One request, two contracts.
+   */
+  async itemByBarcode(code: string, options: BarcodeLookupOptions = {}): Promise<ItemSearchRow | null> {
+    const trimmed = code.trim()
+    if (!trimmed) return null
+    try {
+      return await fetchByBarcode(trimmed, options)
+    } catch (err) {
+      if (isApiError(err) && err.status === 404) return null
+      throw err
+    }
   },
 
   async warehouses(signal?: AbortSignal): Promise<WarehouseRow[]> {
@@ -131,8 +177,19 @@ export const lookupApi = {
     return res.data
   },
 
-  boms(q = '', signal?: AbortSignal): Promise<ListResponse<BomListRow>> {
-    return api.list<BomListRow>('v1/bill-of-materials', { q, status: 'active', limit: 100 }, { signal })
+  /**
+   * Active bills of materials, optionally only those that produce one finished item.
+   *
+   * `finished_item_id` is a filter BomController::index already applies; passing it is what lets
+   * the production screen offer only the BOMs valid for the item being made, rather than every
+   * BOM in the company.
+   */
+  boms(q = '', options: { finishedItemId?: number | null; signal?: AbortSignal } = {}): Promise<ListResponse<BomListRow>> {
+    return api.list<BomListRow>(
+      'v1/bill-of-materials',
+      { q, status: 'active', limit: 100, finished_item_id: options.finishedItemId ?? undefined },
+      { signal: options.signal },
+    )
   },
 
   async bom(id: number, signal?: AbortSignal): Promise<BomHeader> {

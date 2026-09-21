@@ -38,6 +38,23 @@ export interface ColumnChartProps {
   truncateAfter?: number | null
   /** Sentence shown where the un-happened part of the axis would be. */
   truncatedNote?: string
+  /**
+   * What one column is, for the accessible table's row header — `Hour`, `Week`.
+   *
+   * The table IS the data for a screen-reader, and a column of dates under the heading
+   * "Hour" describes a different chart from the one on screen.
+   */
+  categoryLabel?: string
+  /**
+   * The unabbreviated name of each column, in `categories` order.
+   *
+   * An axis label has to be short enough to fit under a bar; the tooltip and the
+   * accessible table have room for `Week of 14 Sep 2026` and are the places a reader
+   * checks when the short form is ambiguous.
+   */
+  categoryTitles?: readonly string[]
+  /** Bar width utilities. Widen it for a chart with few columns and room to spare. */
+  barClassName?: string
   height?: number
   className?: string
 }
@@ -49,6 +66,9 @@ export function ColumnChart({
   unit = 'documents',
   truncateAfter = null,
   truncatedNote,
+  categoryLabel = 'Period',
+  categoryTitles,
+  barClassName = 'w-1.5 md:w-2',
   height = 168,
   className,
 }: ColumnChartProps) {
@@ -79,7 +99,7 @@ export function ColumnChart({
         style={{ height }}
       >
         {shown.map((category, i) => (
-          <div key={category} className="flex h-full min-w-[18px] flex-1 flex-col justify-end gap-1">
+          <div key={`${category}-${i}`} className="flex h-full min-w-[18px] flex-1 flex-col justify-end gap-1">
             <div className="flex flex-1 items-end justify-center gap-[2px]">
               {series.map((s) => {
                 const value = s.values[i] ?? 0
@@ -90,9 +110,9 @@ export function ColumnChart({
                 return (
                   <div
                     key={s.key}
-                    className={cx('w-1.5 rounded-t-sm transition-[height] duration-500 md:w-2', value > 0 ? s.fill : '')}
+                    className={cx('rounded-t-sm transition-[height] duration-500', barClassName, value > 0 ? s.fill : '')}
                     style={{ height: `${pct}%` }}
-                    title={`${category} — ${s.label}: ${value} ${unit}`}
+                    title={`${categoryTitles?.[i] ?? category} — ${s.label}: ${value} ${unit}`}
                   />
                 )
               })}
@@ -128,7 +148,7 @@ export function ColumnChart({
         <caption>{caption}</caption>
         <thead>
           <tr>
-            <th scope="col">Hour</th>
+            <th scope="col">{categoryLabel}</th>
             {series.map((s) => (
               <th key={s.key} scope="col">
                 {s.label} ({unit})
@@ -138,8 +158,8 @@ export function ColumnChart({
         </thead>
         <tbody>
           {shown.map((category, i) => (
-            <tr key={category}>
-              <th scope="row">{category}</th>
+            <tr key={`${category}-${i}`}>
+              <th scope="row">{categoryTitles?.[i] ?? category}</th>
               {series.map((s) => (
                 <td key={s.key}>{s.values[i] ?? 0}</td>
               ))}

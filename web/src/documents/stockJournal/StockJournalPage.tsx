@@ -169,7 +169,7 @@ export function StockJournalPage({ spec, documentId, initial, existing, onSaved 
       ls.map((l) =>
         touchedWarehouses.current.has(l.key)
           ? l
-          : { ...l, warehouse_id: id, batch_id: null, batch_no: null, batch_expiry: null, serials: [] },
+          : { ...l, warehouse_id: id, batch_id: null, batch_no: null, expiry_date: null, serials: [] },
       ),
     )
   }, [patchHeader])
@@ -178,7 +178,7 @@ export function StockJournalPage({ spec, documentId, initial, existing, onSaved 
     (key: string, id: number | null) => {
       touchedWarehouses.current.add(key)
       // Batch and serial selections belong to a warehouse; they cannot survive it.
-      patchLine(key, { warehouse_id: id, batch_id: null, batch_no: null, batch_expiry: null, serials: [] })
+      patchLine(key, { warehouse_id: id, batch_id: null, batch_no: null, expiry_date: null, serials: [] })
     },
     [patchLine],
   )
@@ -216,7 +216,7 @@ export function StockJournalPage({ spec, documentId, initial, existing, onSaved 
                 // A new item invalidates everything that was chosen for the old one.
                 batch_id: null,
                 batch_no: null,
-                batch_expiry: null,
+                expiry_date: null,
                 serials: [],
               }
             : l,
@@ -238,7 +238,7 @@ export function StockJournalPage({ spec, documentId, initial, existing, onSaved 
       unit_id: null,
       batch_id: null,
       batch_no: null,
-      batch_expiry: null,
+      expiry_date: null,
       serials: [],
     })
   }, [patchLine])

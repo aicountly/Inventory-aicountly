@@ -155,7 +155,7 @@ export function StockJournalRow({
                       onPatch({
                         batch_id: b?.batch_id ?? null,
                         batch_no: b?.batch_no ?? null,
-                        batch_expiry: b?.expiry_date ?? null,
+                        expiry_date: b?.expiry_date ?? null,
                         // Serials belong to a batch; changing it invalidates them.
                         serials: [],
                       })

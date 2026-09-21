@@ -213,7 +213,7 @@ describe('buildWarnings', () => {
     const w = buildWarnings({
       ...base,
       header: header(),
-      lines: [line({ batch_no: 'B1', batch_expiry: '2026-01-01', rate: '1' })],
+      lines: [line({ batch_no: 'B1', expiry_date: '2026-01-01', rate: '1' })],
       availability: {},
     })
     expect(w.some((x) => x.code === 'batch_expired')).toBe(true)

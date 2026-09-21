@@ -36,7 +36,8 @@ const ctx = (findItem: LocalAssistContext['findItem'] = vi.fn(async () => item()
 })
 
 describe('serverAssistEnabled', () => {
-  it('is off unless the deployment opts in, so nothing fires a 404', () => {
+  it('is off until VITE_INVENTORY_AI_PATH names an endpoint, so nothing fires a 404', () => {
+    // The same seam the masters' AI panels read — not a second flag of our own.
     expect(serverAssistEnabled()).toBe(false)
   })
 })

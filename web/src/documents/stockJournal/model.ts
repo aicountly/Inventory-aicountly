@@ -12,7 +12,6 @@
 
 import { countDifference, isBlankLine, lineAmount, lineBaseQty, round4 } from '../formModel'
 import type { HeaderDraft, LineDraft } from '../formModel'
-import type { DocumentTypeSpec } from '../registry'
 import type { AvailabilityCheckResult } from '../../services/stockApi'
 import { shortBy } from '../../services/stockApi'
 import { formatQty, toNumber } from '../../utils/format'
@@ -352,12 +351,12 @@ export function buildWarnings(input: WarningInput): JournalWarning[] {
       })
     }
 
-    if (line.batch_expiry && line.direction === 'out' && line.batch_expiry < today) {
+    if (line.expiry_date && line.direction === 'out' && line.expiry_date < today) {
       out.push({
         level: 'warning',
         code: 'batch_expired',
         lineKey: line.key,
-        message: `${label}: batch ${line.batch_no ?? ''} expired on ${line.batch_expiry}.`.replace('  ', ' '),
+        message: `${label}: batch ${line.batch_no ?? ''} expired on ${line.expiry_date}.`.replace('  ', ' '),
       })
     }
   }
@@ -420,11 +419,6 @@ export function rowNeedsDeleteConfirm(line: LineDraft): boolean {
   if (line.item_id !== null) return true
   if (line.serials.length > 0 || line.batch_id !== null) return true
   return line.qty.trim() !== '' || line.rate.trim() !== '' || line.description.trim() !== ''
-}
-
-/** A stock journal is a `by_line` document; this keeps the assumption in one place. */
-export function isStockJournal(spec: DocumentTypeSpec): boolean {
-  return spec.code === 'STOCK_JOURNAL'
 }
 
 /** Re-exported so the screen imports its arithmetic from one place. */

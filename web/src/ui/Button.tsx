@@ -17,6 +17,8 @@ const VARIANTS = {
   link: 'bg-transparent text-primary hover:underline px-1 py-1 focus:ring-0',
   warning:
     'bg-amber-500 text-white hover:bg-amber-600 focus:ring-2 focus:ring-amber-300',
+  /** AI-assisted actions (Inventory AI, AI Suggest) — the same violet the IconTile/Badge "violet" tone uses. */
+  ai: 'bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100 focus:ring-2 focus:ring-violet-300',
 } as const
 
 const SIZES = {

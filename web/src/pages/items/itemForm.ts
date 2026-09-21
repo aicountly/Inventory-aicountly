@@ -1,6 +1,8 @@
 import { ITC_ELIGIBILITY } from '../../services/items'
 import type { ItcEligibility, Item, ItemOpening, ItemUnitLine } from '../../services/items'
 import { toNumber } from '../../utils/format'
+import { attributesChanged, attributesToDraft, draftToAttributes, emptyAttributes } from './itemAttributes'
+import type { ItemAttributesDraft } from './itemAttributes'
 
 /** Pure draft ↔ payload helpers for the item form. */
 
@@ -54,6 +56,11 @@ export interface ItemFormState {
   is_active: boolean
   unitLines: UnitLineDraft[]
   openings: OpeningDraft[]
+  /**
+   * `attributes_json` on the row — description, notes, tags and whatever else this company keeps
+   * on its items. See itemAttributes.ts for why it is a JSON column and not seven new ones.
+   */
+  attributes: ItemAttributesDraft
 }
 
 let keySeq = 0
@@ -64,6 +71,23 @@ export function nextKey(prefix = 'k'): string {
 
 const s = (v: unknown): string => (v === null || v === undefined ? '' : String(v))
 const on = (v: unknown): boolean => v === 1 || v === '1' || v === true
+
+/**
+ * A stored decimal as a person would type it: `15.0000` → `15`, `0.0833` → `0.0833`.
+ *
+ * Every numeric column here is NUMERIC(18,4) and PostgreSQL hands back all four decimals, so an
+ * MRP of fifteen rupees arrived in the box reading "15.0000". The trailing zeros are noise the
+ * user then has to edit around, and they make the form read as dirty-looking data.
+ *
+ * Only the presentation changes — the payload goes through `toNumber` either way, so `15.0000`
+ * and `15` are the same number to the server. Anything that is not a plain decimal is passed
+ * through untouched rather than guessed at.
+ */
+const num = (v: unknown): string => {
+  const raw = s(v)
+  if (!/^-?\d+\.\d+$/.test(raw)) return raw
+  return raw.replace(/0+$/, '').replace(/\.$/, '')
+}
 
 export function emptyItemForm(defaultValuationMethod = 'FIFO'): ItemFormState {
   return {
@@ -99,6 +123,7 @@ export function emptyItemForm(defaultValuationMethod = 'FIFO'): ItemFormState {
     is_active: true,
     unitLines: [],
     openings: [],
+    attributes: emptyAttributes(),
   }
 }
 
@@ -106,7 +131,7 @@ export function emptyItemForm(defaultValuationMethod = 'FIFO'): ItemFormState {
 export function unitLinesFromItem(lines: ItemUnitLine[], baseUnitId: number | null): UnitLineDraft[] {
   return lines
     .filter((l) => Number(l.is_default) !== 1 && Number(l.unit_id) !== baseUnitId)
-    .map((l) => ({ key: nextKey('u'), unit_id: s(l.unit_id), conversion_factor: s(l.conversion_factor), uom_role: s(l.uom_role) }))
+    .map((l) => ({ key: nextKey('u'), unit_id: s(l.unit_id), conversion_factor: num(l.conversion_factor), uom_role: s(l.uom_role) }))
 }
 
 export function openingsFromRows(rows: ItemOpening[], fyId: number): OpeningDraft[] {
@@ -117,8 +142,8 @@ export function openingsFromRows(rows: ItemOpening[], fyId: number): OpeningDraf
       warehouse_id: r.warehouse_id ? s(r.warehouse_id) : '',
       unit_id: s(r.unit_id),
       batch_id: r.batch_id ? s(r.batch_id) : '',
-      opening_qty: s(r.opening_qty),
-      opening_valuation_rate: s(r.opening_valuation_rate),
+      opening_qty: num(r.opening_qty),
+      opening_valuation_rate: num(r.opening_valuation_rate),
     }))
 }
 
@@ -132,7 +157,7 @@ export function itemToForm(item: Item, openingRows: ItemOpening[], effectiveFyId
     item_sku: s(item.item_sku),
     item_upc: s(item.item_upc),
     hsn_sac: s(item.hsn_sac),
-    mrp: s(item.mrp),
+    mrp: num(item.mrp),
     item_grp_id: s(item.item_grp_id),
     stock_cat_id: s(item.stock_cat_id),
     brand_id: s(item.brand_id),
@@ -140,7 +165,7 @@ export function itemToForm(item: Item, openingRows: ItemOpening[], effectiveFyId
     purchase_unit_id: s(item.purchase_unit_id),
     sales_unit_id: s(item.sales_unit_id),
     valuation_method: s(item.valuation_method).toUpperCase() || 'FIFO',
-    standard_cost: s(item.standard_cost),
+    standard_cost: num(item.standard_cost),
     negative_stock_policy: s(item.negative_stock_policy),
     // An unrecognised stored value reads as "the item says nothing" rather than picking a side for
     // it; the server refuses writing one, so this only guards a row that predates the vocabulary.
@@ -149,16 +174,17 @@ export function itemToForm(item: Item, openingRows: ItemOpening[], effectiveFyId
     track_serial: on(item.track_serial),
     track_expiry: on(item.track_expiry),
     shelf_life_days: s(item.shelf_life_days),
-    min_stock_qty: s(item.min_stock_qty),
-    max_stock_qty: s(item.max_stock_qty),
-    reorder_point_qty: s(item.reorder_point_qty),
-    reorder_qty: s(item.reorder_qty),
-    safety_stock_qty: s(item.safety_stock_qty),
+    min_stock_qty: num(item.min_stock_qty),
+    max_stock_qty: num(item.max_stock_qty),
+    reorder_point_qty: num(item.reorder_point_qty),
+    reorder_qty: num(item.reorder_qty),
+    safety_stock_qty: num(item.safety_stock_qty),
     lead_time_days: s(item.lead_time_days),
     default_warehouse_id: s(item.default_warehouse_id),
     is_active: on(item.is_active),
     unitLines: unitLinesFromItem(item.unit_lines ?? [], base),
     openings: openingsFromRows(openingRows, effectiveFyId),
+    attributes: attributesToDraft(item.attributes),
   }
 }
 
@@ -213,10 +239,21 @@ export function openingsPayload(rows: OpeningDraft[]): { warehouse_id: number | 
   return out
 }
 
-/** Body for POST / PUT `/v1/items` (openings travel separately). */
-export function itemPayload(f: ItemFormState): Record<string, unknown> {
+/**
+ * Body for POST / PUT `/v1/items` (openings travel separately).
+ *
+ * `originalAttributes` is what the API last returned for this item. It decides whether
+ * `attributes` rides along at all: the server only rewrites `attributes_json` when the request
+ * carries the key, so omitting it on an untouched item is what keeps a value written by another
+ * Aicountly app — or by a future field this screen does not model — exactly where it was.
+ *
+ * Note what is NOT here: `books_sales_acc_id`, `books_purchase_acc_id` and `books_tax_cat_id`.
+ * Books owns those rows and this screen has no live list to pick from, so it shows them read-only
+ * and never sends them. A column a request does not carry is a column it cannot damage.
+ */
+export function itemPayload(f: ItemFormState, originalAttributes?: unknown): Record<string, unknown> {
   const baseUnit = optId(f.unit_id)
-  return {
+  const body: Record<string, unknown> = {
     item_name: f.item_name.trim(),
     item_alias: optStr(f.item_alias),
     print_name: optStr(f.print_name),
@@ -249,6 +286,10 @@ export function itemPayload(f: ItemFormState): Record<string, unknown> {
     is_active: f.is_active ? 1 : 0,
     unit_lines: baseUnit ? unitLinesPayload(f.unitLines, baseUnit) : [],
   }
+  if (attributesChanged(originalAttributes ?? null, f.attributes)) {
+    body.attributes = draftToAttributes(f.attributes)
+  }
+  return body
 }
 
 export function validateItemForm(f: ItemFormState): Record<string, string> {
@@ -292,4 +333,43 @@ export function validateItemForm(f: ItemFormState): Record<string, string> {
     else if (o.opening_valuation_rate.trim() !== '' && (rate === null || rate < 0)) errors[`openings.${o.key}`] = `Opening ${i + 1}: rate cannot be negative`
   })
   return errors
+}
+
+/**
+ * What a duplicate KEEPS and what it must drop — stated once.
+ *
+ * A duplicate keeps everything that makes two items alike: classification,
+ * units and conversions, tax attributes, tracking flags, the reorder policy.
+ * It drops everything that belongs to exactly one item:
+ *
+ *  - the SKU and the barcode, which are identifiers and unique per company.
+ *    Carrying them over either fails on the first save or, worse, succeeds and
+ *    leaves two items answering the same scan.
+ *  - the opening stock, because an opening quantity is a statement about
+ *    physical goods counted on a date. A copied opening is stock that was never
+ *    received, and the valuation engine would faithfully cost it.
+ *
+ * The name gets a suffix so the copy cannot be saved under the original's name
+ * by someone who tabbed straight past the first field.
+ *
+ * One function because there are two ways in — the item form's own Duplicate
+ * action, which copies the draft on screen, and Duplicate on the items list,
+ * which copies a saved record. Two copies of this rule would drift, and the
+ * thing that drifts is which fields are safe to carry.
+ */
+export function duplicateDraft(form: ItemFormState): ItemFormState {
+  return {
+    ...form,
+    item_name: `${form.item_name} (copy)`.trim(),
+    item_sku: '',
+    item_upc: '',
+    openings: [],
+    // Fresh objects: the copy is edited independently of the draft it came from.
+    unitLines: form.unitLines.map((l) => ({ ...l })),
+  }
+}
+
+/** The same rule, entered from a saved item rather than from a draft on screen. */
+export function duplicateItemForm(item: Item): ItemFormState {
+  return duplicateDraft(itemToForm(item, [], 0))
 }

@@ -3,14 +3,17 @@
  *
  * ## What this is, and what it is not
  *
- * Inventory has no assistant endpoint today — there is no `/v1/.../assist` route
- * in `Config/Routes.php` and no model credentials anywhere in the API. Rather
- * than ship a screen that pretends to call one, this module is the seam:
+ * Inventory has no assistant endpoint today — there is no AI route in
+ * `Config/Routes.php` and no model credentials anywhere in the API. Rather than
+ * ship a screen that pretends to call one, this module is the seam:
  *
- *   - `requestSuggestions` calls the server endpoint when the deployment has one
- *     (`VITE_STOCK_JOURNAL_ASSIST=1`), and
+ *   - `requestSuggestions` posts to the endpoint `VITE_INVENTORY_AI_PATH` names,
+ *     the SAME variable the masters' AI panels read (services/uomAiApi.ts,
+ *     services/stockCategoryAi.ts, masters/warehouseGroups/warehouseGroupsAi.ts).
+ *     One seam for one service: a second flag is how half the screens end up
+ *     connected and the other half quietly are not.
  *   - `parsePrompt` / `suggestLocally` are a deterministic, on-device parser used
- *     otherwise.
+ *     until that endpoint exists.
  *
  * The local parser is not a language model and does not claim to be: it reads a
  * small, documented grammar ("transfer 10 of ABC from Main to Store 2"), and the
@@ -64,28 +67,48 @@ export class AssistUnavailableError extends Error {
   }
 }
 
+// The one Aicountly AI seam, read exactly as the masters' panels read it.
+const ASSISTANT_PATH = (import.meta.env.VITE_INVENTORY_AI_PATH ?? '').trim().replace(/^\/+/, '')
+
 /**
- * Whether a server-side assistant is configured. Off unless the deployment says
- * otherwise, so a build with no endpoint never fires a request that 404s.
+ * Whether a server-side assistant is configured. Off unless a build points
+ * VITE_INVENTORY_AI_PATH at a live endpoint, so a deployment without one never
+ * fires a request that 404s.
  */
 export function serverAssistEnabled(): boolean {
-  return import.meta.env.VITE_STOCK_JOURNAL_ASSIST === '1'
+  return ASSISTANT_PATH !== ''
 }
 
-const ASSIST_PATH = 'v1/inventory-documents/stock-journal/assist'
-
 /**
- * Ask the server. Company, branch and financial year are NOT in the body: the
- * API client puts the active scope on every request (`services/api.ts`
- * `setActiveScope`) and the server trusts its own session over anything the
- * browser sends, which is the same rule every other call here follows.
+ * Ask the service, in the shape it is already asked everywhere else:
+ * `{ message, context }` (services/uomAiApi.ts `askAssistant`).
+ *
+ * Company, branch and financial year are NOT in the body: the API client puts
+ * the active scope on every request (`services/api.ts` `setActiveScope`) and the
+ * server trusts its own session over anything the browser sends, which is the
+ * rule every other call here follows.
  */
 export async function requestSuggestions(body: AssistRequest, signal?: AbortSignal): Promise<AssistResponse> {
   if (!serverAssistEnabled()) throw new AssistUnavailableError()
+  const payload = {
+    message: body.prompt,
+    context: {
+      intent: 'stock_journal_lines',
+      document_type: 'STOCK_JOURNAL',
+      default_warehouse_id: body.default_warehouse_id,
+      document_date: body.document_date,
+    },
+  }
   try {
-    const res = await api.post<ItemResponse<{ suggestions: AssistSuggestion[]; warnings?: string[] }>>(ASSIST_PATH, body, { signal })
-    return { suggestions: res.data.suggestions ?? [], warnings: res.data.warnings ?? [], source: 'server' }
+    const res = await api.post<ItemResponse<{ suggestions?: AssistSuggestion[]; warnings?: string[] }>>(ASSISTANT_PATH, payload, { signal })
+    // A general-purpose assistant may answer something that is not a set of
+    // lines. Without suggestions there is nothing to put on the grid, and
+    // inventing some would be worse than saying so.
+    const suggestions = res.data?.suggestions ?? []
+    if (suggestions.length === 0 && !(res.data?.warnings?.length)) throw new AssistUnavailableError()
+    return { suggestions, warnings: res.data?.warnings ?? [], source: 'server' }
   } catch (err) {
+    if (err instanceof AssistUnavailableError) throw err
     if (isApiError(err) && (err.status === 404 || err.status === 405 || err.status === 501)) {
       throw new AssistUnavailableError()
     }
