@@ -399,6 +399,12 @@ export function FilterControl(props: FilterControlProps) {
             value={value}
             onChange={(next) => onChange(f.key, next)}
             placeholder={f.placeholder ?? f.label}
+            // Named explicitly, like every other control in the panel. The wrapping
+            // <label> cannot do it here: SearchBox renders a Clear button beside the
+            // input, so the label has two labelable descendants and associates with
+            // neither — leaving the box announced by its placeholder, which on this
+            // register is the sentence "Item, document no., batch, reference…".
+            aria-label={f.label}
             // The panel's grid is a row of `md` controls; a search box a
             // notch shorter than the select beside it is the kind of thing
             // nobody names but everybody sees.
