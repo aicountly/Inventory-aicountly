@@ -42,7 +42,22 @@ Manage through the API's read-only relay (`/api/manage/...`).
   status, stock health, Books integration, last reconciliation.
 - **Items** — list with search, filters, sort and paging; create / edit with
   alternate units and conversions, tracking flags, stock levels and opening
-  stock per warehouse (`/v1/items/{id}/openings`); soft delete.
+  stock per warehouse (`/v1/items/{id}/openings`); soft delete. **Bulk edit**
+  has a workspace of its own (`src/pages/items/bulkEdit`): one field across a
+  selection, with the selection carried across pages as explicit ids, a
+  field-aware editor over an allowlist narrower than the API's own, a plan that
+  separates "will update" from "already has this value" (the second is never
+  written again, and is stated in the rail, the preview and the confirmation),
+  preview-before-apply, a confirmation that names the same count the button
+  does, `POST /v1/items/bulk-update` at 500 rows a batch, and recent bulk edits
+  read back out of the audit trail (`item.bulk_update` rows regrouped by their
+  request id). HSN / SAC and the Books tax category are listed but read-only:
+  Smart Books owns them, the API refuses an Inventory-side change, and the
+  screen says so rather than collecting a value the server will reject. The
+  assistant rail is deterministic — it tidies what was typed and ticks the rows
+  that are empty, and never proposes a value or a tax classification. Templates
+  (field + filters, never item ids) live in `localStorage` per member and
+  company, like saved views.
 - **Masters** — item groups (tree), stock categories, brands, units of measure,
   warehouse groups, warehouses, locations and serial numbers (single and bulk
   registration). **Brands** has its own workspace: company-wide figures

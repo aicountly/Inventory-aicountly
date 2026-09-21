@@ -523,12 +523,6 @@ class ItemsController extends BaseController
         } catch (\Throwable $e) {
             return $this->failFromException($e);
         }
-        // A bulk edit always means a change, so there is no unchanged value to wave through.
-        foreach ($changes as $change) {
-            if (($owned = $this->booksOwnedStatutoryEdit($a['session'], $change)) !== null) {
-                return $this->booksOwnedFieldRefusal($owned);
-            }
-        }
         if ($changes === []) {
             return $this->failStructured(400, 'validation_error', 'Select at least one item and one field to change');
         }
@@ -546,6 +540,21 @@ class ItemsController extends BaseController
         $missing = array_values(array_diff(array_keys($changes), array_keys($existingRows)));
         if ($missing !== []) {
             return $this->failStructured(404, 'not_found', 'Some items no longer exist', ['item_ids' => $missing]);
+        }
+
+        /*
+         * Books owns HSN / SAC and the tax category, and this is checked against what each item
+         * actually holds — the same comparison the single-item PUT makes.
+         *
+         * It used to run before the rows were read, with no `existing` to compare against, so
+         * every value looked like a change from nothing and a request that merely restated an
+         * item's stored HSN was refused. A real change is still refused, one item is enough to
+         * refuse the batch, and nothing has been written at this point.
+         */
+        foreach ($changes as $itemId => $change) {
+            if (($owned = $this->booksOwnedStatutoryEdit($a['session'], $change, $existingRows[$itemId])) !== null) {
+                return $this->booksOwnedFieldRefusal($owned);
+            }
         }
 
         $now = date('Y-m-d H:i:s');
