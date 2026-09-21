@@ -293,9 +293,18 @@ export function RegisterFilterPanel({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 items-end gap-x-4 gap-y-3 sm:grid-cols-2 xl:grid-cols-4">
+      {/* Six across on a wide screen: a register with eight primary filters reads
+          as two tidy rows there and as four cramped ones at `xl`, and the extra
+          two tracks cost nothing to a register that declares four. */}
+      <div className="grid grid-cols-1 items-end gap-x-4 gap-y-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-6">
         {gridFilters.map(control)}
         {trailing ? <div className="min-w-0">{trailing}</div> : null}
+        {/* Clear all and Apply filters are NOT here. Both sides of this merge
+            were fixing the same complaint — the actions stranded mid-row under
+            whichever filter happened to land above them. `col-span-full` gave
+            them a row inside the grid; the toggle row below does the same job
+            and seats the checkboxes beside them, which is what the approved
+            layout asks for. Keeping both would render Apply filters twice. */}
       </div>
 
       {toggleFilters.length || onReset || onApply ? (

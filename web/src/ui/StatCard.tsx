@@ -50,6 +50,12 @@ export interface StatCardProps {
    */
   footer?: ReactNode
   /**
+   * A measured series behind the figure, drawn at the top-right in `metric`
+   * layout. Like `previous`, it is never invented: a card renders none when the
+   * endpoint sent none, and the layout does not move when it does.
+   */
+  sparkline?: ReactNode
+  /**
    * `stacked` (the default) is the dashboard tile: tile on top, then the label
    * and the figure. `metric` puts the tile beside them, which reads better in a
    * row of four wide cards over a table — the eye runs down one column of
@@ -148,6 +154,7 @@ export function StatCard({
   emphasizeNegative = false,
   to,
   footer,
+  sparkline,
   layout = 'stacked',
   ornament = false,
   className,
@@ -180,8 +187,12 @@ export function StatCard({
    * exactly where `footer` renders. A card carrying both would draw bars
    * behind a real control — so a card with a footer simply does not get them.
    * Nothing is lost: the bars mean nothing by design.
+   *
+   * It yields to `sparkline` for the stronger reason: that IS a measured
+   * series. Putting invented bars on the same card as a real plot invites the
+   * reader to take the bars for data too.
    */
-  const showOrnament = ornament && !footer
+  const showOrnament = ornament && !footer && !sparkline
 
   const delta = (
     <>
@@ -220,7 +231,17 @@ export function StatCard({
               </Badge>
             ) : null}
           </div>
-          <p className={cx(METRIC_VALUE_CLASS, valueClass)}>{value}</p>
+          <div className="flex items-end justify-between gap-2">
+            <p className={cx(METRIC_VALUE_CLASS, valueClass, 'min-w-0')}>{value}</p>
+            {/* Takes the delta's colour when there is one, so the line and the
+                arrow above it tell the same story; grey when there is nothing
+                to compare against. Screen only — the sheet carries the figure. */}
+            {sparkline ? (
+              <span className={cx('shrink-0 pb-0.5 print:hidden', pct != null ? deltaCls : 'text-gray-300')} aria-hidden>
+                {sparkline}
+              </span>
+            ) : null}
+          </div>
           {/* The hint truncates against the card edge, which would run it
               under the ornament. Reserve the corner the bars occupy. */}
           <div className={cx(METRIC_DELTA_ROW_CLASS, showOrnament && 'pr-12')}>{delta}</div>

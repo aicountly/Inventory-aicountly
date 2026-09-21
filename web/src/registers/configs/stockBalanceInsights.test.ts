@@ -62,7 +62,15 @@ function respond(rows: StockBalanceGridRow[], total = rows.length) {
 
 function insightsFor(rows: StockBalanceGridRow[], total = rows.length) {
   const { summary, response } = respond(rows, total)
-  const set = stockBalanceRegister.insights!(summary, response)
+  // Called the way ReportPage calls it: the third argument carries the filters
+  // the register was asked, which this register's insights do not read.
+  const set = stockBalanceRegister.insights!(summary, response, {
+    summary,
+    rows,
+    values: {},
+    query: {},
+    loading: false,
+  })
   const by = (key: string) => set.items.find((i) => i.key === key)!
   return { set, by }
 }

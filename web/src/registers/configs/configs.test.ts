@@ -267,7 +267,8 @@ describe('sort headers match what the endpoint can order by', () => {
     'stock-balances': ['Services/StockBalanceService.php', 'SORTABLE'],
     valuation: ['Controllers/Api/V1/ValuationController.php', 'SNAPSHOT_SORTABLE'],
     reservations: ['Controllers/Api/V1/ReservationsController.php', 'SORTABLE'],
-    'pending-quantities': ['Services/PendingQuantityService.php', 'SORTABLE'],
+    // The register's read side; PendingQuantityService owns the write lifecycle.
+    'pending-quantities': ['Services/PendingRegisterQuery.php', 'SORTABLE'],
     'reconciliation-runs': ['Controllers/Api/V1/ReconciliationController.php', 'SORTABLE'],
   }
 
