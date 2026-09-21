@@ -10,6 +10,8 @@ import { BreadcrumbHeader } from '../ui/shell/BreadcrumbHeader'
 import { PageShell } from '../ui/shell/PageShell'
 import { DocumentForm } from './DocumentForm'
 import { ConsumptionForm } from './consumption/ConsumptionForm'
+import { InwardChallanForm } from './grn/InwardChallanForm'
+import { MaterialReceiptForm } from './receipt/MaterialReceiptForm'
 import { StockTransferWorkspace } from './transfer/StockTransferWorkspace'
 import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS, statusTone } from './actions'
 import type { StatusTone } from './actions'
@@ -43,6 +45,18 @@ export function DocumentFormPage() {
   const spec = editing ? specForCode(existing.data?.document_type) : specForSlug(slug)
   const crumbs = [{ label: 'Documents', to: '/documents' }]
   const icon = documentTypeGlyph(editing ? existing.data?.document_type : spec?.code).icon
+  /**
+   * Some types have a workspace of their own rather than the shared editor —
+   * the ones an operator lives in all day, which earn a screen built around the
+   * way that day goes: a stock transfer, a consumption issue, a material
+   * receipt with its supplier paperwork, gate details, batches and serials,
+   * forty lines at a time. Everything underneath stays shared: the same draft
+   * model, the same payload, the same create / update / post calls and the same
+   * permission gates, which is why each branches here at the end of the gate
+   * chain rather than owning a route of its own. The list grows; deliberately
+   * uncounted so this comment does not go stale the next time it does.
+   */
+  const isReceipt = spec?.code === 'MATERIAL_RECEIPT'
 
   if (!editing && !spec) {
     return (
@@ -120,6 +134,9 @@ export function DocumentFormPage() {
       )
     }
     const initial = draftFromDocument(doc, spec)
+    // Some types have a screen of their own — transfer, consumption, receiving. Each brings its
+    // own page shell, breadcrumbs and header, so it is returned whole rather than wrapped by the
+    // one below. Every other native type still uses the shared DocumentForm.
     if (spec.code === 'STOCK_TRANSFER') {
       return (
         <StockTransferWorkspace
@@ -142,6 +159,29 @@ export function DocumentFormPage() {
           existingStatus={doc.status}
           existingVersion={doc.version}
           onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
+    if (spec.formKind === 'inward_challan') {
+      return (
+        <InwardChallanForm
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          status={doc.status}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
+    if (isReceipt) {
+      return (
+        <MaterialReceiptForm
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          currencyCode={doc.currency_code}
         />
       )
     }
@@ -169,6 +209,10 @@ export function DocumentFormPage() {
   if (s.code === 'CONSUMPTION') {
     return <ConsumptionForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
   }
+  if (s.formKind === 'inward_challan') {
+    return <InwardChallanForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
+  if (isReceipt) return <MaterialReceiptForm key={s.code} spec={s} />
   return (
     <PageShell paddingBottom>
       <BreadcrumbHeader

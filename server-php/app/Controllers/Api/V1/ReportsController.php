@@ -61,15 +61,45 @@ class ReportsController extends BaseController
         }, 100, 1000);
     }
 
-    /** GET reports/warehouse-stock — closing qty and value per item per warehouse. */
+    /** Report valuation methods the register may be run at. Mirrors ValuationController. */
+    public const REPORT_METHODS = ['FIFO', 'LIFO', 'WAC', 'AS_PER_MASTER'];
+
+    /**
+     * GET reports/warehouse-stock — closing qty and value per item per warehouse, with the
+     * live reserved / available buckets and the stock-health verdict.
+     *
+     * `method` is honoured here the same way the valuation register honours it: an unknown
+     * one is rejected rather than quietly valued at the item master, because a register
+     * headed "LIFO" showing FIFO figures is worse than one that refuses to run.
+     */
     public function warehouseStock()
     {
         return $this->report('warehouse_stock', function (array $ctx, array $p) {
+            $method = $this->methodParam();
+            if ($method === null) {
+                return $this->failStructured(422, 'validation_failed', 'method must be one of ' . implode(', ', self::REPORT_METHODS), ['allowed' => self::REPORT_METHODS]);
+            }
             $d = $this->dates(['to', 'as_of']);
-            $f = $this->commonFilters($p) + ['to' => $d['to'] ?? $d['as_of'], 'nonzero' => $this->flag('nonzero', false)];
+            $f = $this->commonFilters($p) + [
+                'to'      => $d['to'] ?? $d['as_of'],
+                'nonzero' => $this->flag('nonzero', false),
+                'method'  => $method,
+                'health'  => trim((string) ($this->request->getGet('health') ?? '')),
+            ];
 
             return $this->reports->warehouseStock((int) $ctx['cmp_id'], (int) $ctx['fy_id'], (int) $ctx['bo_id'], $f, $p['limit'], $p['offset']);
         }, 100, 1000, 'item_name');
+    }
+
+    /** Report method from ?method= ; null when invalid. Defaults to AS_PER_MASTER. */
+    private function methodParam(): ?string
+    {
+        $raw = strtoupper(trim((string) ($this->request->getGet('method') ?? '')));
+        if ($raw === '' || $raw === 'AS_PER_MASTER' || $raw === 'MASTER') {
+            return 'AS_PER_MASTER';
+        }
+
+        return \App\Services\InventorySettingsService::METHOD_ALIASES[$raw] ?? null;
     }
 
     /** GET reports/batch-stock — balances by batch with expiry. */

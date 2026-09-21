@@ -94,6 +94,7 @@ $routes->group('', ['namespace' => 'App\Controllers\Api', 'filter' => 'cors'], s
         $routes->post('serials/bulk', 'SerialsController::bulkCreate');
         $routes->post('bill-of-materials/(:num)/explode', 'BomController::explode/$1');
         $routes->get('items/form-options', 'ItemsController::formOptions');
+        $routes->get('items/summary', 'ItemsController::summary');
         $routes->get('items/search', 'ItemsController::search');
         $routes->get('items/by-barcode/(:segment)', 'ItemsController::byBarcode/$1');
         $routes->post('items/bulk-lookup', 'ItemsController::bulkLookup');
