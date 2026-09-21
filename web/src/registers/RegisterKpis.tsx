@@ -11,7 +11,8 @@ import type { StatCardSpec } from './RegisterConfig'
  * and NOTHING here derives either of them. Most Inventory report endpoints send
  * no comparative figures, so most registers declare none and StatCard falls back
  * to the hint line with no delta chip — which is the designed behaviour, not a
- * gap to fill. The registers that do show a delta (the pending register) have an
+ * gap to fill. The registers that do show a delta (the pending register, and the
+ * movement register through `/v1/stock-movements?summary=1`) have an
  * endpoint that measured the earlier figure; a percentage computed anywhere else
  * would be a number on a manager's screen that no server ever produced.
  */
