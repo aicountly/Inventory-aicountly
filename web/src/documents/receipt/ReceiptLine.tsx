@@ -76,7 +76,7 @@ function controls(props: ReceiptLineProps, describedBy: string | undefined) {
       invalid={invalid('warehouse')}
       aria-label={`Warehouse for line ${row}`}
       emptyLabel={headerWarehouseId ? 'Default' : 'Select warehouse'}
-      onChange={(id) => onPatch({ warehouse_id: id, batch_id: null, batch_no: null, batch_expiry: null, serials: [] })}
+      onChange={(id) => onPatch({ warehouse_id: id, batch_id: null, batch_no: null, expiry_date: null, serials: [] })}
     />
   )
 
@@ -88,7 +88,7 @@ function controls(props: ReceiptLineProps, describedBy: string | undefined) {
         value={line.batch_id}
         disabled={disabled}
         invalid={invalid('batch')}
-        onChange={(b) => onPatch({ batch_id: b?.batch_id ?? null, batch_no: b?.batch_no ?? null, batch_expiry: b?.expiry_date ?? null })}
+        onChange={(b) => onPatch({ batch_id: b?.batch_id ?? null, batch_no: b?.batch_no ?? null, expiry_date: b?.expiry_date ?? null })}
       />
     ) : (
       <span className="text-xs text-gray-400">{line.batch_no ?? 'Not tracked'}</span>
@@ -199,8 +199,8 @@ function controls(props: ReceiptLineProps, describedBy: string | undefined) {
       <span className="text-xs text-gray-400">—</span>
     )
 
-  const expiry = line.batch_expiry ? (
-    <span className="text-xs tabular-nums text-gray-700">{formatDate(line.batch_expiry)}</span>
+  const expiry = line.expiry_date ? (
+    <span className="text-xs tabular-nums text-gray-700">{formatDate(line.expiry_date)}</span>
   ) : (
     <span className="text-xs text-gray-400">—</span>
   )

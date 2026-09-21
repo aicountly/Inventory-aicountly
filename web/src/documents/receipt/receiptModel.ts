@@ -142,7 +142,7 @@ export function lineAmountOf(line: LineDraft): number | null {
 
 export type IssueLevel = 'error' | 'warning'
 
-export type HeaderField = 'document_date' | 'document_no' | 'default_warehouse_id' | 'party_name' | 'party_ref' | 'source_document_date' | 'lines'
+export type HeaderField = 'document_date' | 'document_no' | 'default_warehouse_id' | 'party_name' | 'party_ref' | 'reference_date' | 'lines'
 
 export type LineField = 'item' | 'warehouse' | 'batch' | 'unit' | 'qty' | 'rate' | 'serials'
 
@@ -206,8 +206,8 @@ export function validateReceipt(header: HeaderDraft, lines: LineDraft[], options
   if (!DATE_RE.test(header.document_date)) {
     headerIssues.push({ field: 'document_date', level: 'error', message: 'Enter the receipt date.' })
   }
-  if (header.source_document_date && !DATE_RE.test(header.source_document_date)) {
-    headerIssues.push({ field: 'source_document_date', level: 'error', message: 'Reference date must be a valid date.' })
+  if (header.reference_date && !DATE_RE.test(header.reference_date)) {
+    headerIssues.push({ field: 'reference_date', level: 'error', message: 'Reference date must be a valid date.' })
   }
   if (header.party_ref.trim() !== '' && (toNumber(header.party_ref) ?? 0) <= 0) {
     headerIssues.push({ field: 'party_ref', level: 'error', message: 'A Books ledger id is a positive number.' })

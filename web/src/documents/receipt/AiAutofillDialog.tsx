@@ -92,8 +92,8 @@ export function AiAutofillDialog({ open, onClose, toPatch, onApply }: AiAutofill
     ? ([
         ['Supplier', patch.header.party_name],
         ['Supplier ledger', patch.header.party_ref],
-        ['Reference no.', patch.header.source_document_no],
-        ['Reference date', patch.header.source_document_date],
+        ['Reference no.', patch.header.reference],
+        ['Reference date', patch.header.reference_date],
       ] as const).filter(([, value]) => Boolean(value))
     : []
 

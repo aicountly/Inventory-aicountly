@@ -125,9 +125,9 @@ export function extractionToPatch(extraction: ExtractedReceipt, options: PoDraft
 
   if (extraction.supplier_name?.trim()) header.party_name = extraction.supplier_name.trim()
   if (extraction.supplier_ref && Number(extraction.supplier_ref) > 0) header.party_ref = String(Math.floor(Number(extraction.supplier_ref)))
-  if (extraction.reference_no?.trim()) header.source_document_no = extraction.reference_no.trim()
-  if (isDate(extraction.reference_date)) header.source_document_date = extraction.reference_date
-  else if (isDate(extraction.document_date)) header.source_document_date = extraction.document_date
+  if (extraction.reference_no?.trim()) header.reference = extraction.reference_no.trim()
+  if (isDate(extraction.reference_date)) header.reference_date = extraction.reference_date
+  else if (isDate(extraction.document_date)) header.reference_date = extraction.document_date
 
   const lines: LineDraft[] = []
   const unmatched: ExtractionPatch['unmatched'] = []

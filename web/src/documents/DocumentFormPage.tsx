@@ -10,6 +10,7 @@ import { BreadcrumbHeader } from '../ui/shell/BreadcrumbHeader'
 import { PageShell } from '../ui/shell/PageShell'
 import { DocumentForm } from './DocumentForm'
 import { ConsumptionForm } from './consumption/ConsumptionForm'
+import { InwardChallanForm } from './grn/InwardChallanForm'
 import { MaterialReceiptForm } from './receipt/MaterialReceiptForm'
 import { StockTransferWorkspace } from './transfer/StockTransferWorkspace'
 import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS, statusTone } from './actions'
@@ -133,6 +134,9 @@ export function DocumentFormPage() {
       )
     }
     const initial = draftFromDocument(doc, spec)
+    // Some types have a screen of their own — transfer, consumption, receiving. Each brings its
+    // own page shell, breadcrumbs and header, so it is returned whole rather than wrapped by the
+    // one below. Every other native type still uses the shared DocumentForm.
     if (spec.code === 'STOCK_TRANSFER') {
       return (
         <StockTransferWorkspace
@@ -154,6 +158,18 @@ export function DocumentFormPage() {
           initial={initial}
           existingStatus={doc.status}
           existingVersion={doc.version}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
+    if (spec.formKind === 'inward_challan') {
+      return (
+        <InwardChallanForm
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          status={doc.status}
           onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
         />
       )
@@ -192,6 +208,9 @@ export function DocumentFormPage() {
   }
   if (s.code === 'CONSUMPTION') {
     return <ConsumptionForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
+  if (s.formKind === 'inward_challan') {
+    return <InwardChallanForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
   }
   if (isReceipt) return <MaterialReceiptForm key={s.code} spec={s} />
   return (

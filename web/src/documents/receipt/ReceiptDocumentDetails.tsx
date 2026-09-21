@@ -61,7 +61,7 @@ export function ReceiptDocumentDetails({
 }: ReceiptDocumentDetailsProps) {
   const dateError = issueFor(issues, 'document_date')
   const warehouseError = issueFor(issues, 'default_warehouse_id')
-  const refDateError = issueFor(issues, 'source_document_date')
+  const refDateError = issueFor(issues, 'reference_date')
   const partyError = issueFor(issues, 'party_ref')
 
   const poButton = (
@@ -169,11 +169,11 @@ export function ReceiptDocumentDetails({
           <Input
             id="mr_reference_no"
             size="md"
-            value={header.source_document_no}
+            value={header.reference}
             disabled={disabled}
             maxLength={64}
             placeholder="e.g. INV-4421"
-            onChange={(e) => onHeaderChange({ source_document_no: e.target.value })}
+            onChange={(e) => onHeaderChange({ reference: e.target.value })}
           />
         </FormField>
 
@@ -182,11 +182,11 @@ export function ReceiptDocumentDetails({
             id="mr_reference_date"
             type="date"
             size="md"
-            value={header.source_document_date}
+            value={header.reference_date}
             disabled={disabled}
             invalid={Boolean(refDateError)}
-            trailingIcon={header.source_document_date ? undefined : CalendarDays}
-            onChange={(e) => onHeaderChange({ source_document_date: e.target.value })}
+            trailingIcon={header.reference_date ? undefined : CalendarDays}
+            onChange={(e) => onHeaderChange({ reference_date: e.target.value })}
           />
         </FormField>
 

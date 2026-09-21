@@ -81,8 +81,8 @@ describe('applying a read invoice', () => {
     const patch = extractionToPatch(extraction, options)
     expect(patch.header.party_name).toBe('Shree Cement')
     expect(patch.header.party_ref).toBe('1042')
-    expect(patch.header.source_document_no).toBe('INV-4421')
-    expect(patch.header.source_document_date).toBe('2026-09-17')
+    expect(patch.header.reference).toBe('INV-4421')
+    expect(patch.header.reference_date).toBe('2026-09-17')
   })
 
   it('never moves the receipt date to the invoice date', () => {

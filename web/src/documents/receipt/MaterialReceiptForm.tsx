@@ -239,7 +239,7 @@ export function MaterialReceiptForm({ spec, documentId, initial, currencyCode }:
             warehouse_id: l.warehouse_id ?? row.default_warehouse_id ?? header.default_warehouse_id ?? null,
             batch_id: null,
             batch_no: null,
-            batch_expiry: null,
+            expiry_date: null,
             serials: [],
           }
         }),
@@ -260,7 +260,7 @@ export function MaterialReceiptForm({ spec, documentId, initial, currencyCode }:
         unit_id: null,
         batch_id: null,
         batch_no: null,
-        batch_expiry: null,
+        expiry_date: null,
         serials: [],
       })
     },
@@ -339,7 +339,7 @@ export function MaterialReceiptForm({ spec, documentId, initial, currencyCode }:
       patchHeader({
         metadata: {
           ...header.metadata,
-          purchase_order_id: receivable.order.po_id,
+          purchase_order_id: String(receivable.order.po_id),
           purchase_order_no: receivable.order.po_no,
         },
         ...(header.party_name.trim() === '' && receivable.order.supplier_name ? { party_name: receivable.order.supplier_name } : {}),
@@ -390,9 +390,9 @@ export function MaterialReceiptForm({ spec, documentId, initial, currencyCode }:
         revealProblems()
         return
       }
+      // toPayload carries the reference and its date for every type; this form
+      // adds nothing to what the shared mapping already sends.
       const payload = toPayload(header, lines, spec)
-      payload.source_document_no = header.source_document_no.trim() || null
-      payload.source_document_date = header.source_document_date || null
 
       setBusy(post ? 'post' : 'save')
       let id = savedId
