@@ -21,6 +21,8 @@ import { InventoryAssistantPanel } from './InventoryAssistantPanel'
 import { LineEditor, unitOptionsFrom } from './LineEditor'
 import { AddMultipleItemsModal } from './AddMultipleItemsModal'
 import { ImportLinesModal } from './ImportLinesModal'
+import { WriteOffAssistPanel } from './WriteOffAssistPanel'
+import type { StagedAttachment } from './AttachmentUploader'
 import { computeCostConfidence } from './lineFormInsights'
 import { CopyStockModal } from './openingStock/CopyStockModal'
 import { OpeningStockHeaderExtras } from './openingStock/OpeningStockHeaderExtras'
@@ -104,6 +106,7 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
   const [busy, setBusy] = useState<'save' | 'post' | null>(null)
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [pendingNav, setPendingNav] = useState<(() => void) | null>(null)
+  const [attachments, setAttachments] = useState<StagedAttachment[]>([])
   const linesWrapRef = useRef<HTMLDivElement>(null)
 
   const canOverride = can('stock.negative_override')
@@ -446,6 +449,15 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
         </FormGrid>
       </FormSectionCard>
 
+      {spec.code === 'WRITE_OFF' ? (
+        <WriteOffAssistPanel
+          warehouseId={header.default_warehouse_id}
+          attachments={attachments}
+          onAttachmentsChange={setAttachments}
+          onApplyReasonSuggestion={(s) => patchHeader({ reason_code: s.reasonCode, ...(s.remark ? { movement_reason: s.remark } : {}) })}
+          disabled={disabled}
+        />
+      ) : null}
       {spec.formKind === 'job_work_in' ? (
         <SettlementsPanel
           spec={spec}
