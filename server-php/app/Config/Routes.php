@@ -66,6 +66,8 @@ $routes->group('', ['namespace' => 'App\Controllers\Api', 'filter' => 'cors'], s
         // otherwise be read as ids by the loop's own `uom/(:num)`; the brands pair only matches
         // digits so there is no collision either way, but a literal segment that must win belongs
         // above the placeholder that could one day be widened.
+        $routes->get('stock-categories/summary', 'StockCategoriesController::summary');
+        $routes->post('stock-categories/bulk-status', 'StockCategoriesController::bulkStatus');
         $routes->get('brands/metrics', 'BrandsController::metrics');
         $routes->get('brands/sales', 'BrandsController::sales');
         $routes->get('uom/summary', 'UomController::summary');
