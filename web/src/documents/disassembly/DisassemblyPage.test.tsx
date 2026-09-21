@@ -131,7 +131,9 @@ async function pickItem(role: 'finished' | 'component', row: ItemSearchRow) {
   const input = within(region).getByPlaceholderText('Search item by name, SKU or barcode…')
   fireEvent.focus(input)
   fireEvent.change(input, { target: { value: row.item_name } })
-  const option = await within(region).findByRole('option', { name: new RegExp(row.item_name, 'i') })
+  // The suggestion list is rendered in a body portal (so the scrolling line table cannot clip
+  // it), which puts it outside the section the input lives in — hence `screen`, not `within`.
+  const option = await screen.findByRole('option', { name: new RegExp(row.item_name, 'i') })
   fireEvent.mouseDown(option)
 }
 

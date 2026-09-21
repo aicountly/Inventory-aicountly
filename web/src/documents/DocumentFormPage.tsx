@@ -11,22 +11,43 @@ import { BreadcrumbHeader } from '../ui/shell/BreadcrumbHeader'
 import { PageShell } from '../ui/shell/PageShell'
 import { DocumentForm } from './DocumentForm'
 import { BatchAdjustmentPage } from './batch/BatchAdjustmentPage'
+import { DeliveryChallanForm } from './challan/DeliveryChallanForm'
 import { ConsumptionForm } from './consumption/ConsumptionForm'
 import { DisassemblyPage } from './disassembly/DisassemblyPage'
 import { InwardChallanForm } from './grn/InwardChallanForm'
+import { JobWorkPage } from './jobwork/JobWorkPage'
 import { MaterialIssuePage } from './materialIssue/MaterialIssuePage'
 import { ProductionWorkspace } from './production/ProductionWorkspace'
 import { MaterialReceiptForm } from './receipt/MaterialReceiptForm'
+import { PhysicalStockCountPage } from './physicalCount/PhysicalStockCountPage'
 import { StockTransferWorkspace } from './transfer/StockTransferWorkspace'
 import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS, statusTone } from './actions'
 import type { StatusTone } from './actions'
 import { documentTypeGlyph } from './documentTypeIcon'
 import { draftFromDocument } from './formModel'
 import { specForCode, specForSlug, UNAVAILABLE_TYPES } from './registry'
+import { revaluationDraftFromDocument } from './revaluation/revaluationModel'
+import { StockRevaluationPage } from './revaluation/StockRevaluationPage'
+import type { FormKind } from './registry'
 import type { DocumentStatus } from './types'
 import './documents.css'
 
 const STATUS_BADGE_TONE: Record<StatusTone, BadgeTone> = { neutral: 'neutral', info: 'info', success: 'success', warning: 'warning', danger: 'danger' }
+
+/**
+ * Job work has its own screen.
+ *
+ * The generic editor renders every native type from one spec, which is right
+ * for the types whose entry is "a header and some lines". A job-work document
+ * is not one of those: it is half of a two-document workflow, and what an
+ * operator needs in front of them — what is still with the worker, how late it
+ * is, what this receipt settles — has no place in a form every other type
+ * shares. Consumption below is here for the same reason.
+ * See documents/jobwork/JobWorkPage.
+ */
+function isJobWork(formKind: FormKind): boolean {
+  return formKind === 'job_work_in' || formKind === 'job_work_out'
+}
 
 /** `/documents/new/:slug` and `/documents/:id/edit`. */
 export function DocumentFormPage() {
@@ -151,6 +172,10 @@ export function DocumentFormPage() {
         </PageShell>
       )
     }
+    // A revaluation has its own screen; the gates above (type, status, permission) have already run.
+    if (spec.formKind === 'revaluation') {
+      return <StockRevaluationPage key={doc.document_id} spec={spec} documentId={doc.document_id} initial={revaluationDraftFromDocument(doc)} existing={doc} />
+    }
     const initial = draftFromDocument(doc, spec)
     const reapproval = doc.status === 'APPROVED' || doc.status === 'PENDING_APPROVAL'
       ? <Notice kind="info">Saving changes returns the document to draft; it will need approval again.</Notice>
@@ -228,6 +253,20 @@ export function DocumentFormPage() {
         />
       )
     }
+    if (spec.formKind === 'delivery_challan') {
+      return (
+        <DeliveryChallanForm
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          status={doc.status}
+          documentNo={doc.document_no}
+          version={doc.version}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
     if (spec.formKind === 'inward_challan') {
       return (
         <InwardChallanForm
@@ -240,6 +279,18 @@ export function DocumentFormPage() {
         />
       )
     }
+    if (isJobWork(spec.formKind)) {
+      return (
+        <JobWorkPage
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          existing={doc}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
     if (isReceipt) {
       return (
         <MaterialReceiptForm
@@ -248,6 +299,21 @@ export function DocumentFormPage() {
           documentId={doc.document_id}
           initial={initial}
           currencyCode={doc.currency_code}
+        />
+      )
+    }
+    // The count has its own workspace; everything under it — the draft shape,
+    // the validation, the payload and the endpoints — is still shared.
+    if (spec.formKind === 'physical_count') {
+      return (
+        <PhysicalStockCountPage
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          status={doc.status}
+          documentNo={doc.document_no}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
         />
       )
     }
@@ -269,6 +335,9 @@ export function DocumentFormPage() {
   }
 
   const s = spec as NonNullable<typeof spec>
+  if (s.formKind === 'revaluation') {
+    return <StockRevaluationPage key={s.code} spec={s} />
+  }
   /*
    * Production has its own screen. Same route, same spec, same draft shape and the same
    * create / post calls — what differs is that the editor reads live availability, cost, batch
@@ -297,10 +366,21 @@ export function DocumentFormPage() {
   if (s.code === 'MATERIAL_ISSUE') {
     return <MaterialIssuePage key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
   }
+  // The delivery challan has its own screen: same draft model, same payload and
+  // the same create / post calls, with an entry experience built for dispatch.
+  if (s.formKind === 'delivery_challan') {
+    return <DeliveryChallanForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
   if (s.formKind === 'inward_challan') {
     return <InwardChallanForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
   }
+  if (isJobWork(s.formKind)) {
+    return <JobWorkPage key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
   if (isReceipt) return <MaterialReceiptForm key={s.code} spec={s} />
+  if (s.formKind === 'physical_count') {
+    return <PhysicalStockCountPage key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
   return (
     <PageShell paddingBottom>
       <BreadcrumbHeader

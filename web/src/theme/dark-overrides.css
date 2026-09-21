@@ -169,32 +169,34 @@
 .dark .bg-emerald-100 {
   background-color: rgb(6 78 59 / 0.3);
 }
+/* The -100 step of each ramp at rest: a touch stronger than the -50 wash, the
+   same way emerald-100 is above — the badge behind a small status glyph, the
+   insight severity dots, and the tiles that sit on their own tint. The HOVER of
+   a -50 wash is a separate case and is declared further down, one notch
+   stronger again; only sky has no entry there, so it keeps its hover here. */
+.dark .bg-amber-100 {
+  background-color: rgb(120 53 15 / 0.3);
+}
+.dark .bg-red-100 {
+  background-color: rgb(127 29 29 / 0.3);
+}
+.dark .bg-sky-100,
+.dark .hover\:bg-sky-100:hover {
+  background-color: rgb(12 74 110 / 0.3);
+}
 .dark .bg-violet-100 {
   background-color: rgb(76 29 149 / 0.3);
 }
 .dark .bg-amber-50 {
   background-color: rgb(120 53 15 / 0.22);
 }
-/* The -100 step of each ramp: a touch stronger than the -50 wash, the same way
-   emerald-100 is above — used by the insight severity dots and by the quick-link
-   tiles, whose hover is a deepening of their own tint rather than a grey. */
-.dark .bg-amber-100,
-.dark .hover\:bg-amber-100:hover {
-  background-color: rgb(120 53 15 / 0.3);
-}
-.dark .bg-red-100 {
-  background-color: rgb(127 29 29 / 0.3);
-}
-.dark .hover\:bg-sky-100:hover {
-  background-color: rgb(12 74 110 / 0.3);
-}
-.dark .hover\:bg-violet-100:hover {
-  background-color: rgb(76 29 149 / 0.3);
-}
 .dark .bg-red-50,
 .dark .hover\:bg-red-50:hover,
 .dark .focus\:bg-red-50:focus {
   background-color: rgb(127 29 29 / 0.22);
+}
+.dark .hover\:bg-violet-50:hover {
+  background-color: rgb(76 29 149 / 0.3);
 }
 .dark .bg-sky-50 {
   background-color: rgb(12 74 110 / 0.22);
@@ -206,6 +208,11 @@
 .dark .bg-violet-50\/70,
 .dark .hover\:bg-violet-50\/70:hover {
   background-color: rgb(76 29 149 / 0.16);
+}
+/* The hover step of the same accent, a touch stronger so the affordance is
+   still visible on a dark card — violet-50 → violet-100 in light mode. */
+.dark .hover\:bg-violet-100:hover {
+  background-color: rgb(76 29 149 / 0.34);
 }
 .dark .bg-rose-50 {
   background-color: rgb(136 19 55 / 0.22);
@@ -317,7 +324,8 @@
 }
 .dark .border-violet-100,
 .dark .border-violet-200,
-.dark .border-violet-300 {
+.dark .border-violet-300,
+.dark .hover\:border-violet-200:hover {
   border-color: rgb(91 33 182 / 0.5);
 }
 /* A hover border is meant to be visibly brighter than the one it replaces, so
