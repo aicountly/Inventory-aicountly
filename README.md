@@ -59,8 +59,14 @@ Manage through the API's read-only relay (`/api/manage/...`).
 
 - **Documents** — list, detail (lines with valuation, accounting effects,
   approvals, print snapshot) and create / edit forms for every native type;
-  packing lists, pending quantities and reservations. **Job work** has a
-  workspace of its own (`src/documents/jobwork`): one screen for both
+  packing lists, pending quantities and reservations. **Material Receipt** has
+  a workspace of its own (`src/documents/receipt`): supplier and challan
+  reference, gate / vehicle / QC details, a line grid with batch, serial and
+  expiry, barcode scanning, paste-or-import of many lines at once, live totals
+  and a pinned action bar. Its purchase-order, invoice-reading and attachment
+  workflows read other products over live APIs and stay visible-but-disabled
+  until the matching relay exists (`VITE_FEATURE_RECEIPT_*` in `.env.example`).
+  **Job work** has one too (`src/documents/jobwork`): a single screen for both
   directions, with the position still out with job workers, what is late, a
   settlement panel that turns open dispatch quantities into lines, live
   availability on a dispatch, and batch / serial allocation per line.
@@ -79,7 +85,11 @@ Manage through the API's read-only relay (`/api/manage/...`).
   a sum of the page on screen.
 - **Reports** — stock summary, warehouse stock, batch stock, serial numbers,
   stock ageing, movement analysis, near expiry and replenishment, each with
-  URL-persisted filters and CSV export (`src/reports/configs`).
+  URL-persisted filters and CSV export (`src/reports/configs`). Warehouse stock
+  is the worked example of the full register treatment
+  (`src/registers/warehouse/`): KPI cards, saved views, a stock-health verdict
+  per row from the item's own levels, the live reserved / available buckets, and
+  an intelligence rail — all off the one response the rows came from.
 - **Reconciliation** — Inventory's closing valuation against the Books
   Stock-in-Hand ledger: the headline figures for the latest completed run, the
   run history with its trend, the bucket breakdown that explains a gap

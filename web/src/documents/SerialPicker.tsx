@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
 import { Modal } from '../components/Modal'
 import { Notice } from '../components/Notice'
 import { errorMessage, isAbortError } from '../services/api'
@@ -18,13 +19,22 @@ interface SerialPickerProps {
   /** Base quantity of the line, to show n / required. */
   requiredCount: number
   disabled?: boolean
+  /**
+   * Replaces the default trigger button.
+   *
+   * The picker's behaviour — which serials it offers, the registration of new
+   * ones, the count against the line quantity — is the same wherever it is
+   * used; only the button belongs to the grid it sits in. A caller with its own
+   * design language renders that button and calls `open`.
+   */
+  renderTrigger?: (open: () => void, state: { count: number; required: number; mismatch: boolean }) => ReactNode
 }
 
 /**
  * Serial numbers for a line. Issues pick from `in_stock` serials at the warehouse; receipts
  * pick registered `expected` serials or register new ones through `POST /v1/serials/bulk`.
  */
-export function SerialPicker({ itemId, itemName, warehouseId, batchId, direction, value, onChange, requiredCount, disabled }: SerialPickerProps) {
+export function SerialPicker({ itemId, itemName, warehouseId, batchId, direction, value, onChange, requiredCount, disabled, renderTrigger }: SerialPickerProps) {
   const [open, setOpen] = useState(false)
   const [rows, setRows] = useState<SerialRow[]>([])
   const [loading, setLoading] = useState(false)
@@ -97,10 +107,14 @@ export function SerialPicker({ itemId, itemName, warehouseId, batchId, direction
 
   return (
     <>
-      <button type="button" className={`btn btn-sm${mismatch ? ' btn-danger' : ''}`} onClick={() => setOpen(true)} disabled={disabled}>
-        Serials {value.length}
-        {requiredCount > 0 ? ` / ${requiredCount}` : ''}
-      </button>
+      {renderTrigger ? (
+        renderTrigger(() => setOpen(true), { count: value.length, required: requiredCount, mismatch })
+      ) : (
+        <button type="button" className={`btn btn-sm${mismatch ? ' btn-danger' : ''}`} onClick={() => setOpen(true)} disabled={disabled}>
+          Serials {value.length}
+          {requiredCount > 0 ? ` / ${requiredCount}` : ''}
+        </button>
+      )}
       <Modal open={open} title={`Serial numbers · ${itemName}`} onClose={() => setOpen(false)} size="lg" busy={registering} footer={
         <>
           <button type="button" className="btn" onClick={() => setOpen(false)}>

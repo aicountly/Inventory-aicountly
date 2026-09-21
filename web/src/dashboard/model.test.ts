@@ -225,13 +225,24 @@ describe('buildKpiCards', () => {
 describe('warehouseSeries', () => {
   const summary: WarehouseStockSummary = {
     rows: 3,
+    items: 3,
+    warehouses: 3,
+    active_warehouses: 2,
     closing_qty: 300,
     closing_value: 1000,
+    reserved_qty: 0,
+    available_qty: 300,
     by_warehouse: [
-      { warehouse_id: 2, warehouse_name: 'Pune', closing_qty: 100, closing_value: 250 },
-      { warehouse_id: 1, warehouse_name: 'Mumbai', closing_qty: 150, closing_value: 600 },
-      { warehouse_id: null, warehouse_name: null, closing_qty: 50, closing_value: 150 },
+      { warehouse_id: 2, warehouse_name: 'Pune', closing_qty: 100, closing_value: 250, items: 1 },
+      { warehouse_id: 1, warehouse_name: 'Mumbai', closing_qty: 150, closing_value: 600, items: 1 },
+      { warehouse_id: null, warehouse_name: null, closing_qty: 50, closing_value: 150, items: 1 },
     ],
+    health: { negative: 0, out: 0, reorder: 0, low: 0, overstocked: 0, healthy: 3 },
+    health_items: { negative: 0, out: 0, reorder: 0, low: 0, overstocked: 0, healthy: 3 },
+    health_filter: null,
+    method: 'AS_PER_MASTER',
+    live_buckets: true,
+    currency: 'INR',
     to: ASOF,
   }
 
