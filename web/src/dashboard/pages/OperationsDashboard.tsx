@@ -288,6 +288,7 @@ export function OperationsDashboard({ scope, view }: DashboardSectionProps) {
         >
           <ColumnChart
             categories={hourly.categories}
+            categoryLabel="Hour"
             unit="documents"
             truncatedNote={truncatedNote}
             caption={`Documents posted by hour on ${data ? formatDate(data.date) : 'the selected date'}, split into receipts, issues, transfers and adjustments. Counts documents, not lines.`}

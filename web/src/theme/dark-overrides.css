@@ -168,6 +168,9 @@
 .dark .bg-emerald-100 {
   background-color: rgb(6 78 59 / 0.3);
 }
+.dark .bg-violet-100 {
+  background-color: rgb(76 29 149 / 0.3);
+}
 .dark .bg-amber-50 {
   background-color: rgb(120 53 15 / 0.22);
 }
@@ -195,7 +198,8 @@
 .dark .bg-sky-50 {
   background-color: rgb(12 74 110 / 0.22);
 }
-.dark .bg-violet-50 {
+.dark .bg-violet-50,
+.dark .hover\:bg-violet-50:hover {
   background-color: rgb(76 29 149 / 0.22);
 }
 .dark .bg-violet-50\/70,
@@ -231,8 +235,9 @@
 .dark .bg-red-50\/40 {
   background-color: rgb(127 29 29 / 0.09);
 }
-/* The guidance panels under the recalculation register, and the faint tint that
-   marks a failed row in it. Same fractions as their light counterparts. */
+/* The guidance panels under the recalculation register, the faint tint that
+   marks a failed row in it, and the one that marks a warned row on a stock
+   transfer. Same fractions as their light counterparts. */
 .dark .bg-sky-50\/40 {
   background-color: rgb(12 74 110 / 0.09);
 }
@@ -242,6 +247,9 @@
 .dark .bg-violet-50\/40 {
   background-color: rgb(76 29 149 / 0.09);
 }
+.dark .bg-amber-50\/40 {
+  background-color: rgb(120 53 15 / 0.09);
+}
 .dark .bg-red-50\/30 {
   background-color: rgb(127 29 29 / 0.07);
 }
@@ -250,6 +258,7 @@
 .dark .border-emerald-200 {
   border-color: rgb(6 95 70 / 0.5);
 }
+.dark .border-amber-100,
 .dark .border-amber-200,
 .dark .border-amber-300,
 .dark .hover\:border-amber-300:hover {
@@ -327,6 +336,7 @@
 }
 .dark .text-violet-600,
 .dark .text-violet-700,
+.dark .text-violet-800,
 .dark .hover\:text-violet-700:hover,
 .dark .hover\:text-violet-800:hover {
   color: rgb(196 181 253);
