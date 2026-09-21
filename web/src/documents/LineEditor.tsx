@@ -1,8 +1,9 @@
-import { Copy, Trash2 } from 'lucide-react'
+import { Copy, Plus, Trash2 } from 'lucide-react'
 import type { FormOptionWarehouse } from '../services/items'
 import type { ItemSearchRow, ItemUnitRow } from '../services/lookupApi'
 import type { AvailabilityCheckResult } from '../services/stockApi'
 import { shortBy } from '../services/stockApi'
+import { Button } from '../ui/Button'
 import { formatQty } from '../utils/format'
 import { BatchPicker } from './BatchPicker'
 import { LineItemPicker } from './LineItemPicker'
@@ -22,6 +23,12 @@ interface LineEditorProps {
   checking: boolean
   offendingKeys: ReadonlySet<string>
   disabled?: boolean
+  /** Item box of this line gets focus on the next render — set after "Scan barcode" or Ctrl+Enter adds a blank line. */
+  autoFocusKey?: string | null
+  /** Briefly highlighted after being added in bulk (scan, import, copy, add-multiple). */
+  flashKeys?: ReadonlySet<string>
+  /** Shares item + warehouse + batch with another line — flagged, never blocked. */
+  duplicateKeys?: ReadonlySet<string>
 }
 
 export function unitOptionsFrom(row: Pick<ItemSearchRow, 'units' | 'unit_id' | 'unit_symbol'>): UnitOption[] {
@@ -46,7 +53,7 @@ function valuationLabel(spec: DocumentTypeSpec): string {
 const ORIGIN_TAG: Record<string, string> = { bom: 'BOM', settlement: 'Settlement', deferred: 'Purchase', count: 'Count' }
 
 /** Editable document lines. Column set follows the type spec; each row keeps its own pickers. */
-export function LineEditor({ spec, header, lines, onChange, warehouses, availability, checking, offendingKeys, disabled }: LineEditorProps) {
+export function LineEditor({ spec, header, lines, onChange, warehouses, availability, checking, offendingKeys, disabled, autoFocusKey, flashKeys, duplicateKeys }: LineEditorProps) {
   const isTransfer = spec.lineMode === 'transfer'
   const isCount = spec.formKind === 'physical_count'
   const showDirection = spec.lineMode === 'by_line' && !isCount
@@ -142,20 +149,22 @@ export function LineEditor({ spec, header, lines, onChange, warehouses, availabi
             {showValuation ? <th className="align-right">{valuationLabel(spec)}</th> : null}
             <th>Serials</th>
             {showAvailability ? <th>Availability</th> : null}
-            <th className="align-right">Actions</th>
+            <th aria-label="Remove" />
           </tr>
         </thead>
         <tbody>
           {lines.map((line, i) => {
             const dir = effectiveDirection(line)
             const diff = isCount ? countDifference(line.book_qty, line.physical_qty) : null
-            const cls = [offendingKeys.has(line.key) ? 'line-offending' : '', line.origin !== 'manual' ? 'line-auto' : ''].filter(Boolean).join(' ') || undefined
+            const isDuplicate = duplicateKeys?.has(line.key) ?? false
+            const cls = ['table-row-hover', offendingKeys.has(line.key) ? 'line-offending' : '', line.origin !== 'manual' ? 'line-auto' : '', flashKeys?.has(line.key) ? 'line-flash' : ''].filter(Boolean).join(' ') || undefined
             return (
               <tr key={line.key} className={cls}>
                 <td className="muted">{i + 1}</td>
                 <td className="item-cell">
-                  <LineItemPicker itemId={line.item_id} itemName={line.item_name} itemSku={line.item_sku} warehouseId={outWarehouse(line) ?? header.default_warehouse_id} onPick={(row) => pick(line, row)} onClear={() => clear(line)} disabled={disabled} invalid={offendingKeys.has(line.key)} />
+                  <LineItemPicker itemId={line.item_id} itemName={line.item_name} itemSku={line.item_sku} warehouseId={outWarehouse(line) ?? header.default_warehouse_id} onPick={(row) => pick(line, row)} onClear={() => clear(line)} disabled={disabled} invalid={offendingKeys.has(line.key)} autoFocus={autoFocusKey === line.key} />
                   {line.origin !== 'manual' && ORIGIN_TAG[line.origin] ? <span className="line-tag">{ORIGIN_TAG[line.origin]}</span> : null}
+                  {isDuplicate ? <span className="line-tag line-tag-warning" title="Same item, warehouse and batch as another line">Duplicate</span> : null}
                   {line.description ? <div className="hint">{line.description}</div> : null}
                 </td>
                 {isTransfer ? (
@@ -244,11 +253,11 @@ export function LineEditor({ spec, header, lines, onChange, warehouses, availabi
                 {showAvailability ? <td>{availabilityCell(line)}</td> : null}
                 <td className="action">
                   <span className="row-actions">
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => duplicate(line.key)} disabled={disabled} title="Duplicate line" aria-label={`Duplicate line ${i + 1}`}>
-                      <Copy className="w-3.5 h-3.5" aria-hidden />
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => duplicate(line.key)} disabled={disabled} aria-label={`Duplicate line ${i + 1}`} title="Duplicate line">
+                      <Copy className="h-3.5 w-3.5" aria-hidden />
                     </button>
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => remove(line.key)} disabled={disabled} title="Delete line" aria-label={`Delete line ${i + 1}`}>
-                      <Trash2 className="w-3.5 h-3.5" aria-hidden />
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => remove(line.key)} disabled={disabled} aria-label={`Remove line ${i + 1}`} title="Remove line">
+                      <Trash2 className="h-3.5 w-3.5" aria-hidden />
                     </button>
                   </span>
                 </td>
@@ -258,9 +267,9 @@ export function LineEditor({ spec, header, lines, onChange, warehouses, availabi
         </tbody>
       </table>
       <div className="lines-footer">
-        <button type="button" className="btn btn-sm" onClick={add} disabled={disabled}>
-          + Add line
-        </button>
+        <Button type="button" variant="secondary" size="sm" icon={Plus} onClick={add} disabled={disabled} kbd="Ctrl + Enter">
+          Add line
+        </Button>
         <div className="lines-totals">
           <span>
             Lines <strong>{totals.lines}</strong>
