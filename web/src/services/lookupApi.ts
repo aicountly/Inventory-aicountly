@@ -102,6 +102,15 @@ export const lookupApi = {
     return res.data
   },
 
+  /** Exact UPC / SKU match for a keyboard-wedge scan: `GET /v1/items/by-barcode/{code}`. 404 when nothing matches. */
+  async byBarcode(code: string, options: { warehouseId?: number | null; signal?: AbortSignal } = {}): Promise<ItemSearchRow> {
+    const res = await api.get<ItemResponse<ItemSearchRow>>(`v1/items/by-barcode/${encodeURIComponent(code)}`, {
+      query: { warehouse_id: options.warehouseId ?? undefined },
+      signal: options.signal,
+    })
+    return res.data
+  },
+
   async warehouses(signal?: AbortSignal): Promise<WarehouseRow[]> {
     const res = await api.list<WarehouseRow>('v1/warehouses', { limit: 1000, status: 'active', sort: 'warehouse_name' }, { signal })
     return res.data

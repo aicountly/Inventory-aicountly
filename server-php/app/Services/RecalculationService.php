@@ -33,12 +33,19 @@ class RecalculationService
         $this->audit ??= new AuditService();
     }
 
-    public function enqueue(int $cmpId, ?int $fyId, ?int $itemId, string $fromDate, string $trigger, ?int $triggerDocumentId, ?string $actor, bool $dryRun = false): int
+    /**
+     * `$remarks` is the reason a person gave for restating historical valuation.
+     * Optional and last so every existing caller — the posting engine, the reversal
+     * path, the carry-forward — is unchanged: those enqueue with a trigger_kind that
+     * already IS the reason, and have no person to quote.
+     */
+    public function enqueue(int $cmpId, ?int $fyId, ?int $itemId, string $fromDate, string $trigger, ?int $triggerDocumentId, ?string $actor, bool $dryRun = false, ?string $remarks = null): int
     {
         $db = \Config\Database::connect();
         $db->table('inv_valuation_recalc_jobs')->insert([
             'cmp_id' => $cmpId, 'fy_id' => $fyId, 'item_id' => $itemId, 'from_date' => $fromDate, 'trigger_kind' => $trigger,
-            'trigger_document_id' => $triggerDocumentId, 'status' => 'QUEUED', 'dry_run' => $dryRun ? 1 : 0, 'requested_by' => $actor, 'created_at' => date('Y-m-d H:i:s'),
+            'trigger_document_id' => $triggerDocumentId, 'status' => 'QUEUED', 'dry_run' => $dryRun ? 1 : 0, 'requested_by' => $actor,
+            'remarks' => $remarks, 'created_at' => date('Y-m-d H:i:s'),
         ]);
 
         return (int) $db->insertID();
