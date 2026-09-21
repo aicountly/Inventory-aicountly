@@ -48,6 +48,12 @@ Warehouse group fields: `grp_name` (required, unique per company), `grp_code` (o
 `GET /v1/batches/summary` takes the same filters (paging is ignored) and returns `{total, active, expiring_soon, expired, inactive, total_on_hand, with_stock, zero_stock, previous_total, comparison_days, near_expiry_days, by_status{}, expiry_buckets{expired, within_30, days_31_90, days_91_180, beyond_180, no_expiry}}`. `previous_total` is how many of the matching batches already existed `comparison_days` ago.
 
 `POST /v1/batches/bulk-update {batch_ids:[…], status}` sets one status across a selection (max 500) in a single transaction, writing one `batch.bulk_update` audit entry per batch that actually changed → `{updated, unchanged, status, batch_ids}`.
+#### Stock categories — two extra reads and a bulk write
+`/v1/item-groups` and `/v1/stock-categories` return `item_count` on every row, counted for the whole page in one grouped query, never a count per row. `GET /v1/stock-categories?sort=item_count&order=desc` ranks by that same count over the whole company rather than over the page that was fetched.
+
+`GET /v1/stock-categories/summary` → `{total, active, inactive, created_this_month, most_used{stock_cat_id, cat_name, item_count}|null, uncategorised_items}`. Counted over the whole company, NOT over the caller's filters: these are the figures above the list, and a reader who searches or turns a page must not watch them move. `most_used` is `null` while nothing is categorised — the endpoint says so rather than naming a category that carries nothing.
+
+`POST /v1/stock-categories/bulk-status {ids:[…], is_active:0|1}` → `{updated, is_active}`. Only rows whose status actually moves are touched, so an unchanged row keeps its `updated_at`, and each row that does move writes its own `stock_category.activate` / `.deactivate` audit entry with before / after.
 
 `POST /v1/bill-of-materials/{id}/explode {production_qty, warehouse_id?, finished_rate?, document_date?, narration?}` → the ready-to-create PRODUCTION payload (component OUT lines scaled by `production_qty / yield_qty` plus scrap %, by-product IN lines, finished IN line at `finished_rate`, `metadata{bom_id, production_qty, finished_rate, warehouse_id}`). Nothing is saved.
 
