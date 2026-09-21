@@ -139,6 +139,7 @@ $routes->group('', ['namespace' => 'App\Controllers\Api', 'filter' => 'cors'], s
         $routes->get('valuation/recalculations/(:num)', 'ValuationController::recalcJob/$1');
         $routes->post('valuation/recalculations/(:num)/run', 'ValuationController::runRecalc/$1');
         $routes->get('valuation/revisions', 'ValuationController::revisions');
+        $routes->get('valuation/revisions/summary', 'ValuationController::revisionsSummary');
         $routes->post('valuation/revisions/ack', 'ValuationController::ackRevisions');
         $routes->get('valuation/carry-forward', 'ValuationController::carryForwardPreview');
         $routes->post('valuation/carry-forward', 'ValuationController::carryForward');
