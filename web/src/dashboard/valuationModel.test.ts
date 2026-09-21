@@ -144,6 +144,56 @@ describe('ageing', () => {
     expect(view.buckets).toHaveLength(0)
     expect(view.compositionInvalid).toBe(false)
   })
+
+  it('splits by quantity when asked, and swaps which measure is the headline', () => {
+    const value = ageingView(ageing(), '2026-09-15', 'value')
+    const qty = ageingView(ageing(), '2026-09-15', 'quantity')
+
+    expect(value.buckets[0].display).toContain('₹')
+    expect(qty.buckets[0].display).toContain('units')
+    // 600 of 1,000 units are in the newest bucket, but only 62% of the value.
+    expect(qty.buckets[0].share).toBeCloseTo(60, 0)
+    expect(value.buckets[0].share).not.toBeCloseTo(60, 0)
+    // Neither measure is hidden: the one that is not the headline is the sub.
+    expect(qty.buckets[0].sub).toContain('₹')
+    expect(value.buckets[0].sub).toContain('units')
+  })
+
+  it('reports the centre figure the slices actually add to', () => {
+    // With a negative bucket excluded, the report's own total and the base the
+    // shares were taken over differ — and the donut's centre must be the base,
+    // or the slices do not add to the number printed inside them.
+    const withNegative = ageing({
+      // What the report would really send: the negative bucket is inside its
+      // own total, so the two figures genuinely part company.
+      total_value: 4_812_000,
+      buckets: { ...ageing().buckets, '180_plus': { qty: -10, value: -50_000 } } as StockAgeingSummary['buckets'],
+    })
+    const view = ageingView(withNegative, '2026-09-15')
+    expect(view.compositionInvalid).toBe(true)
+    expect(view.positiveTotal).toBe(4_862_000)
+    expect(view.reportedTotal).toBe(4_812_000)
+    // The centre reports the base the slices were taken over, not the report's
+    // total — otherwise the slices do not add to the number printed inside them.
+    expect(view.totalDisplay).toBe('₹48.62 L')
+    expect(view.totalLabel).toBe('Total value')
+  })
+
+  it('judges a bucket negative by the measure being shown', () => {
+    // A bucket can be positive in value and negative in quantity; which buckets
+    // are exceptions genuinely depends on the toggle.
+    const mixed = ageing({
+      buckets: { ...ageing().buckets, '180_plus': { qty: -5, value: 1_000 } } as StockAgeingSummary['buckets'],
+    })
+    expect(ageingView(mixed, '2026-09-15', 'value').negatives).toHaveLength(0)
+    expect(ageingView(mixed, '2026-09-15', 'quantity').negatives).toHaveLength(1)
+  })
+
+  it('labels the quantity centre without inventing a currency for it', () => {
+    const view = ageingView(ageing(), '2026-09-15', 'quantity')
+    expect(view.totalLabel).toBe('Total quantity')
+    expect(view.totalDisplay).not.toContain('₹')
+  })
 })
 
 describe('movement thresholds', () => {

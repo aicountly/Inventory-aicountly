@@ -1,6 +1,6 @@
 import { ActiveBadge, StatusBadge, statusBadgeLabel } from '../components/StatusBadge'
-import { batchesApi, brandsApi, itemGroupsApi, locationsApi, stockCategoriesApi, uomApi, warehouseGroupsApi, warehousesApi, BATCH_STATUSES, LOCATION_TYPES, WAREHOUSE_TYPES } from '../services/masters'
-import type { Batch, Brand, ItemGroup, Location, StockCategory, Uom, Warehouse, WarehouseGroup } from '../services/masters'
+import { batchesApi, itemGroupsApi, locationsApi, stockCategoriesApi, warehouseGroupsApi, warehousesApi, BATCH_STATUSES, LOCATION_TYPES, WAREHOUSE_TYPES } from '../services/masters'
+import type { Batch, ItemGroup, Location, StockCategory, Warehouse } from '../services/masters'
 import { formatDate, formatDateTime, formatInt, formatQty, humanize } from '../utils/format'
 import { isPickedItem } from './formValues'
 import { buildTree, descendantIds } from './tree'
@@ -100,101 +100,33 @@ export const stockCategoriesConfig: MasterConfig<StockCategory> = {
   ],
 }
 
-export const brandsConfig: MasterConfig<Brand> = {
-  slug: 'brands',
-  permissionSlug: 'brands',
-  title: 'Brands',
-  singular: 'Brand',
-  idKey: 'brand_id',
-  nameOf: (r) => r.brand_name,
-  api: brandsApi,
-  defaultSort: 'brand_name',
-  needsFormOptions: false,
-  columns: [
-    { key: 'brand_name', header: 'Brand', sortKey: 'brand_name', render: (r) => <strong>{r.brand_name}</strong> },
-    { key: 'brand_alias', header: 'Alias', sortKey: 'brand_alias' },
-    activeColumn<Brand>(),
-    updatedAt<Brand>(),
-  ],
-  fields: [
-    { name: 'brand_name', label: 'Brand name', type: 'text', required: true, maxLength: 255, span: 2 },
-    { name: 'brand_alias', label: 'Alias', type: 'text', maxLength: 64 },
-    { name: 'is_active', label: 'Active', type: 'checkbox' },
-  ],
-}
+/*
+ * No brandsConfig.
+ *
+ * Brands outgrew the generic master screen — an item count worth clicking
+ * through, a revenue column owned by another product, a create form with more
+ * than three fields — and is rendered by `pages/masters/brands/BrandsPage.tsx`.
+ * A config left here would be a second, silent definition of that screen: a
+ * column added to it would change nothing, which is exactly the kind of edit
+ * that gets made twice before anyone notices.
+ */
 
-export const uomConfig: MasterConfig<Uom> = {
-  slug: 'uom',
-  permissionSlug: 'uom',
-  title: 'Units of measure',
-  singular: 'Unit',
-  idKey: 'unit_id',
-  nameOf: (r) => r.unit_name,
-  api: uomApi,
-  defaultSort: 'unit_name',
-  needsFormOptions: false,
-  columns: [
-    { key: 'unit_name', header: 'Unit', sortKey: 'unit_name', render: (r) => <strong>{r.unit_name}</strong> },
-    { key: 'unit_symbol', header: 'Symbol', sortKey: 'unit_symbol' },
-    { key: 'print_name', header: 'Print name', sortKey: 'print_name' },
-    { key: 'uqc_gst', header: 'GST UQC', sortKey: 'uqc_gst', render: (r) => <span className="mono">{r.uqc_gst ?? '—'}</span> },
-    { key: 'decimal_places', header: 'Decimals', align: 'right', sortKey: 'decimal_places' },
-    activeColumn<Uom>(),
-    updatedAt<Uom>(),
-  ],
-  fields: [
-    { name: 'unit_name', label: 'Unit name', type: 'text', required: true, maxLength: 128, placeholder: 'Pieces' },
-    { name: 'unit_symbol', label: 'Symbol', type: 'text', required: true, maxLength: 16, placeholder: 'Pcs' },
-    { name: 'print_name', label: 'Print name', type: 'text', maxLength: 128, help: 'Defaults to the symbol.' },
-    { name: 'uqc_gst', label: 'GST UQC code', type: 'text', maxLength: 16, placeholder: 'PCS', help: 'Unit quantity code used on GST returns.' },
-    { name: 'decimal_places', label: 'Decimal places', type: 'number', min: 0, max: 4, step: 1, help: '0 to 4.' },
-    { name: 'is_active', label: 'Active', type: 'checkbox' },
-  ],
-  toValues: (row) => ({
-    unit_name: row?.unit_name ?? '',
-    unit_symbol: row?.unit_symbol ?? '',
-    print_name: row?.print_name ?? '',
-    uqc_gst: row?.uqc_gst ?? '',
-    decimal_places: row ? String(row.decimal_places ?? 4) : '4',
-    is_active: row ? Number(row.is_active) === 1 : true,
-  }),
-}
+/*
+ * Units of measure has no config.
+ *
+ * It is the one master with a screen of its own (pages/masters/uom), so a
+ * `uomConfig` left here would be a definition nothing renders — the kind that
+ * gets edited in good faith and changes nothing on screen.
+ */
 
-export const warehouseGroupsConfig: MasterConfig<WarehouseGroup> = {
-  slug: 'warehouse-groups',
-  permissionSlug: 'warehouse_groups',
-  title: 'Warehouse groups',
-  singular: 'Warehouse group',
-  idKey: 'warehouse_group_id',
-  nameOf: (r) => r.grp_name,
-  api: warehouseGroupsApi,
-  defaultSort: 'grp_name',
-  needsFormOptions: false,
-  tree: { parentKey: 'parent_grp_id' },
-  columns: [
-    { key: 'grp_name', header: 'Group', sortKey: 'grp_name', render: (r) => <strong>{r.grp_name}</strong> },
-    activeColumn<WarehouseGroup>(),
-    updatedAt<WarehouseGroup>(),
-  ],
-  fields: [
-    { name: 'grp_name', label: 'Group name', type: 'text', required: true, maxLength: 255, span: 2 },
-    {
-      name: 'parent_grp_id',
-      label: 'Parent group',
-      type: 'select',
-      emptyLabel: '— No parent —',
-      options: (ctx) => {
-        const self = ctx.row ? idNum(ctx.row.warehouse_group_id) : null
-        const blocked = self !== null ? descendantIds(buildTree(ctx.rows, { idKey: 'warehouse_group_id', parentKey: 'parent_grp_id', labelOf: (r) => r.grp_name }), self) : new Set<number>()
-        return ctx.rows
-          .filter((r) => !blocked.has(r.warehouse_group_id))
-          .sort((a, b) => a.grp_name.localeCompare(b.grp_name))
-          .map((r) => ({ value: r.warehouse_group_id, label: r.grp_name }))
-      },
-    },
-    { name: 'is_active', label: 'Active', type: 'checkbox' },
-  ],
-}
+/*
+ * Warehouse groups used to be described here. It now has a screen of its own —
+ * masters/warehouseGroups/WarehouseGroupsPage — because a MasterConfig cannot
+ * express what that screen does: three views of the same rows, live figures
+ * counted over the whole master, a contextual structure panel and a form with
+ * a suggested code. `warehouseGroupsApi` is still the same endpoint, and the
+ * warehouse form below still reads its options from it.
+ */
 
 const warehouseTypeOptions: SelectOption[] = WAREHOUSE_TYPES.map((t) => ({ value: t, label: humanize(t) }))
 
@@ -239,7 +171,7 @@ export const warehousesConfig: MasterConfig<Warehouse> = {
       type: 'select',
       loadOptions: async (_ctx, signal) => {
         const res = await warehouseGroupsApi.list({ limit: 1000, status: 'active', sort: 'grp_name' }, signal)
-        return res.data.map((g) => ({ value: g.warehouse_group_id, label: g.grp_name }))
+        return res.data.map((g) => ({ value: g.warehouse_group_id, label: g.grp_code ? `${g.grp_name} (${g.grp_code})` : g.grp_name }))
       },
     },
     {
