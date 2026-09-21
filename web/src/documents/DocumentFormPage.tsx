@@ -11,6 +11,7 @@ import { PageShell } from '../ui/shell/PageShell'
 import { DocumentForm } from './DocumentForm'
 import { BatchAdjustmentPage } from './batch/BatchAdjustmentPage'
 import { ConsumptionForm } from './consumption/ConsumptionForm'
+import { InwardChallanForm } from './grn/InwardChallanForm'
 import { StockTransferWorkspace } from './transfer/StockTransferWorkspace'
 import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS, statusTone } from './actions'
 import type { StatusTone } from './actions'
@@ -21,13 +22,16 @@ import type { DocumentStatus } from './types'
 import './documents.css'
 
 /*
- * Three native types have a screen of their own; every other one keeps the
+ * Some native types have a screen of their own; every other one keeps the
  * shared `DocumentForm`. A type earns one when the generic editor cannot say
  * what it needs to say while the document is being typed — a transfer has two
  * warehouses on the header and a route per line, a consumption has to settle
  * batches and serials before it can be saved at all, a batch adjustment has to
  * show both ends of every reallocation and whether they balance — and the
  * alternative is finding out when the API refuses it.
+ *
+ * Counted rather than listed, this sentence goes stale every time one is added;
+ * the branches below are the list.
  */
 
 const STATUS_BADGE_TONE: Record<StatusTone, BadgeTone> = { neutral: 'neutral', info: 'info', success: 'success', warning: 'warning', danger: 'danger' }
@@ -137,6 +141,9 @@ export function DocumentFormPage() {
       )
     }
     const initial = draftFromDocument(doc, spec)
+    // Some types have a screen of their own — transfer, consumption, receiving. Each brings its
+    // own page shell, breadcrumbs and header, so it is returned whole rather than wrapped by the
+    // one below. Every other native type still uses the shared DocumentForm.
     if (spec.code === 'STOCK_TRANSFER') {
       return (
         <StockTransferWorkspace
@@ -175,6 +182,18 @@ export function DocumentFormPage() {
         />
       )
     }
+    if (spec.formKind === 'inward_challan') {
+      return (
+        <InwardChallanForm
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          status={doc.status}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
     return (
       <PageShell paddingBottom>
         <BreadcrumbHeader
@@ -201,6 +220,9 @@ export function DocumentFormPage() {
   }
   if (s.code === 'CONSUMPTION') {
     return <ConsumptionForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
+  if (s.formKind === 'inward_challan') {
+    return <InwardChallanForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
   }
   return (
     <PageShell paddingBottom>
