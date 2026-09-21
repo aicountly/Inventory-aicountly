@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 
 /**
- * Whether a CSS media query matches, as a value React can branch on.
+ * `true` while the media query matches.
  *
  * For the cases where CSS alone is not enough: a grid and a card list are not
  * two skins of the same markup, they are two trees, and rendering both and
@@ -9,28 +9,30 @@ import { useEffect, useState } from 'react'
  * typeaheads, two batch pickers and two rounds of the requests they make. This
  * mounts the one the viewport is actually going to show.
  *
- * `fallback` is the answer before the query can be asked (a test environment
- * without matchMedia). Pass the desktop answer where the desktop layout is the
- * richer one, so nothing is lost when the question cannot be answered.
+ * Defensive about `matchMedia` for the same reason AppSidebar is: the DOM the
+ * tests run in (happy-dom) does not implement it, and a layout hook that threw
+ * there would take every render test on the page down with it. The fallback is
+ * the caller's `initial`, which should be the state that needs no special
+ * handling — the desktop one, normally.
  */
-export function useMediaQuery(query: string, fallback = false): boolean {
+export function useMediaQuery(query: string, initial = false): boolean {
   const [matches, setMatches] = useState(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return fallback
+    if (typeof window === 'undefined' || !window.matchMedia) return initial
     return window.matchMedia(query).matches
   })
 
   useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined
-    const list = window.matchMedia(query)
+    if (typeof window === 'undefined' || !window.matchMedia) return undefined
+    const mql = window.matchMedia(query)
+    setMatches(mql.matches)
     const onChange = (e: MediaQueryListEvent) => setMatches(e.matches)
-    setMatches(list.matches)
     // Safari below 14 only has the deprecated listener pair.
-    if (typeof list.addEventListener === 'function') {
-      list.addEventListener('change', onChange)
-      return () => list.removeEventListener('change', onChange)
+    if (typeof mql.addEventListener === 'function') {
+      mql.addEventListener('change', onChange)
+      return () => mql.removeEventListener('change', onChange)
     }
-    list.addListener(onChange)
-    return () => list.removeListener(onChange)
+    mql.addListener(onChange)
+    return () => mql.removeListener(onChange)
   }, [query])
 
   return matches
