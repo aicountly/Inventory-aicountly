@@ -227,11 +227,19 @@ export const lookupApi = {
    * Exact rather than "the first match": `SN-1` is a prefix of `SN-10`, and a scanner that
    * silently attached the wrong serial to an adjustment would be worse than one that found
    * nothing at all.
+   *
+   * The page is deliberately roomy. `q` no longer matches only the serial number —
+   * SerialsController::applyFilters fans the same needle out across the item name, SKU, UPC,
+   * batch, warehouse and location — and the rows come back ordered by serial_no. So a scan
+   * whose text also happens to prefix, say, a warehouse name shares its page with every serial
+   * in that warehouse, and on a short page the exact hit can fall off the end and be reported
+   * as "not registered". Fetching a wide page costs one request either way; a false "not found"
+   * costs the operator a re-scan and a doubt about the screen.
    */
   async findSerialExact(serialNo: string, signal?: AbortSignal): Promise<SerialLookupRow | null> {
     const value = serialNo.trim()
     if (value === '') return null
-    const rows = await lookupApi.findSerials(value, { limit: 25, signal })
+    const rows = await lookupApi.findSerials(value, { limit: 200, signal })
     const needle = value.toLowerCase()
     return rows.find((r) => r.serial_no.trim().toLowerCase() === needle) ?? null
   },
