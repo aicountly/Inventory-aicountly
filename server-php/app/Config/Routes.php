@@ -48,6 +48,9 @@ $routes->group('', ['namespace' => 'App\Controllers\Api', 'filter' => 'cors'], s
         $routes->post('settings/period-locks', 'SettingsController::lockPeriod');
         $routes->delete('settings/period-locks/(:num)', 'SettingsController::releasePeriodLock/$1');
         $routes->get('document-types', 'SettingsController::documentTypes');
+        // The parties Inventory's documents reference, for register filters. A
+        // picker over inv_documents.party_ref — never a party master.
+        $routes->get('document-parties', 'SettingsController::documentParties');
         $routes->get('dashboard', 'DashboardController::index');
         // The four dashboards the overview counters do not answer. Registered
         // BEFORE the bare 'dashboard' segment would ever be matched as an id,
@@ -146,8 +149,11 @@ $routes->group('', ['namespace' => 'App\Controllers\Api', 'filter' => 'cors'], s
         $routes->get('valuation/cost-layers', 'ValuationController::costLayers');
         $routes->get('valuation/recalculations', 'ValuationController::recalcJobs');
         $routes->post('valuation/recalculations', 'ValuationController::enqueueRecalc');
+        // Before the (:num) route so the literal segment cannot be read as an id.
+        $routes->get('valuation/recalculations/summary', 'ValuationController::recalcSummary');
         $routes->get('valuation/recalculations/(:num)', 'ValuationController::recalcJob/$1');
         $routes->post('valuation/recalculations/(:num)/run', 'ValuationController::runRecalc/$1');
+        $routes->post('valuation/recalculations/(:num)/cancel', 'ValuationController::cancelRecalc/$1');
         $routes->get('valuation/revisions', 'ValuationController::revisions');
         $routes->get('valuation/revisions/summary', 'ValuationController::revisionsSummary');
         $routes->post('valuation/revisions/ack', 'ValuationController::ackRevisions');
