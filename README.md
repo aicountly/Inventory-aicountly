@@ -59,7 +59,13 @@ Manage through the API's read-only relay (`/api/manage/...`).
 
 - **Documents** — list, detail (lines with valuation, accounting effects,
   approvals, print snapshot) and create / edit forms for every native type;
-  packing lists, pending quantities and reservations.
+  packing lists, pending quantities and reservations. **Material Receipt** has
+  a workspace of its own (`src/documents/receipt`): supplier and challan
+  reference, gate / vehicle / QC details, a line grid with batch, serial and
+  expiry, barcode scanning, paste-or-import of many lines at once, live totals
+  and a pinned action bar. Its purchase-order, invoice-reading and attachment
+  workflows read other products over live APIs and stay visible-but-disabled
+  until the matching relay exists (`VITE_FEATURE_RECEIPT_*` in `.env.example`).
 - **Stock** — balances by item × warehouse × batch with every bucket, the
   stock ledger of an item with running quantity and value, and the movement
   list.

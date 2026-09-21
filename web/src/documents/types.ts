@@ -303,8 +303,14 @@ export interface CreateDocumentPayload {
   /**
    * The party's own number for the consignment — a supplier challan no., invoice no. or PO no.
    * Held by the server as `source_document_no` and searched by the documents register's `q`.
+   *
+   * `source_document_id` stays null on these: the duplicate-posting guard
+   * (uq_inv_documents_source) only binds when an id is present, so a free-text
+   * reference never collides with another document's.
    */
   source_document_no?: string | null
+  /** The date on that paperwork, when it carries one. */
+  source_document_date?: string | null
   party_ref?: number | null
   party_name?: string | null
   from_warehouse_id?: number | null
