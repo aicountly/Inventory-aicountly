@@ -1,13 +1,19 @@
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useAccess } from '../access/AccessContext'
 import { Notice } from '../components/Notice'
-import { PageHeader } from '../components/PageHeader'
 import { useQuery } from '../hooks/useQuery'
 import { errorMessage } from '../services/api'
 import { documentsApi } from '../services/documentsApi'
+import type { BadgeTone } from '../ui/Badge'
+import { Badge } from '../ui/Badge'
+import { BreadcrumbHeader } from '../ui/shell/BreadcrumbHeader'
+import { PageShell } from '../ui/shell/PageShell'
 import { DocumentForm } from './DocumentForm'
 import { BatchAdjustmentPage } from './batch/BatchAdjustmentPage'
-import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS } from './actions'
+import { ConsumptionForm } from './consumption/ConsumptionForm'
+import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS, statusTone } from './actions'
+import type { StatusTone } from './actions'
+import { documentTypeGlyph } from './documentTypeIcon'
 import { draftFromDocument } from './formModel'
 import { specForCode, specForSlug, UNAVAILABLE_TYPES } from './registry'
 import type { DocumentStatus } from './types'
@@ -16,11 +22,13 @@ import './documents.css'
 /**
  * Batch Adjustment has its own workspace (`documents/batch`) rather than the generic line editor:
  * the type reallocates quantity between batches without valuing anything, and the screen is built
- * around that — where the stock leaves, where it lands, and whether the two balance. Every other
- * type still renders `DocumentForm`, and the workspace saves and posts through exactly the same
- * draft model and API calls.
+ * around that — where the stock leaves, where it lands, and whether the two balance. Consumption
+ * has its own for its own reasons (`documents/consumption`). Every other type still renders
+ * `DocumentForm`, and both workspaces save and post through the same draft model and API calls.
  */
 const BATCH_ADJUSTMENT = 'BATCH_ADJUSTMENT'
+
+const STATUS_BADGE_TONE: Record<StatusTone, BadgeTone> = { neutral: 'neutral', info: 'info', success: 'success', warning: 'warning', danger: 'danger' }
 
 /** `/documents/new/:slug` and `/documents/:id/edit`. */
 export function DocumentFormPage() {
@@ -34,54 +42,55 @@ export function DocumentFormPage() {
 
   const spec = editing ? specForCode(existing.data?.document_type) : specForSlug(slug)
   const crumbs = [{ label: 'Documents', to: '/documents' }]
+  const icon = documentTypeGlyph(editing ? existing.data?.document_type : spec?.code).icon
 
   if (!editing && !spec) {
     return (
-      <div className="page">
-        <PageHeader title="Unknown document type" breadcrumbs={crumbs} />
+      <PageShell>
+        <BreadcrumbHeader breadcrumbs={crumbs} title="Unknown document type" escBack={false} />
         <Notice kind="error">There is no native document type for &ldquo;{slug}&rdquo;.</Notice>
-      </div>
+      </PageShell>
     )
   }
   if (!editing && spec && UNAVAILABLE_TYPES.has(spec.code)) {
     return (
-      <div className="page">
-        <PageHeader title={spec.label} breadcrumbs={crumbs} />
+      <PageShell>
+        <BreadcrumbHeader breadcrumbs={crumbs} title={spec.label} icon={icon} escBack={false} />
         <Notice kind="warning">A {spec.label.toLowerCase()} cannot be created: the type is declared but nothing happens when it posts, so the document would record work it never did.</Notice>
-      </div>
+      </PageShell>
     )
   }
   if (!editing && spec && !canCreate(spec.code, can)) {
     return (
-      <div className="page">
-        <PageHeader title={spec.label} breadcrumbs={crumbs} />
+      <PageShell>
+        <BreadcrumbHeader breadcrumbs={crumbs} title={spec.label} icon={icon} escBack={false} />
         <Notice kind="warning">You do not have permission to create a {spec.label.toLowerCase()}.</Notice>
-      </div>
+      </PageShell>
     )
   }
   if (editing) {
     if (existing.loading && !existing.data) {
       return (
-        <div className="page">
-          <PageHeader title="Loading…" breadcrumbs={crumbs} />
-        </div>
+        <PageShell>
+          <BreadcrumbHeader breadcrumbs={crumbs} title="Loading…" escBack={false} />
+        </PageShell>
       )
     }
     if (existing.error || !existing.data) {
       return (
-        <div className="page">
-          <PageHeader title="Document" breadcrumbs={crumbs} />
+        <PageShell>
+          <BreadcrumbHeader breadcrumbs={crumbs} title="Document" escBack={false} />
           <Notice kind="error">{existing.error ? errorMessage(existing.error) : 'Document not found.'}</Notice>
-        </div>
+        </PageShell>
       )
     }
     const doc = existing.data
     if (!spec) {
       return (
-        <div className="page">
-          <PageHeader title={doc.document_type_label ?? doc.document_type} breadcrumbs={[...crumbs, { label: doc.document_no ?? `#${doc.document_id}`, to: `/documents/${doc.document_id}` }]} />
+        <PageShell>
+          <BreadcrumbHeader breadcrumbs={[...crumbs, { label: doc.document_no ?? `#${doc.document_id}`, to: `/documents/${doc.document_id}` }]} title={doc.document_type_label ?? doc.document_type} icon={icon} escBack={false} />
           <Notice kind="info">This document was created by {doc.source_app} and is edited there, not in Inventory.</Notice>
-        </div>
+        </PageShell>
       )
     }
     if (!isEditable(doc.status)) {
@@ -101,20 +110,28 @@ export function DocumentFormPage() {
         )
       }
       return (
-        <div className="page">
-          <PageHeader title={`${spec.label} ${doc.document_no ?? `#${doc.document_id}`}`} breadcrumbs={crumbs} />
-          <Notice kind="warning" actions={<Link className="btn btn-sm" to={`/documents/${doc.document_id}`}>Open</Link>}>
-            A {STATUS_LABELS[doc.status as DocumentStatus]?.toLowerCase() ?? doc.status} document cannot be edited.
-          </Notice>
-        </div>
+        <PageShell>
+          <BreadcrumbHeader
+            breadcrumbs={crumbs}
+            title={`${spec.label} ${doc.document_no ?? `#${doc.document_id}`}`}
+            icon={icon}
+            escBack={false}
+            actions={
+              <Link className="btn btn-sm" to={`/documents/${doc.document_id}`}>
+                Open
+              </Link>
+            }
+          />
+          <Notice kind="warning">A {STATUS_LABELS[doc.status as DocumentStatus]?.toLowerCase() ?? doc.status} document cannot be edited.</Notice>
+        </PageShell>
       )
     }
     if (!can(permissionKeysFor('edit', doc.document_type))) {
       return (
-        <div className="page">
-          <PageHeader title={`${spec.label} ${doc.document_no ?? `#${doc.document_id}`}`} breadcrumbs={crumbs} />
+        <PageShell>
+          <BreadcrumbHeader breadcrumbs={crumbs} title={`${spec.label} ${doc.document_no ?? `#${doc.document_id}`}`} icon={icon} escBack={false} />
           <Notice kind="warning">You do not have permission to edit documents.</Notice>
-        </div>
+        </PageShell>
       )
     }
     const initial = draftFromDocument(doc, spec)
@@ -131,12 +148,33 @@ export function DocumentFormPage() {
         />
       )
     }
+    if (spec.code === 'CONSUMPTION') {
+      return (
+        <ConsumptionForm
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          existingStatus={doc.status}
+          existingVersion={doc.version}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
     return (
-      <div className="page">
-        <PageHeader title={`Edit ${spec.label.toLowerCase()} ${doc.document_no ?? `#${doc.document_id}`}`} subtitle={`Version ${doc.version} · ${STATUS_LABELS[doc.status as DocumentStatus] ?? doc.status}`} breadcrumbs={[...crumbs, { label: doc.document_no ?? `#${doc.document_id}`, to: `/documents/${doc.document_id}` }]} />
+      <PageShell paddingBottom>
+        <BreadcrumbHeader
+          breadcrumbs={[...crumbs, { label: doc.document_no ?? `#${doc.document_id}`, to: `/documents/${doc.document_id}` }]}
+          title={`Edit ${spec.label.toLowerCase()} ${doc.document_no ?? `#${doc.document_id}`}`}
+          description={spec.description}
+          icon={icon}
+          badge={<Badge tone={STATUS_BADGE_TONE[statusTone(doc.status)]}>{STATUS_LABELS[doc.status as DocumentStatus] ?? doc.status}</Badge>}
+          meta={<span className="text-xs text-gray-500">Version {doc.version}</span>}
+          escBack={false}
+        />
         {doc.status === 'APPROVED' || doc.status === 'PENDING_APPROVAL' ? <Notice kind="info">Saving changes returns the document to draft; it will need approval again.</Notice> : null}
         <DocumentForm key={doc.document_id} spec={spec} documentId={doc.document_id} initial={initial} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
-      </div>
+      </PageShell>
     )
   }
 
@@ -144,10 +182,20 @@ export function DocumentFormPage() {
   if (s.code === BATCH_ADJUSTMENT) {
     return <BatchAdjustmentPage key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
   }
+  if (s.code === 'CONSUMPTION') {
+    return <ConsumptionForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
   return (
-    <div className="page">
-      <PageHeader title={`New ${s.label.toLowerCase()}`} breadcrumbs={crumbs} />
+    <PageShell paddingBottom>
+      <BreadcrumbHeader
+        breadcrumbs={crumbs}
+        title={`New ${s.label.toLowerCase()}`}
+        description={s.description}
+        icon={icon}
+        badge={<Badge tone="info">Draft</Badge>}
+        escBack={false}
+      />
       <DocumentForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
-    </div>
+    </PageShell>
   )
 }

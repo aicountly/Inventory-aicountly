@@ -363,6 +363,17 @@ export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
 
 
   /**
+   * Heading on the empty state, when filters are set and nothing matched.
+   *
+   * "No rows match these filters" is right for a register with no better word
+   * for its rows, and vague for one that has: a reader who filtered a stock
+   * grid is looking for stock, and being told about "rows" makes them check
+   * whether they are on the screen they think they are. Defaults to that
+   * sentence; `emptyMessage` remains the line under it.
+   */
+  emptyTitle?: string
+
+  /**
    * Heading over the table card. Defaults to the register's own title.
    *
    * A node rather than a string because a register with `views` puts its view

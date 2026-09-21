@@ -3,8 +3,10 @@
 namespace App\Controllers\Api\V1;
 
 use App\Controllers\Api\BaseController;
+use App\Services\AuditService;
 use App\Services\FyCarryForwardService;
 use App\Services\FyCarryForwardStatus;
+use App\Services\IdempotencyService;
 use App\Services\InventorySettingsService;
 use App\Services\ManageContextService;
 use App\Services\RecalculationService;
@@ -31,6 +33,16 @@ class ValuationController extends BaseController
         'stock_value' => 'numeric',
         'item_id'     => 'numeric',
     ];
+
+    /**
+     * Values `?qty_sign=` accepts — the snapshot narrowed to one side of zero.
+     *
+     * There is no `all` member because that is the absence of the parameter,
+     * and no `on_hand` one because the snapshot is already only the items that
+     * hold stock: ValuationReplayService drops everything under 0.0001 before
+     * it costs a single item.
+     */
+    public const SNAPSHOT_QTY_SIGNS = ['positive', 'negative'];
 
     private const JOB_STATUSES = ['QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED'];
 
@@ -81,7 +93,33 @@ class ValuationController extends BaseController
         . ', COALESCE(SUM(r.delta_amount),0) AS net_delta, COALESCE(SUM(ABS(r.delta_amount)),0) AS abs_delta';
 
     /**
-     * GET /valuation?as_of=&method=FIFO|LIFO|WAC|AS_PER_MASTER&item_id=&warehouse_id=
+     * Columns the recalculation register may order by.
+     *
+     * A closed list because the value is interpolated into ORDER BY: anything not
+     * named here falls back to created_at rather than reaching the database.
+     * `affected_line_count` and `revised_line_count` are here so the two count
+     * columns the screen right-aligns can actually be sorted — a register that
+     * draws a sort arrow the server ignores is worse than one that draws none.
+     */
+    private const JOB_SORTABLE = [
+        'created_at', 'job_id', 'status', 'from_date', 'finished_at', 'cogs_delta',
+        'affected_line_count', 'revised_line_count', 'started_at', 'trigger_kind',
+    ];
+
+    /**
+     * How much of a typed reason is stored.
+     *
+     * Generous rather than tight — the field exists to be read by a person in an
+     * audit, and truncating their explanation at 200 characters would defeat it —
+     * but bounded, so a pasted stack trace cannot become an unbounded row.
+     */
+    private const REMARKS_MAX = 1000;
+
+    /** Which timestamp `from` / `to` filter on. `queued` is the historical default. */
+    private const JOB_DATE_FIELDS = ['created_at' => 'created_at', 'queued' => 'created_at', 'finished' => 'finished_at', 'finished_at' => 'finished_at', 'effective' => 'from_date', 'from_date' => 'from_date'];
+
+    /**
+     * GET /valuation?as_of=&method=FIFO|LIFO|WAC|AS_PER_MASTER&item_id=&warehouse_id=&qty_sign=
      * Closing quantity per item as at `as_of`, valued at the cost the method resolves.
      */
     public function snapshot()
@@ -96,6 +134,14 @@ class ValuationController extends BaseController
         if ($method === null) {
             return $this->failStructured(422, 'validation_failed', 'method must be one of ' . implode(', ', self::REPORT_METHODS), ['allowed' => self::REPORT_METHODS]);
         }
+        $qtySign = $this->qtySignParam();
+        if ($qtySign === false) {
+            // Deliberately a rejection rather than a silent ignore: the summary
+            // below is computed over whatever rows survive this filter, so a
+            // misspelt scope that was quietly dropped would put the whole
+            // company's total on screen under the label "negative stock only".
+            return $this->failStructured(422, 'validation_failed', 'qty_sign must be one of ' . implode(', ', self::SNAPSHOT_QTY_SIGNS), ['allowed' => self::SNAPSHOT_QTY_SIGNS]);
+        }
         $itemId = (int) ($this->request->getGet('item_id') ?? 0) ?: null;
         $warehouseId = (int) ($this->request->getGet('warehouse_id') ?? 0) ?: null;
         $p = $this->listParams(500, 5000, 'item_name');
@@ -104,6 +150,7 @@ class ValuationController extends BaseController
         } catch (\Throwable $e) {
             return $this->failFromException($e);
         }
+        $snap = self::filterSnapshotByQtySign($snap, $qtySign);
         $rows = self::sortSnapshotRows($snap['rows'], $p['sort'], $p['order']);
         $total = count($rows);
         $page = array_slice($rows, $p['offset'], $p['limit']);
@@ -115,6 +162,47 @@ class ValuationController extends BaseController
             'total_value' => $snap['total_value'],
             'item_count'  => $total,
         ]]);
+    }
+
+    /**
+     * Narrow a snapshot to the items whose closing quantity falls on one side
+     * of zero, and re-total what is left.
+     *
+     * It has to happen here rather than in the caller's browser. The `summary`
+     * this endpoint returns is computed over the rows it returns, and a client
+     * that filtered the page it was handed would print a company-wide total
+     * under the heading "negative stock only" — a figure that counts rows it is
+     * not showing. Filtering before the totals keeps the two describing the
+     * same set.
+     *
+     * Only the rows and their totals move: the method is the caller's, and the
+     * item count is derived downstream from the rows.
+     *
+     * @param array{rows: list<array<string, mixed>>, total_qty: float, total_value: float, method: string} $snap
+     * @param 'positive'|'negative'|null $sign
+     * @return array{rows: list<array<string, mixed>>, total_qty: float, total_value: float, method: string}
+     */
+    public static function filterSnapshotByQtySign(array $snap, ?string $sign): array
+    {
+        if ($sign === null) {
+            return $snap;
+        }
+        $keep = $sign === 'negative'
+            ? static fn (array $r): bool => (float) ($r['closing_qty'] ?? 0) < 0
+            : static fn (array $r): bool => (float) ($r['closing_qty'] ?? 0) > 0;
+        $rows = array_values(array_filter($snap['rows'], $keep));
+        $totalQty = 0.0;
+        $totalValue = 0.0;
+        foreach ($rows as $r) {
+            $totalQty += (float) ($r['closing_qty'] ?? 0);
+            $totalValue += (float) ($r['stock_value'] ?? 0);
+        }
+
+        return array_merge($snap, [
+            'rows'        => $rows,
+            'total_qty'   => round($totalQty, 4),
+            'total_value' => round($totalValue, 4),
+        ]);
     }
 
     /**
@@ -387,31 +475,9 @@ class ValuationController extends BaseController
         if (!$this->request->getGet('order')) {
             $p['order'] = 'DESC';
         }
-        $b = $this->jobQuery($cmpId);
-        if ((int) ($this->request->getGet('all_fy') ?? 0) !== 1) {
-            $b->groupStart()->where('j.fy_id', (int) $ctx['fy_id'])->orWhere('j.fy_id', null)->groupEnd();
-        }
-        $status = trim((string) ($this->request->getGet('status') ?? ''));
-        if ($status !== '') {
-            $b->whereIn('j.status', array_map('strtoupper', array_filter(array_map('trim', explode(',', $status)))));
-        }
-        if ($itemId = (int) ($this->request->getGet('item_id') ?? 0)) {
-            $b->where('j.item_id', $itemId);
-        }
-        if ($trigger = trim((string) ($this->request->getGet('trigger_kind') ?? ''))) {
-            $b->where('j.trigger_kind', $trigger);
-        }
-        if ($docId = (int) ($this->request->getGet('trigger_document_id') ?? 0)) {
-            $b->where('j.trigger_document_id', $docId);
-        }
-        if ($from = $this->dateParam('from')) {
-            $b->where('j.created_at >=', $from . ' 00:00:00');
-        }
-        if ($to = $this->dateParam('to')) {
-            $b->where('j.created_at <=', $to . ' 23:59:59');
-        }
+        $b = $this->recalcJobQuery($cmpId, isset($ctx['fy_id']) ? (int) $ctx['fy_id'] : null, true);
         $total = (clone $b)->countAllResults(false);
-        $sort = in_array($p['sort'], ['created_at', 'job_id', 'status', 'from_date', 'finished_at', 'cogs_delta'], true) ? 'j.' . $p['sort'] : 'j.created_at';
+        $sort = in_array($p['sort'], self::JOB_SORTABLE, true) ? 'j.' . $p['sort'] : 'j.created_at';
         $rows = $b->select($this->jobColumns())->orderBy($sort, $p['order'])->orderBy('j.job_id', $p['order'])->limit($p['limit'], $p['offset'])->get()->getResultArray();
         foreach ($rows as &$r) {
             $r = $this->castJob($r);
@@ -439,6 +505,13 @@ class ValuationController extends BaseController
             return $this->failStructured(422, 'validation_failed', 'from_date (YYYY-MM-DD) is required');
         }
         $fromDate = date('Y-m-d', $ts);
+        // Costing is replayed FORWARD from this date over movements that already exist.
+        // A future date can only ever select nothing, so a job queued with one is not a
+        // small recalculation — it is a no-op that reads on the register as a completed
+        // restatement of a period nobody touched.
+        if ($fromDate > date('Y-m-d')) {
+            return $this->failStructured(422, 'validation_failed', 'from_date cannot be in the future', ['from_date' => $fromDate]);
+        }
         $itemId = (int) ($body['item_id'] ?? 0) ?: null;
         $db = \Config\Database::connect();
         if ($itemId !== null && $db->table('inv_items')->where('cmp_id', $cmpId)->where('item_id', $itemId)->countAllResults() === 0) {
@@ -449,9 +522,24 @@ class ValuationController extends BaseController
         if ($triggerDocId !== null && $db->table('inv_documents')->where('cmp_id', $cmpId)->where('document_id', $triggerDocId)->countAllResults() === 0) {
             return $this->failStructured(404, 'not_found', 'Trigger document not found');
         }
+        $remarks = trim((string) ($body['remarks'] ?? $body['reason'] ?? ''));
+        if (mb_strlen($remarks) > self::REMARKS_MAX) {
+            return $this->failStructured(422, 'validation_failed', 'remarks must be at most ' . self::REMARKS_MAX . ' characters');
+        }
+        // A recalculation is not a read: a double-clicked button or a retried request
+        // must not restate the same period twice and publish two sets of COGS revisions
+        // to Books. Same guard, same table and same replay semantics as documents and
+        // reservations — the client sends an Idempotency-Key and gets its first answer
+        // back rather than a second job.
+        $idem = new IdempotencyService();
+        $key = $this->idempotencyKey();
+        $hash = IdempotencyService::hashRequest($body);
+        if ($replay = $idem->replay($cmpId, $key, 'inventory_valuation_recalc', $hash)) {
+            return $this->respond($replay['body'], $replay['status']);
+        }
         try {
             $service = new RecalculationService();
-            $jobId = $service->enqueue($cmpId, (int) $ctx['fy_id'], $itemId, $fromDate, 'manual', $triggerDocId, $a['session']['uuid'], $dryRun);
+            $jobId = $service->enqueue($cmpId, (int) $ctx['fy_id'], $itemId, $fromDate, 'manual', $triggerDocId, $a['session']['uuid'], $dryRun, $remarks !== '' ? $remarks : null);
             if (!empty($body['run_now'])) {
                 $service->run($jobId);
             }
@@ -459,8 +547,116 @@ class ValuationController extends BaseController
         } catch (\Throwable $e) {
             return $this->failFromException($e);
         }
+        $cast = $this->castJob($job);
+        $resp = ['data' => $cast];
+        $idem->remember($cmpId, $key, 'inventory_valuation_recalc', (int) $cast['job_id'], (string) ($cast['job_uuid'] ?? ''), 201, $resp, $hash);
 
-        return $this->respond(['data' => $this->castJob($job)], 201);
+        return $this->respond($resp, 201);
+    }
+
+    /**
+     * POST /valuation/recalculations/{id}/cancel — drop a job that has not started.
+     *
+     * Only QUEUED. RUNNING is refused rather than "cancelled": run() replays costing
+     * and writes revisions inside one transaction with no cooperative checkpoint to
+     * stop at, so flipping the row to CANCELLED under a live replay would leave the
+     * register claiming a job was stopped while it went on to publish to Books. The
+     * terminal states are refused because there is nothing left to cancel — and
+     * COMPLETED especially is not undone by this endpoint. Reversing a completed
+     * restatement means recalculating again, which is a new job with its own trail.
+     */
+    public function cancelRecalc($id = null)
+    {
+        $a = $this->authorize('valuation.recalculate');
+        if (isset($a['response'])) {
+            return $a['response'];
+        }
+        $cmpId = (int) $a['ctx']['cmp_id'];
+        $db = \Config\Database::connect();
+        $job = $this->jobQuery($cmpId)->select('j.job_id, j.status')->where('j.job_id', (int) $id)->get()->getRowArray();
+        if (!$job) {
+            return $this->failStructured(404, 'not_found', 'Recalculation job not found');
+        }
+        if ($job['status'] !== 'QUEUED') {
+            return $this->failStructured(409, 'conflict', 'Only a queued recalculation can be cancelled', ['status' => $job['status']]);
+        }
+        // WHERE status = 'QUEUED' as well as by id: two operators pressing Cancel on
+        // the same row, or a worker picking the job up between the read above and this
+        // write, must not turn a RUNNING job into a CANCELLED one.
+        $db->table('inv_valuation_recalc_jobs')
+            ->where('job_id', (int) $id)->where('cmp_id', $cmpId)->where('status', 'QUEUED')
+            ->update(['status' => 'CANCELLED', 'cancelled_by' => $a['session']['uuid'] ?? null, 'finished_at' => date('Y-m-d H:i:s')]);
+        if ($db->affectedRows() === 0) {
+            $now = $this->jobQuery($cmpId)->select('j.status')->where('j.job_id', (int) $id)->get()->getRowArray();
+
+            return $this->failStructured(409, 'conflict', 'Recalculation job is no longer queued', ['status' => $now['status'] ?? null]);
+        }
+        (new AuditService())->log($cmpId, 'valuation_recalc_job', (int) $id, 'valuation.recalc_cancelled', $a['session']['uuid'] ?? null, []);
+        $row = $this->jobQuery($cmpId)->select($this->jobColumns())->where('j.job_id', (int) $id)->get()->getRowArray();
+
+        return $this->respond(['data' => $this->castJob($row)]);
+    }
+
+    /**
+     * GET /valuation/recalculations/summary — the register's KPI figures.
+     *
+     * Computed by the server over the WHOLE filtered set, never by the client over the
+     * page it was served: a screen showing 50 of 812 jobs cannot count how many failed,
+     * and a "success rate" derived from one page is a number no one can reconcile.
+     *
+     * Every filter the list accepts is applied here EXCEPT `status`, and that is the
+     * one deliberate difference: the cards ARE the status breakdown, so narrowing them
+     * by status would leave a reader filtered to Failed looking at "Completed 0". The
+     * client says so on the cards.
+     *
+     * The comparatives are real month-over-month figures from the same table — a count
+     * of jobs queued this calendar month against last, and the COGS movement finished
+     * in each. Nothing here is estimated: where a month has no jobs the value is 0 and
+     * the client renders no delta rather than inventing a percentage.
+     */
+    public function recalcSummary()
+    {
+        $a = $this->authorizeAny(['valuation.recalculate', 'reports.valuation.read']);
+        if (isset($a['response'])) {
+            return $a['response'];
+        }
+        $ctx = $a['ctx'];
+        $cmpId = (int) $ctx['cmp_id'];
+        $fyId = isset($ctx['fy_id']) ? (int) $ctx['fy_id'] : null;
+        // The same builder the rows come from, minus the status filter.
+        $scoped = fn () => $this->recalcJobQuery($cmpId, $fyId, false);
+
+        $byStatus = $scoped()->select('j.status, COUNT(*) AS jobs, COALESCE(SUM(j.cogs_delta),0) AS delta', false)->groupBy('j.status')->get()->getResultArray();
+        $counts = array_fill_keys(self::JOB_STATUSES, 0);
+        $total = 0;
+        $cogsDelta = 0.0;
+        foreach ($byStatus as $r) {
+            $status = (string) $r['status'];
+            $counts[$status] = ($counts[$status] ?? 0) + (int) $r['jobs'];
+            $total += (int) $r['jobs'];
+            $cogsDelta += (float) $r['delta'];
+        }
+
+        $monthStart = date('Y-m-01');
+        $prevStart = date('Y-m-01', strtotime($monthStart . ' -1 month'));
+        $queuedThisMonth = (int) ($scoped()->where('j.created_at >=', $monthStart . ' 00:00:00')->countAllResults());
+        $queuedPrevMonth = (int) ($scoped()->where('j.created_at >=', $prevStart . ' 00:00:00')->where('j.created_at <', $monthStart . ' 00:00:00')->countAllResults());
+        $deltaThis = $scoped()->select('COALESCE(SUM(j.cogs_delta),0) AS d', false)->where('j.finished_at >=', $monthStart . ' 00:00:00')->get()->getRowArray();
+        $deltaPrev = $scoped()->select('COALESCE(SUM(j.cogs_delta),0) AS d', false)->where('j.finished_at >=', $prevStart . ' 00:00:00')->where('j.finished_at <', $monthStart . ' 00:00:00')->get()->getRowArray();
+
+        return $this->respond(['data' => [
+            'total'                  => $total,
+            'by_status'              => $counts,
+            'in_progress'            => ($counts['QUEUED'] ?? 0) + ($counts['RUNNING'] ?? 0),
+            'cogs_delta'             => round($cogsDelta, 4),
+            'queued_this_month'      => $queuedThisMonth,
+            'queued_prev_month'      => $queuedPrevMonth,
+            'cogs_delta_this_month'  => round((float) ($deltaThis['d'] ?? 0), 4),
+            'cogs_delta_prev_month'  => round((float) ($deltaPrev['d'] ?? 0), 4),
+            'month_start'            => $monthStart,
+            // What the cards are counted over, so the screen can say it rather than imply it.
+            'ignores_status_filter'  => true,
+        ]]);
     }
 
     /** GET /valuation/recalculations/{id} */
@@ -1014,13 +1210,123 @@ class ValuationController extends BaseController
     {
         return \Config\Database::connect()->table('inv_valuation_recalc_jobs j')
             ->join('inv_items i', 'i.item_id = j.item_id', 'left')
+            // The scope a job ran under is what the register's SCOPE column reads, and
+            // "Warehouse #4" is not a scope anyone recognises. Left-joined like the item
+            // because warehouse_id is null on every whole-company job.
+            ->join('inv_warehouses w', 'w.warehouse_id = j.warehouse_id', 'left')
             ->join('inv_documents d', 'd.document_id = j.trigger_document_id', 'left')
             ->where('j.cmp_id', $cmpId);
     }
 
     private function jobColumns(): string
     {
-        return 'j.job_id, j.job_uuid, j.cmp_id, j.fy_id, j.item_id, j.warehouse_id, j.from_date, j.to_date, j.trigger_kind, j.trigger_document_id, j.status, j.dry_run, j.affected_documents_json, j.affected_line_count, j.revised_line_count, j.cogs_delta, j.failure_reason, j.requested_by, j.created_at, j.started_at, j.finished_at, i.item_name, i.item_sku, d.document_no AS trigger_document_no, d.document_type AS trigger_document_type';
+        return 'j.job_id, j.job_uuid, j.cmp_id, j.fy_id, j.item_id, j.warehouse_id, j.from_date, j.to_date, j.trigger_kind, j.trigger_document_id, j.status, j.dry_run, j.affected_documents_json, j.affected_line_count, j.revised_line_count, j.cogs_delta, j.failure_reason, j.remarks, j.requested_by, j.cancelled_by, j.created_at, j.started_at, j.finished_at, i.item_name, i.item_sku, w.warehouse_name, d.document_no AS trigger_document_no, d.document_type AS trigger_document_type';
+    }
+
+    /**
+     * The recalculation register's filtered set — ONE builder, used by the rows
+     * and by the figures above them.
+     *
+     * Shared deliberately. The list and the summary answer the same question
+     * ("which jobs are we looking at") and two copies of that question drift:
+     * a filter added to one and forgotten in the other produces a card that
+     * disagrees with the table underneath it, which is the single worst failure
+     * this screen can have. There is exactly one difference, and it is the
+     * parameter: the summary IS the status breakdown, so it is built without
+     * the status filter — otherwise a reader narrowed to Failed would be shown
+     * "Completed 0".
+     *
+     * @return \CodeIgniter\Database\BaseBuilder
+     */
+    private function recalcJobQuery(int $cmpId, ?int $fyId, bool $withStatus)
+    {
+        $b = $this->jobQuery($cmpId);
+        if ((int) ($this->request->getGet('all_fy') ?? 0) !== 1) {
+            // `fy_id IS NULL` is a job the engine queued outside any one year; it
+            // belongs to whichever year is being looked at rather than to none.
+            $b->groupStart()->where('j.fy_id', (int) $fyId)->orWhere('j.fy_id', null)->groupEnd();
+        }
+        if ($withStatus) {
+            $status = trim((string) ($this->request->getGet('status') ?? ''));
+            if ($status !== '') {
+                $b->whereIn('j.status', array_map('strtoupper', array_filter(array_map('trim', explode(',', $status)))));
+            }
+        }
+        if ($itemId = (int) ($this->request->getGet('item_id') ?? 0)) {
+            $b->where('j.item_id', $itemId);
+        }
+        if ($trigger = trim((string) ($this->request->getGet('trigger_kind') ?? ''))) {
+            $b->where('j.trigger_kind', $trigger);
+        }
+        if ($docId = (int) ($this->request->getGet('trigger_document_id') ?? 0)) {
+            $b->where('j.trigger_document_id', $docId);
+        }
+        if ($warehouseId = (int) ($this->request->getGet('warehouse_id') ?? 0)) {
+            $b->where('j.warehouse_id', $warehouseId);
+        }
+        if (($this->request->getGet('dry_run') ?? '') !== '') {
+            $b->where('j.dry_run', (int) $this->request->getGet('dry_run') === 1 ? 1 : 0);
+        }
+        // Jobs that actually moved money, for a reader reconciling against Books.
+        if ((int) ($this->request->getGet('has_cogs_impact') ?? 0) === 1) {
+            $b->where('j.cogs_delta <>', 0);
+        }
+        $field = $this->dateField();
+        // `from_date` is a DATE: appending a time to it would make `to` exclude
+        // every job whose effective date IS that day.
+        $suffixFrom = $field === 'from_date' ? '' : ' 00:00:00';
+        $suffixTo = $field === 'from_date' ? '' : ' 23:59:59';
+        if ($from = $this->dateParam('from')) {
+            $b->where('j.' . $field . ' >=', $from . $suffixFrom);
+        }
+        if ($to = $this->dateParam('to')) {
+            $b->where('j.' . $field . ' <=', $to . $suffixTo);
+        }
+        $this->applyJobSearch($b, (string) ($this->request->getGet('q') ?? ''));
+
+        return $b;
+    }
+
+    /** Which job timestamp `?from=` / `?to=` narrow. Unknown values fall back to queued. */
+    private function dateField(): string
+    {
+        $raw = strtolower(trim((string) ($this->request->getGet('date_field') ?? '')));
+
+        return self::JOB_DATE_FIELDS[$raw] ?? 'created_at';
+    }
+
+    /**
+     * The register's free-text box, over the words the register actually shows.
+     *
+     * Deliberately not a full-text index: the job table is small (one row per
+     * recalculation, not per line) and the columns searched are the ones a reader
+     * can see on screen — the reference, the item, the trigger, the failure, the
+     * reason typed at the time. Searching anything they cannot see would return
+     * rows they cannot explain.
+     *
+     * Case-insensitive through the builder's own flag, the way AuditController and
+     * MasterController already search — so `Invalid cost layer` is found by typing
+     * `invalid`, and the escaping of a `%` or `_` in the box stays the builder's job
+     * rather than this method's.
+     *
+     * @param \CodeIgniter\Database\BaseBuilder $b
+     */
+    private function applyJobSearch($b, string $raw): void
+    {
+        $q = trim($raw);
+        if ($q === '') {
+            return;
+        }
+        $b->groupStart();
+        foreach (['j.trigger_kind', 'j.failure_reason', 'j.remarks', 'j.requested_by', 'i.item_name', 'i.item_sku', 'w.warehouse_name', 'd.document_no'] as $i => $col) {
+            $i === 0 ? $b->like($col, $q, 'both', null, true) : $b->orLike($col, $q, 'both', null, true);
+        }
+        // "RC-00012" and "12" both find job 12: the reference on screen is the id,
+        // zero-padded and prefixed by the client, and a reader pastes what they see.
+        if (($digits = ltrim(preg_replace('/\D+/', '', $q) ?: '', '0')) !== '') {
+            $b->orWhere('j.job_id', (int) $digits);
+        }
+        $b->groupEnd();
     }
 
     /** @param array<string, mixed> $r @return array<string, mixed> */
@@ -1054,6 +1360,25 @@ class ValuationController extends BaseController
         }
 
         return null;
+    }
+
+    /**
+     * Scope from ?qty_sign= : null when absent (the whole snapshot), the value
+     * when it names a side of zero, and `false` when it is anything else.
+     *
+     * Three outcomes rather than two because "not asked for" and "asked for
+     * wrongly" must not collapse into the same answer — see snapshot().
+     *
+     * @return 'positive'|'negative'|false|null
+     */
+    private function qtySignParam(): string|false|null
+    {
+        $raw = strtolower(trim((string) ($this->request->getGet('qty_sign') ?? '')));
+        if ($raw === '') {
+            return null;
+        }
+
+        return in_array($raw, self::SNAPSHOT_QTY_SIGNS, true) ? $raw : false;
     }
 
     private function dateParam(string $name): ?string

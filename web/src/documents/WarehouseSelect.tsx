@@ -1,6 +1,14 @@
+import type { Ref } from 'react'
 import type { FormOptionWarehouse } from '../services/items'
 
 interface WarehouseSelectProps {
+  /**
+   * Declared, not inherited: React 19 hands `ref` to a function component as an
+   * ordinary prop, but only if the component names it. A page that needs to put
+   * focus here — an empty state offering "Change warehouse" — has no other way
+   * to reach the element. Same reason `ui/Button` declares one.
+   */
+  ref?: Ref<HTMLSelectElement>
   value: number | null
   onChange: (id: number | null) => void
   warehouses: FormOptionWarehouse[]
@@ -12,10 +20,11 @@ interface WarehouseSelectProps {
   invalid?: boolean
 }
 
-export function WarehouseSelect({ value, onChange, warehouses, emptyLabel = 'Select warehouse…', id, disabled, className, invalid }: WarehouseSelectProps) {
+export function WarehouseSelect({ ref, value, onChange, warehouses, emptyLabel = 'Select warehouse…', id, disabled, className, invalid }: WarehouseSelectProps) {
   const known = value !== null && warehouses.some((w) => w.warehouse_id === value)
   return (
     <select
+      ref={ref}
       id={id}
       className={`select${className ? ` ${className}` : ''}`}
       value={value ?? ''}
