@@ -115,7 +115,7 @@ final class LandedCostLineValidationTest extends TestCase
             $read = $this->read(['landed_cost_amount' => 10, 'landed_cost_breakdown' => [['cost_type' => 'other', 'amount' => 10, 'allocation_basis' => $basis]]]);
             $this->assertSame($basis, $read['breakdown'][0]['allocation_basis']);
         }
-        $this->assertSame(['value', 'qty', 'manual', 'direct'], DocumentService::LANDED_COST_BASES);
+        $this->assertSame(['value', 'qty', 'equal', 'manual', 'direct'], DocumentService::LANDED_COST_BASES);
     }
 
     /** Value is the default basis, so a breakdown entry that omits it is not a hole. */
