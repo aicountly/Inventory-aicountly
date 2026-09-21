@@ -102,7 +102,8 @@ function renderPage() {
 describe('OutboxPage', () => {
   it('says what the queue is for and what a dead event costs', async () => {
     renderPage()
-    await waitFor(() => expect(screen.getByText(/What the outbox holds/)).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole('button', { name: /How the audit trail works/ })).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: /How the audit trail works/ }))
     const text = document.body.textContent ?? ''
     expect(text).toContain('queue Inventory uses to tell Books')
     expect(text).toContain('used up its retries')

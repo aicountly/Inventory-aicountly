@@ -27,6 +27,93 @@ export function formatInt(value: unknown, empty = '0'): string {
   return n === null ? empty : INT_FORMAT.format(n)
 }
 
+/**
+ * The symbol a currency code is written with, or the code itself.
+ *
+ * Aicountly is multi-currency: a company's base currency is a setting, not an
+ * assumption, so nothing here may hardcode a rupee sign. Intl knows the symbol
+ * for every code it recognises; an unrecognised one throws, and falling back to
+ * the code prints `XYZ 2.48 Cr`, which is at least true.
+ */
+const CURRENCY_SYMBOLS = new Map<string, string>()
+
+export function currencySymbol(code: string | null | undefined): string {
+  const key = (code || 'INR').trim().toUpperCase()
+  const cached = CURRENCY_SYMBOLS.get(key)
+  if (cached !== undefined) return cached
+  let symbol = key
+  try {
+    const parts = new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: key,
+      maximumFractionDigits: 0,
+    }).formatToParts(0)
+    symbol = parts.find((part) => part.type === 'currency')?.value || key
+  } catch {
+    symbol = key
+  }
+  CURRENCY_SYMBOLS.set(key, symbol)
+  return symbol
+}
+
+/** `2.4800` → `2.48`, `3.00` → `3`. Keeps a short figure short. */
+function trimTrailingZeros(fixed: string): string {
+  return fixed.includes('.') ? fixed.replace(/\.?0+$/, '') : fixed
+}
+
+const CRORE = 1e7
+const LAKH = 1e5
+
+/**
+ * A large amount shortened to fit a KPI caption: `₹ 2.48 Cr`, `$ 2.48M`.
+ *
+ * The Indian scale (lakh / crore) travels with the Indian currency rather than
+ * with the reader's locale — `₹ 24.8M` would be as wrong for a Mumbai ledger as
+ * `$ 2.48 Cr` would be for a New York one. Below the first step the figure is
+ * printed in full: rounding ₹84,300 to "0.84 L" loses more than it saves.
+ *
+ * Only for captions. Anything a reader will add up, reconcile or export goes
+ * through formatMoney, which rounds nothing away.
+ */
+export function formatCompactMoney(value: unknown, currencyCode = 'INR', empty = '—'): string {
+  const n = toNumber(value)
+  if (n === null) return empty
+  const symbol = currencySymbol(currencyCode)
+  const sign = n < 0 ? '-' : ''
+  const abs = Math.abs(n)
+  const indian = (currencyCode || 'INR').trim().toUpperCase() === 'INR'
+  const steps: { limit: number; suffix: string }[] = indian
+    ? [
+        { limit: CRORE, suffix: ' Cr' },
+        { limit: LAKH, suffix: ' L' },
+      ]
+    : [
+        { limit: 1e9, suffix: 'B' },
+        { limit: 1e6, suffix: 'M' },
+        { limit: 1e3, suffix: 'K' },
+      ]
+  for (const step of steps) {
+    if (abs >= step.limit) {
+      return `${sign}${symbol} ${trimTrailingZeros((abs / step.limit).toFixed(2))}${step.suffix}`
+    }
+  }
+  return `${sign}${symbol} ${INT_FORMAT.format(Math.round(abs))}`
+}
+
+/**
+ * An amount with its currency symbol: `₹ 15,900.00`, `$ 15,900.00`.
+ *
+ * The symbol comes from the company's base currency, never from a literal in a component —
+ * Aicountly is multi-currency, and a hard-coded rupee sign is simply wrong for every company
+ * that is not Indian. Full precision, Indian digit grouping, and the sign in front of the symbol
+ * so a negative reads as `-₹ 100.00` rather than `₹ -100.00`.
+ */
+export function formatCurrency(value: unknown, currencyCode: string | null | undefined = 'INR', empty = '—'): string {
+  const n = toNumber(value)
+  if (n === null) return empty
+  return `${n < 0 ? '-' : ''}${currencySymbol(currencyCode)} ${MONEY_FORMAT.format(Math.abs(n))}`
+}
+
 /** `2025-04-01` (or a timestamp) → `01 Apr 2025`. Invalid → the empty marker. */
 export function formatDate(value: unknown, empty = '—'): string {
   if (value === null || value === undefined || value === '') return empty

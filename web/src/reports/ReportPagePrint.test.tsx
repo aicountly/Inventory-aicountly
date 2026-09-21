@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi, beforeEach } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { defineRegister } from '../registers/RegisterConfig'
 import { buildTotalsRow, totalsLabel } from '../registers/registerTotals'
@@ -201,7 +201,11 @@ describe('Ctrl+P on a register', () => {
   it('is advertised because it is wired', async () => {
     renderRegister()
     await screen.findByText('Widget A')
+    // Advertised twice over, and both only because the handler exists: the
+    // hint row beside the actions, and a chip on the control itself.
     expect(screen.getByText('Search · Refresh · Print · Back')).toBeTruthy()
+    expect(within(screen.getByRole('button', { name: /^Print/ })).getByText('Ctrl P')).toBeTruthy()
+    expect(within(screen.getByRole('button', { name: /^Refresh/ })).getByText('Ctrl R')).toBeTruthy()
   })
 
   it('does not fire on an empty register, exactly as the Print button does not', async () => {
@@ -226,8 +230,8 @@ describe('Ctrl+P on a register', () => {
     )
     expect(screen.getByText('Search · Refresh · Back')).toBeTruthy()
     // Ctrl+R stays; the P of Ctrl+P is the chip that would be a lie.
+    expect(screen.queryAllByText('Ctrl P')).toHaveLength(0)
     expect(screen.queryAllByText('P')).toHaveLength(0)
-    expect(screen.getAllByText('R').length).toBeGreaterThan(0)
   })
 })
 

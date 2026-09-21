@@ -1,6 +1,6 @@
 import { Loader2 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import type { ButtonHTMLAttributes, ReactNode } from 'react'
+import type { ButtonHTMLAttributes, ReactNode, Ref } from 'react'
 import { AIC, cx } from './cx'
 
 const VARIANTS = {
@@ -17,6 +17,8 @@ const VARIANTS = {
   link: 'bg-transparent text-primary hover:underline px-1 py-1 focus:ring-0',
   warning:
     'bg-amber-500 text-white hover:bg-amber-600 focus:ring-2 focus:ring-amber-300',
+  /** AI-assisted actions (Inventory AI, AI Suggest) — the same violet the IconTile/Badge "violet" tone uses. */
+  ai: 'bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100 focus:ring-2 focus:ring-violet-300',
 } as const
 
 const SIZES = {
@@ -30,6 +32,13 @@ export type ButtonVariant = keyof typeof VARIANTS
 export type ButtonSize = keyof typeof SIZES
 
 export interface ButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children'> {
+  /**
+   * Declared, not inherited: React 19 passes `ref` to a function component as
+   * an ordinary prop, but `ButtonHTMLAttributes` does not name it, so without
+   * this a caller that needs the element (to anchor a menu to it, to focus it)
+   * cannot ask for it. It rides along in `...rest` onto the real `<button>`.
+   */
+  ref?: Ref<HTMLButtonElement>
   variant?: ButtonVariant
   size?: ButtonSize
   icon?: LucideIcon
@@ -77,7 +86,14 @@ export function Button({
         <Icon className={cx('shrink-0', size === 'xs' ? 'w-3.5 h-3.5' : 'w-4 h-4')} aria-hidden />
       ) : null}
       {children ? <span className="truncate">{children}</span> : null}
-      {kbd ? <span className="kbd ml-1">{kbd}</span> : null}
+      {/* The chip shows the shortcut; it is not part of what the button is
+          called. Left in the accessible name, every such control announces
+          "Print Ctrl P", and the binding is already on the button's title. */}
+      {kbd ? (
+        <span className="kbd ml-1" aria-hidden>
+          {kbd}
+        </span>
+      ) : null}
       {IconRight ? <IconRight className="w-4 h-4 opacity-80 shrink-0" aria-hidden /> : null}
     </button>
   )

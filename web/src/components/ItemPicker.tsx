@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { forwardRef, useEffect, useId, useImperativeHandle, useRef, useState } from 'react'
 import { useDebounce } from '../hooks/useDebounce'
 import { isAbortError } from '../services/api'
 import { itemsApi } from '../services/items'
@@ -27,8 +27,17 @@ interface ItemPickerProps {
   invalid?: boolean
 }
 
-/** Typeahead over `GET /v1/items/search` (name / alias / SKU / barcode prefix). */
-export function ItemPicker({ value, onChange, placeholder = 'Search items by name, SKU or barcode…', disabled, filter, autoFocus, id, invalid }: ItemPickerProps) {
+/**
+ * Typeahead over `GET /v1/items/search` (name / alias / SKU / barcode prefix).
+ *
+ * Forwards a ref to its input so a page can hand it to
+ * `usePageKeyboard({ searchInputRef })` — on a register whose only free-text
+ * control is the item picker, this is what `/` and the Search button focus.
+ */
+export const ItemPicker = forwardRef<HTMLInputElement, ItemPickerProps>(function ItemPicker(
+  { value, onChange, placeholder = 'Search items by name, SKU or barcode…', disabled, filter, autoFocus, id, invalid },
+  ref,
+) {
   const [query, setQuery] = useState('')
   const [rows, setRows] = useState<ItemSearchRow[]>([])
   const [open, setOpen] = useState(false)
@@ -36,6 +45,10 @@ export function ItemPicker({ value, onChange, placeholder = 'Search items by nam
   const [loading, setLoading] = useState(false)
   const debounced = useDebounce(query, 250)
   const rootRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  // Null while a chip is showing instead of the box: there is no input to focus
+  // then, and the caller's fallback is better than focusing nothing.
+  useImperativeHandle(ref, () => inputRef.current as HTMLInputElement, [value])
   const listId = useId()
   // Callers usually pass an inline arrow; reading it through a ref keeps a new
   // identity per render from re-running the search on every render.
@@ -106,6 +119,7 @@ export function ItemPicker({ value, onChange, placeholder = 'Search items by nam
   return (
     <div className="typeahead" ref={rootRef}>
       <input
+        ref={inputRef}
         id={id}
         type="text"
         className="input"
@@ -167,4 +181,4 @@ export function ItemPicker({ value, onChange, placeholder = 'Search items by nam
       ) : null}
     </div>
   )
-}
+})

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -16,7 +16,33 @@ import type { ExportColumn, ExportRow } from './exportColumns'
  */
 const OUT = mkdtempSync(join(tmpdir(), 'aicountly-export-'))
 
+/**
+ * Pin the fallback font path, and keep this file off the network.
+ *
+ * `pdfFonts.ts` fetches Nunito and Noto Sans from a CDN at export time. That is
+ * right in a browser and wrong in a test, for two reasons — and the second one
+ * is why this file used to be green on one machine and red on CI.
+ *
+ * With the webfonts embedded, jsPDF writes text through an Identity-H CID font:
+ * every string in the PDF becomes a run of glyph IDs, not characters. So an
+ * assertion that reads the raw bytes and looks for "ORIGINAL FOR CONSIGNEE"
+ * can only pass when the font fetch FAILED and jsPDF fell back to Helvetica.
+ * The assertion was inverted — green exactly when font embedding was broken,
+ * red as soon as it worked. On a sandboxed machine the CDN returns a stub the
+ * loader rejects, so it passed locally; on CI the real font downloads, so it
+ * failed there.
+ *
+ * Stubbing the fetch makes the fallback deterministic on every machine, which
+ * is the path whose text is readable and therefore the only one these caption
+ * assertions can honestly be written against. Nothing here covers the embedded
+ * font path; asserting glyph IDs would test jsPDF's CMap, not our export.
+ */
+beforeAll(() => {
+  vi.stubGlobal('fetch', () => Promise.reject(new Error('webfonts are stubbed out in tests')))
+})
+
 afterAll(() => {
+  vi.unstubAllGlobals()
   rmSync(OUT, { recursive: true, force: true })
 })
 
@@ -125,6 +151,15 @@ describe('exported files are real and readable', () => {
     })
     const text = readFileSync(`${OUT}/challan-copies.pdf`).toString('latin1')
     expect((text.match(/\/Type\s*\/Page[^s]/g) ?? []).length).toBe(3)
+    // The guard for the assertions below: if the webfont stub ever stops
+    // working, jsPDF embeds Noto Sans, every string becomes glyph IDs, and the
+    // caption checks start failing for a reason that looks nothing like the
+    // cause. Fail here instead, where the message says what actually happened.
+    expect(
+      text,
+      'a webfont was embedded, so PDF text is glyph-encoded and unreadable — the fetch stub is not taking effect',
+    ).not.toContain('/BaseFont /NotoSans')
+
     for (const caption of ['ORIGINAL FOR CONSIGNEE', 'DUPLICATE FOR TRANSPORTER', 'TRIPLICATE FOR CONSIGNOR']) {
       expect(text).toContain(caption)
     }

@@ -42,27 +42,95 @@ Manage through the API's read-only relay (`/api/manage/...`).
   status, stock health, Books integration, last reconciliation.
 - **Items** — list with search, filters, sort and paging; create / edit with
   alternate units and conversions, tracking flags, stock levels and opening
-  stock per warehouse (`/v1/items/{id}/openings`); soft delete.
+  stock per warehouse (`/v1/items/{id}/openings`); soft delete. **Bulk edit**
+  has a workspace of its own (`src/pages/items/bulkEdit`): one field across a
+  selection, with the selection carried across pages as explicit ids, a
+  field-aware editor over an allowlist narrower than the API's own, a plan that
+  separates "will update" from "already has this value" (the second is never
+  written again, and is stated in the rail, the preview and the confirmation),
+  preview-before-apply, a confirmation that names the same count the button
+  does, `POST /v1/items/bulk-update` at 500 rows a batch, and recent bulk edits
+  read back out of the audit trail (`item.bulk_update` rows regrouped by their
+  request id). HSN / SAC and the Books tax category are listed but read-only:
+  Smart Books owns them, the API refuses an Inventory-side change, and the
+  screen says so rather than collecting a value the server will reject. The
+  assistant rail is deterministic — it tidies what was typed and ticks the rows
+  that are empty, and never proposes a value or a tax classification. Templates
+  (field + filters, never item ids) live in `localStorage` per member and
+  company, like saved views.
 - **Masters** — item groups (tree), stock categories, brands, units of measure,
-  warehouse groups (tree), warehouses, locations, bills of materials
-  (components, by-products, scrap), batches and serial numbers (single and
-  bulk registration).
+  warehouse groups, warehouses, locations and serial numbers (single and bulk
+  registration). **Brands** has its own workspace: company-wide figures
+  from `/v1/brands/metrics`, search across name / alias / code / description,
+  status, period and item-linkage filters, item counts that open the filtered
+  item list, bulk activate / deactivate / delete, CSV import with a validation
+  preview, and a contextual rail whose suggestions apply real filters. Per-brand
+  turnover is read live from Books through `/v1/brands/sales` and is simply not
+  shown until that service is connected — nothing of Books' is stored here.
+  **Warehouse groups** have a screen of their own too
+  (`src/masters/warehouseGroups`): list, tree and card views over one load, live
+  counts, a contextual structure panel and deterministic insights.
+  **Batches** has one as well: server-counted figures (`/v1/batches/summary`),
+  derived expiry health (expired / expiring / healthy, computed per request and
+  never stored), filters on status, item, warehouse, expiry window, group,
+  category, lot and on-hand — all in the URL — a detail drawer with
+  per-warehouse balances and recent movements, CSV import, Code 39 labels, and a
+  bulk status change (`POST /v1/batches/bulk-update`).
+  **Bills of materials** is a workspace over `/v1/bill-of-materials`:
+  company-wide counters (`/summary`), component previews carried in the list
+  itself rather than a request per row, filters on item group, component count,
+  scrap, dates and actor, a detail drawer, a material-cost breakdown valued from
+  `inv_wac_state` (falling back to the item's standard cost, and saying "Cost
+  unavailable" rather than ₹0 when neither exists), a two-bill comparison, a CSV
+  import that refuses to invent item codes, and an editor showing gross quantity
+  and live costing per component line.
 
 - **Documents** — list, detail (lines with valuation, accounting effects,
   approvals, print snapshot) and create / edit forms for every native type;
-  packing lists, pending quantities and reservations.
+  packing lists, pending quantities and reservations. **Material Receipt** has
+  a workspace of its own (`src/documents/receipt`): supplier and challan
+  reference, gate / vehicle / QC details, a line grid with batch, serial and
+  expiry, barcode scanning, paste-or-import of many lines at once, live totals
+  and a pinned action bar. Its purchase-order, invoice-reading and attachment
+  workflows read other products over live APIs and stay visible-but-disabled
+  until the matching relay exists (`VITE_FEATURE_RECEIPT_*` in `.env.example`).
+  **Job work** has one too (`src/documents/jobwork`): a single screen for both
+  directions, with the position still out with job workers, what is late, a
+  settlement panel that turns open dispatch quantities into lines, live
+  availability on a dispatch, and batch / serial allocation per line.
+  **Physical Stock Count** has a counting workspace
+  (`src/documents/physicalCount`): a batched book-quantity snapshot, live
+  variance and progress figures, deterministic variance / serial / batch
+  checks, handheld scanning and CSV import, serial and batch drawers, and a
+  posting-readiness gate over the same draft shape, validation, payload and
+  endpoints every other document type uses.
 - **Stock** — balances by item × warehouse × batch with every bucket, the
   stock ledger of an item with running quantity and value, and the movement
   list.
 - **Valuation** — the valuation snapshot at any method, cost layers with the
   issues that consumed them, back-dated recalculation jobs (dry run or live)
-  and the COGS revisions Books acknowledges.
+  and the COGS revisions Books acknowledges. The revisions screen carries its
+  own workspace: KPI cards, a filter panel (Books state, item, warehouse,
+  source document, movement, value threshold, date range), bulk
+  acknowledgement behind a confirmation that states what is being claimed, a
+  detail drawer showing the Books handover, and a timeline / source split /
+  acknowledgement progress band. Every figure on it is a server aggregate over
+  the same filters as the table (`GET /v1/valuation/revisions/summary`), never
+  a sum of the page on screen.
 - **Reports** — stock summary, warehouse stock, batch stock, serial numbers,
   stock ageing, movement analysis, near expiry and replenishment, each with
-  URL-persisted filters and CSV export (`src/reports/configs`).
-- **Reconciliation** — runs against the Books Stock-in-Hand ledger with the
-  bucket breakdown, the per-voucher posting status, and the outbox events
-  with replay.
+  URL-persisted filters and CSV export (`src/reports/configs`). Warehouse stock
+  is the worked example of the full register treatment
+  (`src/registers/warehouse/`): KPI cards, saved views, a stock-health verdict
+  per row from the item's own levels, the live reserved / available buckets, and
+  an intelligence rail — all off the one response the rows came from.
+- **Reconciliation** — Inventory's closing valuation against the Books
+  Stock-in-Hand ledger: the headline figures for the latest completed run, the
+  run history with its trend, the bucket breakdown that explains a gap
+  (item-wise variance), the per-voucher posting status (pending adjustments),
+  the outbox events with replay (audit trail) and deterministic insights over
+  the runs on record. Both sides stay in their own database and compare over
+  live APIs.
 - **Settings** — company costing defaults, period locks, access profiles and
   members, the document-type catalogue. **Audit** — append-only log with
   before / after snapshots.

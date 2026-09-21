@@ -15,7 +15,7 @@ export interface KpiStripProps {
   cards: readonly KpiCardSpec[]
 }
 
-// Books' own KPI strip, literally: the two products share a 13px root, so a
+// Books' own KPI strip, literally: the two products share a 16px root, so a
 // tightened gap here would only make the same markup read differently there.
 const GRID = 'grid gap-3 grid-cols-2 md:grid-cols-4 xl:grid-cols-8'
 

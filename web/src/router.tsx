@@ -4,20 +4,27 @@ import Dashboard from './pages/Dashboard'
 import { renderDocumentRoutes } from './documents/routes'
 import NotFound from './pages/NotFound'
 import { ItemFormPage } from './pages/items/ItemFormPage'
-import { ItemsBulkEditPage } from './pages/items/ItemsBulkEditPage'
+import { ItemsBulkEditPage } from './pages/items/bulkEdit/ItemsBulkEditPage'
 import { ItemsListPage } from './pages/items/ItemsListPage'
 import { BomFormPage } from './pages/masters/BomFormPage'
-import { BomListPage } from './pages/masters/BomListPage'
+import { BillOfMaterialsPage } from './pages/masters/bom/BillOfMaterialsPage'
 import { MastersIndex } from './pages/masters/MastersIndex'
 import { MastersLayout } from './pages/masters/MastersLayout'
 import { SerialsPage } from './pages/masters/SerialsPage'
-import { BatchesPage, BrandsPage, ItemGroupsPage, LocationsPage, StockCategoriesPage, UomPage, WarehouseGroupsPage, WarehousesPage } from './pages/masters/SimpleMasterPages'
+import { ItemGroupsPage, StockCategoriesPage, UomPage } from './pages/masters/SimpleMasterPages'
+import { BatchesPage } from './pages/masters/batches/BatchesPage'
+import { BrandsPage } from './pages/masters/brands/BrandsPage'
+import { LocationsPage } from './pages/masters/locations/LocationsPage'
+import { WarehousesPage } from './pages/masters/warehouses/WarehousesPage'
+import { WarehouseGroupsPage } from './masters/warehouseGroups/WarehouseGroupsPage'
 import { AuditLogPage } from './pages/audit/AuditLogPage'
 import { OutboxPage } from './pages/integration/OutboxPage'
 import { PostingStatusPage } from './pages/reconciliation/PostingStatusPage'
 import { ReconciliationLayout } from './pages/reconciliation/ReconciliationLayout'
 import { ReconciliationRunPage } from './pages/reconciliation/ReconciliationRunPage'
 import { ReconciliationRunsPage } from './pages/reconciliation/ReconciliationRunsPage'
+import { ReconciliationVariancePage } from './pages/reconciliation/ReconciliationVariancePage'
+import { ReconciliationInsightsPage } from './pages/reconciliation/ReconciliationInsightsPage'
 import { LegacyRedirect } from './registers/LegacyRedirect'
 import { RegisterRoutePage } from './registers/RegisterRoutePage'
 import { RegistersHubPage } from './registers/RegistersHubPage'
@@ -29,6 +36,7 @@ import { DocumentTypesPage } from './pages/settings/DocumentTypesPage'
 import { PeriodLocksPage } from './pages/settings/PeriodLocksPage'
 import { SettingsLayout } from './pages/settings/SettingsLayout'
 import { CostLayersPage } from './pages/valuation/CostLayersPage'
+import { MethodComparisonPage } from './pages/valuation/MethodComparisonPage'
 import { RecalculationsPage } from './pages/valuation/RecalculationsPage'
 import { RevisionsPage } from './pages/valuation/RevisionsPage'
 import { ValuationLayout } from './pages/valuation/ValuationLayout'
@@ -59,7 +67,7 @@ export function AppRoutes() {
           <Route path="warehouse-groups" element={<WarehouseGroupsPage />} />
           <Route path="warehouses" element={<WarehousesPage />} />
           <Route path="locations" element={<LocationsPage />} />
-          <Route path="bill-of-materials" element={<BomListPage />} />
+          <Route path="bill-of-materials" element={<BillOfMaterialsPage />} />
           <Route path="bill-of-materials/new" element={<BomFormPage />} />
           <Route path="bill-of-materials/:id" element={<BomFormPage />} />
           <Route path="batches" element={<BatchesPage />} />
@@ -76,6 +84,7 @@ export function AppRoutes() {
         <Route path="valuation" element={<ValuationLayout />}>
           <Route index element={<LegacyRedirect to="/registers/valuation" />} />
           <Route path="cost-layers" element={<CostLayersPage />} />
+          <Route path="method-comparison" element={<MethodComparisonPage />} />
           <Route path="recalculations" element={<RecalculationsPage />} />
           <Route path="revisions" element={<RevisionsPage />} />
         </Route>
@@ -88,6 +97,8 @@ export function AppRoutes() {
         <Route path="reconciliation" element={<ReconciliationLayout />}>
           <Route index element={<ReconciliationRunsPage />} />
           <Route path="posting-status" element={<PostingStatusPage />} />
+          <Route path="variance" element={<ReconciliationVariancePage />} />
+          <Route path="insights" element={<ReconciliationInsightsPage />} />
           <Route path=":id" element={<ReconciliationRunPage />} />
         </Route>
         <Route path="integration/outbox" element={<OutboxPage />} />

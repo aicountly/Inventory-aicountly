@@ -360,13 +360,27 @@ export function DocumentDetailPage() {
                 <dd>{[doc.reason_code, doc.movement_reason].filter(Boolean).join(' · ')}</dd>
               </div>
             ) : null}
-            {doc.source_app !== 'inventory' || doc.source_document_type ? (
+            {/* A document entered in Inventory that carries a reference and no
+                source type is holding the PARTY's own paperwork — the supplier
+                challan or invoice a material receipt was received against — not
+                a document another app owns. Naming it "Source · inventory"
+                would read as though Inventory had raised it somewhere else, so
+                it is labelled for what it is. */}
+            {doc.source_app !== 'inventory' || doc.source_document_type || doc.source_document_no ? (
               <div>
-                <dt>Source</dt>
+                <dt>{doc.source_app === 'inventory' && !doc.source_document_type ? 'Reference' : 'Source'}</dt>
                 <dd>
-                  {doc.source_app}
-                  {doc.source_document_type ? ` · ${doc.source_document_type}` : ''}
-                  {doc.source_document_no ? ` · ${doc.source_document_no}` : doc.source_document_id ? ` · #${doc.source_document_id}` : ''}
+                  {doc.source_app === 'inventory' && !doc.source_document_type ? null : (
+                    <>
+                      {doc.source_app}
+                      {doc.source_document_type ? ` · ${doc.source_document_type}` : ''}
+                    </>
+                  )}
+                  {doc.source_document_no
+                    ? `${doc.source_app === 'inventory' && !doc.source_document_type ? '' : ' · '}${doc.source_document_no}`
+                    : doc.source_document_id
+                      ? ` · #${doc.source_document_id}`
+                      : ''}
                   {doc.source_document_date ? ` · ${formatDate(doc.source_document_date)}` : ''}
                 </dd>
               </div>

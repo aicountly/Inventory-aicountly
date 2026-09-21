@@ -3,7 +3,7 @@ import type { LucideIcon } from 'lucide-react'
 import { BreadcrumbHeader } from './BreadcrumbHeader'
 import type { Crumb } from './BreadcrumbBar'
 import { PageShell } from './PageShell'
-import { KeyboardShortcutHint } from '../Kbd'
+import { KeyboardShortcutHint, KeyboardShortcutLegend } from '../Kbd'
 import { usePageKeyboard } from '../../keyboard/usePageKeyboard'
 import { cx } from '../cx'
 
@@ -13,6 +13,36 @@ export interface ReportCompactShellProps {
   description?: ReactNode
   icon?: LucideIcon
   headerActions?: ReactNode
+  /**
+   * `compact` (the default) prints the breadcrumb trail, the toolbar and the
+   * actions on one row — right for a register reached from the hub, where the
+   * trail is how the reader knows where they are.
+   *
+   * `page` gives the screen a proper heading: title, description and actions,
+   * with the breadcrumbs above. A top-level destination people work in all day
+   * earns the two lines; `/documents` is one.
+   */
+  headerVariant?: 'compact' | 'page'
+  /**
+   * Lock the page to the viewport and give the table what is left.
+   *
+   * True for a screen that IS a table. A screen carrying a chart band as well
+   * has more than a viewport to give away: the band is a fixed-height sibling
+   * of the table in the same flex column, so the table's `flex-1` resolves
+   * against whatever is left and collapses to about a row. Such a page scrolls
+   * as a whole instead, and the table takes a bounded scroll box of its own.
+   */
+  fill?: boolean
+  /** `page` only: decoration beside the title, shown only at ≥1536px. */
+  headerAside?: ReactNode
+  /**
+   * A small pill immediately beside the title — "● Live data".
+   *
+   * Beside the heading rather than in `headerAside`, which is decoration and
+   * disappears below 1536px: a statement about whether the figures under it are
+   * current has to survive a laptop screen.
+   */
+  headerBadge?: ReactNode
   toolbar?: ReactNode
   shortcutKeys?: readonly string[]
   shortcutLabel?: string
@@ -47,6 +77,10 @@ export function ReportCompactShell({
   description,
   icon,
   headerActions,
+  headerVariant = 'compact',
+  fill = true,
+  headerAside,
+  headerBadge,
   toolbar,
   shortcutKeys,
   shortcutLabel,
@@ -65,35 +99,65 @@ export function ReportCompactShell({
   const hintKeys = shortcutKeys ?? ['/', 'Ctrl+R', ...(onPrint ? ['Ctrl+P'] : []), 'Esc']
   const hintLabel = shortcutLabel ?? `Search · Refresh${onPrint ? ' · Print' : ''} · Back`
 
+  // In `page` mode the hint drops under the title instead of competing with the
+  // buttons. It is a reminder, not a control, and the action row is where the
+  // reader's eye goes for something to press.
+  const page = headerVariant === 'page'
+
   const showHint = Boolean(onRefresh || onPrint || searchInputRef)
-  const actions = (
-    <>
-      {showHint ? (
-        <KeyboardShortcutHint
-          keys={hintKeys}
-          label={hintLabel}
-          className="hidden xl:inline-flex"
-        />
-      ) : null}
-      {headerActions}
-    </>
+  // Under a title there is a whole line to spend, so each chip is printed
+  // beside what it does. The compact header keeps the one-run form: it sits
+  // inline with the buttons, where four labelled pairs would push them off.
+  // An explicit `shortcutKeys` override is honoured in the original form —
+  // a caller that supplied its own keys and label meant that pairing.
+  const hint = !showHint ? null : page && !shortcutKeys ? (
+    <KeyboardShortcutLegend
+      items={[
+        { keys: '/', label: 'Search' },
+        { keys: 'Ctrl+R', label: 'Refresh' },
+        ...(onPrint ? [{ keys: 'Ctrl+P', label: 'Print' }] : []),
+        { keys: 'Esc', label: 'Back' },
+      ]}
+      className="hidden lg:inline-flex"
+    />
+  ) : (
+    <KeyboardShortcutHint keys={hintKeys} label={hintLabel} className="hidden xl:inline-flex" />
   )
 
   return (
     <PageShell
       compact
       paddingBottom={false}
-      className={cx('flex flex-col tall:h-[calc(100dvh-7rem)] tall:overflow-hidden', className)}
+      className={cx(
+        'flex flex-col',
+        fill &&
+            (page
+              ? 'taller:h-[calc(100dvh-7rem)] taller:overflow-hidden'
+              : 'tall:h-[calc(100dvh-7rem)] tall:overflow-hidden'),
+        className,
+      )}
     >
       <BreadcrumbHeader
         breadcrumbs={breadcrumbs}
         title={title}
         description={description}
         icon={icon}
-        actions={actions}
-        toolbar={toolbar}
+        badge={page ? headerBadge : undefined}
+        meta={page ? hint : undefined}
+        aside={page ? headerAside : undefined}
+        actions={
+          page ? (
+            headerActions
+          ) : (
+            <>
+              {hint}
+              {headerActions}
+            </>
+          )
+        }
+        toolbar={page ? undefined : toolbar}
         backTo={backTo}
-        compact
+        compact={!page}
         className="shrink-0 print:hidden"
       />
       <div className="flex flex-col flex-1 min-h-0 gap-2">{children}</div>

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { History, X } from 'lucide-react'
 import { useCan } from '../../access/AccessContext'
 import { useCompany } from '../../company/CompanyContext'
 import { DataTable } from '../../components/DataTable'
@@ -6,11 +7,9 @@ import type { Column } from '../../components/DataTable'
 import { JsonBlock } from '../../components/JsonBlock'
 import { ListSheetActions } from '../../components/ListSheetActions'
 import { Modal } from '../../components/Modal'
-import { PageHeader } from '../../components/PageHeader'
 import { Pagination } from '../../components/Pagination'
 import { RequirePermission } from '../../components/RequirePermission'
 import { StatusBadge, statusBadgeLabel } from '../../components/StatusBadge'
-import { SubNav } from '../../components/SubNav'
 import { useListParams } from '../../hooks/useListParams'
 import { useQuery } from '../../hooks/useQuery'
 import type { ExportableColumn } from '../../registers/registerCells'
@@ -19,19 +18,21 @@ import { ApiError } from '../../services/api'
 import { OUTBOX_STATUSES, integrationApi } from '../../services/integrationApi'
 import type { OutboxEvent } from '../../services/integrationApi'
 import { fetchAllRows } from '../../services/listAll'
+import { Button } from '../../ui/Button'
+import { Card } from '../../ui/Card'
+import { Input } from '../../ui/Input'
+import { Select } from '../../ui/Select'
+import { BreadcrumbHeader } from '../../ui/shell/BreadcrumbHeader'
+import { PageShell } from '../../ui/shell/PageShell'
 import { useToast } from '../../ui/ToastContext'
+import { useScopeLabel } from '../../company/useScopeLabel'
 import { formatDateTime, formatInt } from '../../utils/format'
 import { ReconciliationExplainer } from '../reconciliation/ReconciliationExplainer'
+import { ReconciliationTabs } from '../reconciliation/ReconciliationTabs'
 import '../views.css'
 
 const FILTER_KEYS = ['status', 'event_type', 'aggregate_type', 'aggregate_id', 'target_app', 'from', 'to'] as const
 const STATUS_TONE: Record<string, 'info' | 'good' | 'warning' | 'critical' | 'neutral'> = { PENDING: 'info', SENT: 'good', ACKED: 'good', FAILED: 'warning', DEAD: 'critical' }
-const NAV = [
-  { to: '/reconciliation', label: 'Runs', end: true, permission: P.reconciliationRead },
-  { to: '/reconciliation/posting-status', label: 'Posting status', permission: P.reconciliationRead },
-  { to: '/integration/outbox', label: 'Outbox events', permission: P.integrationRead },
-] as const
-
 /**
  * The sheet's columns — the delivery record, including the error text. An
  * outbox export exists so somebody can work through the failures away from the
@@ -55,6 +56,7 @@ const EXPORT_COLUMNS: ExportableColumn<OutboxEvent>[] = [
 
 export function OutboxPage() {
   const { scope } = useCompany()
+  const scopeLabel = useScopeLabel()
   const toast = useToast()
   const canReplay = useCan(P.integrationReplay)
   const params = useListParams({ sort: 'created_at', order: 'desc', limit: 100, filterKeys: FILTER_KEYS })
@@ -110,11 +112,18 @@ export function OutboxPage() {
   )
 
   return (
-    <div className="page">
-      <SubNav items={NAV} label="Reconciliation" />
-      <PageHeader
-        title="Outbox events"
-        subtitle="Everything Inventory tells Books — postings, reversals, valuation revisions, master changes — with delivery attempts. DEAD events exhausted their retries and need a replay once the cause is fixed."
+    <PageShell fullBleed>
+      <BreadcrumbHeader
+        breadcrumbs={[
+          { label: 'Inventory', to: '/' },
+          { label: 'Reconciliation', to: '/reconciliation' },
+          { label: 'Audit Trail' },
+        ]}
+        icon={History}
+        title="Audit Trail"
+        description="The outbox events behind every reconciliation: everything Inventory tells Books — postings, reversals, valuation revisions, master changes — with delivery attempts. DEAD events exhausted their retries and need a replay once the cause is fixed."
+        meta={<span className="text-[11px] text-gray-500">{scopeLabel}</span>}
+        escBack={false}
         actions={
           <>
             <ListSheetActions<OutboxEvent>
@@ -140,30 +149,48 @@ export function OutboxPage() {
         }
       />
       <RequirePermission permission={P.integrationRead} what="outbox events">
+        <ReconciliationTabs />
         <ReconciliationExplainer screen="outbox" />
-        <div className="toolbar">
-          <select className="select" value={state.filters.status ?? ''} onChange={(e) => params.setFilter('status', e.target.value)} aria-label="Status">
-            <option value="">All statuses</option>
-            {OUTBOX_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-          <input className="input" placeholder="Event type (inventory.document.posted…)" value={state.filters.event_type ?? ''} onChange={(e) => params.setFilter('event_type', e.target.value)} aria-label="Event type" />
-          <input className="input short" placeholder="Aggregate" value={state.filters.aggregate_type ?? ''} onChange={(e) => params.setFilter('aggregate_type', e.target.value)} aria-label="Aggregate type" />
-          <input className="input short" inputMode="numeric" placeholder="Id" value={state.filters.aggregate_id ?? ''} onChange={(e) => params.setFilter('aggregate_id', e.target.value.replace(/[^\d]/g, ''))} aria-label="Aggregate id" />
-          <input className="input date" type="date" value={state.filters.from ?? ''} onChange={(e) => params.setFilter('from', e.target.value)} aria-label="From" />
-          <input className="input date" type="date" value={state.filters.to ?? ''} onChange={(e) => params.setFilter('to', e.target.value)} aria-label="To" />
-          <button type="button" className="btn btn-sm" onClick={list.reload} disabled={list.loading}>
-            Refresh
-          </button>
-          {Object.keys(state.filters).length > 0 ? (
-            <button type="button" className="btn btn-ghost btn-sm" onClick={params.reset}>
-              Reset
-            </button>
-          ) : null}
-        </div>
+        <Card padding="none" className="print:hidden">
+          <div className="flex flex-wrap items-end gap-2 px-3 py-2.5">
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Status</span>
+              <Select size="md" className="min-w-[10rem]" value={state.filters.status ?? ''} onChange={(e) => params.setFilter('status', e.target.value)}>
+                <option value="">All statuses</option>
+                {OUTBOX_STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </Select>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Event type</span>
+              <Input size="md" className="w-[16rem]" placeholder="inventory.document.posted…" value={state.filters.event_type ?? ''} onChange={(e) => params.setFilter('event_type', e.target.value)} />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Aggregate type</span>
+              <Input size="md" className="w-[9rem]" placeholder="document" value={state.filters.aggregate_type ?? ''} onChange={(e) => params.setFilter('aggregate_type', e.target.value)} />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Aggregate id</span>
+              <Input size="md" className="w-[7rem]" inputMode="numeric" placeholder="e.g. 91" value={state.filters.aggregate_id ?? ''} onChange={(e) => params.setFilter('aggregate_id', e.target.value.replace(/[^\d]/g, ''))} />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Created from</span>
+              <Input size="md" className="w-[9.5rem]" type="date" value={state.filters.from ?? ''} onChange={(e) => params.setFilter('from', e.target.value)} />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Created to</span>
+              <Input size="md" className="w-[9.5rem]" type="date" value={state.filters.to ?? ''} onChange={(e) => params.setFilter('to', e.target.value)} />
+            </label>
+            {Object.keys(state.filters).length > 0 ? (
+              <Button variant="ghost" size="md" icon={X} className="ml-auto" onClick={params.reset}>
+                Clear
+              </Button>
+            ) : null}
+          </div>
+        </Card>
         <DataTable
           columns={columns}
           rows={list.data?.data ?? []}
@@ -181,6 +208,6 @@ export function OutboxPage() {
       <Modal open={detail !== null} title={detail ? `Event #${detail.event_id} — ${detail.event_type}` : ''} onClose={() => setDetail(null)} size="lg">
         {detail ? <JsonBlock value={detail} label="Event" open /> : null}
       </Modal>
-    </div>
+    </PageShell>
   )
 }

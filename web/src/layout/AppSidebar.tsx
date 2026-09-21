@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, NavLink, useLocation } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { ChevronRight, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useAccess } from '../access/AccessContext'
 import { APP_ENV, APP_NAME } from '../config'
@@ -8,6 +8,7 @@ import type { MegaMenuColumn, NavLeaf, SidebarNavItem } from '../config/navRegis
 import { Badge } from '../ui/Badge'
 import { Tooltip } from '../ui/Tooltip'
 import { AIC, cx } from '../ui/cx'
+import { activeNavKey } from './activeNavItem'
 
 interface AppSidebarProps {
   collapsed: boolean
@@ -168,6 +169,12 @@ export function AppSidebar({
     [loading, can],
   )
 
+  // Resolved once for the whole rail, so exactly one section can be active.
+  const activeKey = useMemo(
+    () => activeNavKey(location.pathname, items),
+    [location.pathname, items],
+  )
+
   const cancelClose = useCallback(() => {
     if (closeTimer.current) {
       clearTimeout(closeTimer.current)
@@ -275,41 +282,38 @@ export function AppSidebar({
             {items.map((item) => {
               const Icon = item.icon
               const hasMenu = Boolean(item.megaMenu?.length)
+              // Not NavLink's own isActive: it answers per link, and on a
+              // nested route several links answer yes. See activeNavItem.ts.
+              const isActive = item.key === activeKey
               const link = (
-                <NavLink
+                <Link
                   to={item.path}
-                  end={item.end}
                   onClick={onNavigate}
                   onFocus={(e) => openFlyout(item, e.currentTarget)}
-                  className={({ isActive }) =>
-                    cx(
-                      'group relative flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm font-medium no-underline transition-colors',
-                      collapsed && 'justify-center px-0',
-                      isActive
-                        ? 'bg-primary-light text-primary'
-                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900',
-                    )
-                  }
-                >
-                  {({ isActive }) => (
-                    <>
-                      {isActive ? (
-                        <span
-                          className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r bg-primary"
-                          aria-hidden
-                        />
-                      ) : null}
-                      <Icon className="h-4 w-4 shrink-0" aria-hidden />
-                      {!collapsed ? <span className="truncate">{item.label}</span> : null}
-                      {!collapsed && hasMenu ? (
-                        <ChevronRight
-                          className="ml-auto h-3.5 w-3.5 shrink-0 text-gray-300 group-hover:text-gray-400"
-                          aria-hidden
-                        />
-                      ) : null}
-                    </>
+                  aria-current={isActive ? 'page' : undefined}
+                  className={cx(
+                    'group relative flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm font-medium no-underline transition-colors',
+                    collapsed && 'justify-center px-0',
+                    isActive
+                      ? 'bg-gradient-to-r from-primary-light to-primary-light/40 text-primary'
+                      : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900',
                   )}
-                </NavLink>
+                >
+                  {isActive ? (
+                    <span
+                      className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r bg-primary"
+                      aria-hidden
+                    />
+                  ) : null}
+                  <Icon className="h-4 w-4 shrink-0" aria-hidden />
+                  {!collapsed ? <span className="truncate">{item.label}</span> : null}
+                  {!collapsed && hasMenu ? (
+                    <ChevronRight
+                      className="ml-auto h-3.5 w-3.5 shrink-0 text-gray-300 group-hover:text-gray-400"
+                      aria-hidden
+                    />
+                  ) : null}
+                </Link>
               )
               return (
                 <li

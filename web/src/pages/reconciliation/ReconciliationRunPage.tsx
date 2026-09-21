@@ -11,25 +11,10 @@ import { P } from '../../services/access'
 import { reconciliationApi } from '../../services/reconciliationApi'
 import type { BucketDocument, ReconciliationBucket } from '../../services/reconciliationApi'
 import { formatDate, formatDateTime, formatInt, formatMoney, formatQty } from '../../utils/format'
-import { differenceTone } from './ReconciliationRunsPage'
+import { BUCKET_HELP, differenceTone } from './reconciliationModel'
 import { PostingStatusTable } from './PostingStatusTable'
 import '../views.css'
 
-/** What each bucket means and which way it moves Books towards Inventory. */
-const BUCKET_HELP: Record<string, string> = {
-  opening_difference: 'Opening stock differs between Inventory (openings) and the Books ledger opening balance.',
-  pending_posting: 'Books vouchers whose stock lines are still queued for posting to Inventory.',
-  failed_posting: 'Books vouchers Inventory refused; fix and retry from Books (books:inventory-retry).',
-  cancelled_reversed: 'Documents reversed in Inventory or cancelled in Books; netted when both sides agree.',
-  unacknowledged_valuation_revisions: 'COGS revisions Inventory published that Books has not applied yet.',
-  revaluation: 'Revaluation journals Books recorded in adjustment mode.',
-  manual_journal: 'Manual journals on the Stock-in-Hand ledger that have no stock document behind them.',
-  valuation_method_variance: 'Closing snapshot versus opening + movement values — mixed methods, WAC rounding or back-dated recosts.',
-  transfer_valuation_gap: 'Stock transfers whose receiving side carries no cost layer (inherited from legacy data).',
-  missing_source: 'Inventory documents that claim a Books source Books cannot find.',
-  rounding: 'Sub-rupee rounding between line values and ledger amounts.',
-  unexplained: 'What is left after every bucket above. Must be zero before sign-off.',
-}
 
 export function ReconciliationRunPage() {
   const { id = '' } = useParams()
@@ -40,10 +25,17 @@ export function ReconciliationRunPage() {
   const buckets = bd ? Object.entries(bd.buckets ?? {}) : []
 
   return (
-    <>
+    // The module layout used to supply this wrapper; the tabs moved onto the
+    // screens themselves, so the drill-down keeps its own vertical rhythm.
+    <div className="page">
       <PageHeader
+        breadcrumbs={[
+          { label: 'Inventory', to: '/' },
+          { label: 'Reconciliation', to: '/reconciliation' },
+          { label: r ? `Run #${r.run_id}` : 'Run' },
+        ]}
         title={r ? `Reconciliation #${r.run_id} — as at ${formatDate(r.as_of_date)}` : 'Reconciliation run'}
-        subtitle={r ? `Run ${formatDateTime(r.created_at)} by ${r.requested_by ?? 'schedule'} · ${bd?.sign_convention ?? ''}` : ''}
+        subtitle={r ? `Run ${formatDateTime(r.created_at)} by ${r.requested_by ?? 'an actor that was not recorded'} · ${bd?.sign_convention ?? ''}` : ''}
         actions={<Link to="/reconciliation" className="btn btn-ghost">All runs</Link>}
       />
       <RequirePermission permission={P.reconciliationRead} what="this reconciliation run">
@@ -98,7 +90,7 @@ export function ReconciliationRunPage() {
           </>
         ) : null}
       </RequirePermission>
-    </>
+    </div>
   )
 }
 

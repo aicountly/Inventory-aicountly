@@ -39,16 +39,21 @@ export default function App() {
     return (
       <BrowserRouter>
         <ThemeProvider>
-          <KeyboardProvider>
-            <ToastProvider>
-              <CompanyProvider>
-                <AccessProvider>
+          <ToastProvider>
+            <CompanyProvider>
+              <AccessProvider>
+                {/* Inside AccessProvider, not above it: the keyboard handler has
+                    to know what the user may do before it runs a command, and
+                    a shortcut that fires because permissions were not loaded yet
+                    is a shortcut that ignores permissions. Nothing between the
+                    two registers a keyboard scope, so the move costs nothing. */}
+                <KeyboardProvider>
                   <RouteAnalytics />
                   <AppRoutes />
-                </AccessProvider>
-              </CompanyProvider>
-            </ToastProvider>
-          </KeyboardProvider>
+                </KeyboardProvider>
+              </AccessProvider>
+            </CompanyProvider>
+          </ToastProvider>
         </ThemeProvider>
       </BrowserRouter>
     )

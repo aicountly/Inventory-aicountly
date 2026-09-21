@@ -57,9 +57,51 @@ const ALL = [
   'masters.items.read',
 ]
 
+/**
+ * The scope the shell would hand the section.
+ *
+ * Overview no longer owns its as-at date or its warehouse filter — those live
+ * in the URL and are shared by all five dashboards (useDashboardScope), so the
+ * test supplies them the way DashboardPage does. Nothing here is fetched: at
+ * first paint every query is still in flight, which is the state being pinned.
+ */
+function scopeStub(overrides: Record<string, unknown> = {}) {
+  return {
+    view: 'overview',
+    setView: () => {},
+    scopeKey: '1:3:0',
+    scope: { cmp_id: 1, fy_id: 3, bo_id: 0 },
+    ready: true,
+    asOf: '2026-09-15',
+    setAsOf: () => {},
+    period: { from: '2026-04-01', to: '2026-09-15' },
+    warehouses: [],
+    warehousesLoading: false,
+    selectedWarehouseId: null,
+    effectiveWarehouseId: null,
+    setWarehouseId: () => {},
+    warehouseDropped: false,
+    itemId: null,
+    setItemId: () => {},
+    preserved: {},
+    ...overrides,
+  }
+}
+
 async function render(): Promise<string> {
   const { OverviewDashboard } = await import('./OverviewDashboard')
-  return renderToStaticMarkup(createElement(MemoryRouter, null, createElement(OverviewDashboard)))
+  const { viewById } = await import('./views')
+  return renderToStaticMarkup(
+    createElement(
+      MemoryRouter,
+      null,
+      createElement(OverviewDashboard, {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test double
+        scope: scopeStub() as any,
+        view: viewById('overview'),
+      }),
+    ),
+  )
 }
 
 beforeEach(() => {
@@ -86,12 +128,15 @@ describe('OverviewDashboard, first paint', () => {
     }
   })
 
-  it('greets the user and states the scope every figure is counted in', async () => {
+  it('states the scope every figure is counted in', async () => {
+    // The scope line is the contract between a card and the register behind it:
+    // company, financial year, branch, warehouse and the as-at date all have to
+    // be on screen, or a figure cannot be reconciled against anything.
     const html = await render()
-    expect(html).toMatch(/Good (morning|afternoon|evening), Priya/)
     expect(html).toContain('Acme Traders')
     expect(html).toContain('2026-27')
     expect(html).toContain('All branches')
+    expect(html).toContain('All warehouses')
   })
 
   it('shows skeletons rather than zeros before anything has loaded', async () => {
@@ -101,11 +146,16 @@ describe('OverviewDashboard, first paint', () => {
     expect((html.match(/aria-hidden="true"/g) ?? []).length).toBeGreaterThan(5)
   })
 
-  it('offers the expiry window and a refresh without waiting for data', async () => {
+  it('offers the expiry window, a date and a refresh without waiting for data', async () => {
     const html = await render()
     expect(html).toContain('Expiry window')
     for (const d of ['15d', '30d', '60d', '90d']) expect(html).toContain(d)
     expect(html).toContain('aria-pressed="true"')
+    // The as-at picker and the warehouse filter are usable before any request
+    // has resolved — a filter bar that waits for data is a filter bar nobody
+    // can use to narrow the request they are waiting on.
+    expect(html).toContain('type="date"')
+    expect(html).toContain('aria-label="Warehouse"')
   })
 
   it('keeps chrome out of print but not the cards', async () => {

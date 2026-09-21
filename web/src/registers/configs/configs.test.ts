@@ -127,7 +127,26 @@ const summaries: Record<string, unknown> = {
     to: '2026-09-14',
     warehouse_id: null,
   },
-  'movement-register': { total: 9, pageRows: 9, sums: { qty: 3, value: 30 }, isWholeResult: true },
+  // MovementRegisterSummary: the endpoint's aggregate over the whole filtered set, which
+  // is what the footer and the cards are built from — never the served page.
+  'movement-register': {
+    movements: 9,
+    items: 4,
+    documents: 6,
+    in_qty: 12,
+    out_qty: 9,
+    net_qty: 3,
+    in_value: 120,
+    out_value: 90,
+    net_value: 30,
+    total: 9,
+    pageRows: 9,
+    from: '2026-04-01',
+    to: '2026-09-14',
+    previous: null,
+    trend: null,
+    whole: true,
+  },
   'stock-balances': {
     total: 4,
     pageRows: 4,
@@ -170,7 +189,27 @@ const summaries: Record<string, unknown> = {
     from: null,
     to: '2026-09-14',
   },
-  'warehouse-stock': { rows: 3, closing_qty: 2, closing_value: 20, by_warehouse: [], to: '2026-09-14' },
+  'warehouse-stock': {
+    rows: 3,
+    items: 2,
+    warehouses: 2,
+    active_warehouses: 3,
+    closing_qty: 2,
+    closing_value: 20,
+    reserved_qty: 1,
+    available_qty: 1,
+    by_warehouse: [
+      { warehouse_id: 3, warehouse_name: 'Main', closing_qty: 5, closing_value: 18, items: 1 },
+      { warehouse_id: 4, warehouse_name: 'North', closing_qty: -3, closing_value: 2, items: 1 },
+    ],
+    health: { negative: 1, out: 0, reorder: 1, low: 0, overstocked: 0, healthy: 1 },
+    health_items: { negative: 1, out: 0, reorder: 1, low: 0, overstocked: 0, healthy: 1 },
+    health_filter: null,
+    method: 'AS_PER_MASTER',
+    live_buckets: true,
+    currency: 'INR',
+    to: '2026-09-14',
+  },
   'batch-stock': { batches: 2, items: 2, on_hand: 5, reserved: 1 },
   'near-expiry': {
     as_of: '2026-09-14',
@@ -188,14 +227,27 @@ const summaries: Record<string, unknown> = {
     total_qty: 9,
     total_value: 90,
     buckets: {
-      '0_30': { qty: 1, value: 10 },
-      '31_60': { qty: 2, value: 20 },
-      '61_90': { qty: 2, value: 20 },
-      '91_180': { qty: 2, value: 20 },
-      '180_plus': { qty: 2, value: 20 },
+      '0_30': { qty: 1, value: 10, items: 1 },
+      '31_60': { qty: 2, value: 20, items: 2 },
+      '61_90': { qty: 2, value: 20, items: 2 },
+      '91_180': { qty: 2, value: 20, items: 1 },
+      '180_plus': { qty: 2, value: 20, items: 1 },
     },
     bucket_labels: {},
     as_of: '2026-09-14',
+    weighted_age_days: 74,
+    oldest_days: 300,
+    value_over_90: 40,
+    value_over_180: 20,
+    qty_over_90: 4,
+    qty_over_180: 2,
+    by_health: { fresh: 1, healthy: 0, watch: 1, slow: 0, obsolete: 1 },
+    health_score: 63,
+    health_band: 'watch',
+    age_bucket: null,
+    health_status: null,
+    warehouses: [],
+    item_groups: [],
   },
 }
 
@@ -254,7 +306,8 @@ describe('sort headers match what the endpoint can order by', () => {
     'stock-balances': ['Services/StockBalanceService.php', 'SORTABLE'],
     valuation: ['Controllers/Api/V1/ValuationController.php', 'SNAPSHOT_SORTABLE'],
     reservations: ['Controllers/Api/V1/ReservationsController.php', 'SORTABLE'],
-    'pending-quantities': ['Services/PendingQuantityService.php', 'SORTABLE'],
+    // The register's read side; PendingQuantityService owns the write lifecycle.
+    'pending-quantities': ['Services/PendingRegisterQuery.php', 'SORTABLE'],
     'reconciliation-runs': ['Controllers/Api/V1/ReconciliationController.php', 'SORTABLE'],
   }
 
@@ -271,6 +324,42 @@ describe('sort headers match what the endpoint can order by', () => {
         expect(sortable.has(col.sortKey), `${config.path}: "${col.key}" sorts by ${col.sortKey}, which ${constName} has no entry for`).toBe(true)
       }
       expect(sortable.has(config.defaultSort ?? ''), `${config.path}: defaultSort ${config.defaultSort} is not sortable`).toBe(true)
+    })
+  }
+})
+
+/**
+ * The same guard for the report-backed registers whose service declares a named
+ * whitelist. Only the ones that do can be checked; the rest order in PHP through an
+ * inline list, and a test that copied it would drift the moment the endpoint changed.
+ */
+describe('report registers sort by columns their service can order by', () => {
+  const REPORT_SORTABLE: Record<string, [string, string]> = {
+    'stock-ageing': ['Services/InventoryReportService.php', 'STOCK_AGEING_SORTABLE'],
+  }
+
+  for (const [path, [file, constName]] of Object.entries(REPORT_SORTABLE)) {
+    it(`${path} offers no header its service would ignore`, () => {
+      const php = readFileSync(
+        new URL('../../../../server-php/app/' + file, import.meta.url).pathname,
+        'utf8',
+      )
+      const start = php.indexOf(`const ${constName} = [`)
+      expect(start, `${file} no longer declares ${constName}`).toBeGreaterThan(-1)
+      const body = php.slice(start + `const ${constName} = [`.length, php.indexOf('];', start))
+      const sortable = new Set([...body.matchAll(/'([^']+)'/g)].map((m) => m[1]))
+      expect(sortable.size, `${constName} parsed empty`).toBeGreaterThan(0)
+
+      const config = registerByPath(path)!
+      expect(config, `${path} is not a register`).toBeTruthy()
+      for (const col of config.columns) {
+        if (col.sortKey === undefined) continue
+        expect(
+          sortable.has(col.sortKey),
+          `${path}: "${col.key}" sorts by ${col.sortKey}, which ${constName} has no entry for`,
+        ).toBe(true)
+      }
+      expect(sortable.has(config.defaultSort ?? ''), `${path}: defaultSort is not sortable`).toBe(true)
     })
   }
 })
@@ -293,22 +382,57 @@ describe('in-table grouping', () => {
     { movement_id: 3, document_type: 'ISSUE', document_type_label: 'Issue', warehouse_id: null, warehouse_name: null, qty: -2, value: -200 },
   ]
 
-  it('groups the movement register by document type and by warehouse', () => {
+  it('offers the movement register the six views its reader asks for', () => {
     const movement = registerByPath('movement-register')!
-    expect(movement.groupBy?.map((g) => g.key)).toEqual(['document_type', 'warehouse'])
+    expect(movement.groupBy?.map((g) => g.key)).toEqual([
+      'document_type',
+      'warehouse',
+      'item',
+      'date',
+      'batch',
+      'category',
+    ])
     const byType = movement.groupBy![0]
     expect(MOVEMENTS.map((r) => byType.of(r).key)).toEqual(['GRN', 'GRN', 'ISSUE'])
     expect(byType.of(MOVEMENTS[0]).label).toBe('Goods receipt')
-    // A row with no warehouse still belongs to a group, never to undefined.
-    expect(movement.groupBy![1].of(MOVEMENTS[2])).toEqual({ key: '0', label: 'No warehouse' })
+  })
+
+  it('never drops a row into an undefined group for want of a value', () => {
+    // Every grouping keys a null the same way — "0" with a named label — because a row
+    // with no warehouse, batch or category is still a row and has to be somewhere.
+    const groupings = registerByPath('movement-register')!.groupBy!
+    const unlabelled = MOVEMENTS[2]
+    expect(groupings.find((g) => g.key === 'warehouse')!.of(unlabelled)).toEqual({
+      key: '0',
+      label: 'No warehouse',
+    })
+    expect(groupings.find((g) => g.key === 'batch')!.of(unlabelled)).toEqual({
+      key: '0',
+      label: 'No batch',
+    })
+    expect(groupings.find((g) => g.key === 'category')!.of(unlabelled)).toEqual({
+      key: '0',
+      label: 'No category',
+    })
   })
 
   it('subtotals the group it was handed, and says it is a page figure', () => {
     const byType = registerByPath('movement-register')!.groupBy![0]
     const cells = byType.subtotal!(MOVEMENTS.slice(0, 2), byType.of(MOVEMENTS[0]))
-    expect(cells.qty).toBe('10')
+    // Split by direction, exactly as the grid is: the sign of the stored quantity
+    // decides which side of the subtotal a row lands on.
+    expect(cells.in_qty).toBe('10')
+    expect(cells.out_qty).toBe('0')
+    expect(cells.value).toBe('1,000.00')
     expect(String(cells.movement_date)).toContain('Goods receipt')
     expect(String(cells.movement_date)).toContain('on this page')
+  })
+
+  it('subtotals an outward group on the outward side', () => {
+    const byType = registerByPath('movement-register')!.groupBy![0]
+    const cells = byType.subtotal!([MOVEMENTS[2]], byType.of(MOVEMENTS[2]))
+    expect(cells.in_qty).toBe('0')
+    expect(cells.out_qty).toBe('2')
   })
 
   it('never names a column the register does not render', () => {

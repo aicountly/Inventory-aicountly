@@ -80,12 +80,27 @@ export interface DashboardDataState {
   lastSyncedAt: number | null
 }
 
-export function useDashboardData(): DashboardDataState {
+export interface DashboardDataOptions {
+  /**
+   * The as-at date the whole dashboard is computed for.
+   *
+   * Owned by useDashboardScope and carried in the URL, so the five dashboards
+   * agree on which day they are describing and a link to one of them reopens
+   * on the same day. Defaults to today when the caller does not care.
+   */
+  asOf?: string
+  /** Narrows the report-backed widgets to one warehouse. Null means all. */
+  warehouseId?: number | null
+}
+
+export function useDashboardData(options: DashboardDataOptions = {}): DashboardDataState {
   const { scope, fyRange } = useCompany()
   const { can, loading: accessLoading } = useAccess()
   const [nearExpiryDays, setNearExpiryDays] = useState<number>(30)
 
-  const asOf = useMemo(() => todayIso(), [])
+  const today = useMemo(() => todayIso(), [])
+  const asOf = options.asOf ?? today
+  const warehouseId = options.warehouseId ?? null
   const period = useMemo(() => defaultPeriod(fyRange, asOf), [fyRange, asOf])
 
   const perms = useMemo<DashboardPermissions>(
@@ -109,30 +124,42 @@ export function useDashboardData(): DashboardDataState {
   const ready = scope !== null && !accessLoading
   const scopeKey = `${scope?.cmp_id ?? 0}:${scope?.fy_id ?? 0}:${scope?.bo_id ?? 0}`
 
+  // `resetKey: scopeKey` on every query: keepData is right for a date change
+  // and wrong for a company switch, where holding the previous tenant's figures
+  // under the new tenant's name is another company's data on screen.
+  const q = { resetKey: scopeKey }
+
   const core = useQuery((signal) => fetchDashboard(signal), [scopeKey], {
+    ...q,
     enabled: ready && perms.dashboard,
   })
   const stock = useQuery((signal) => fetchStockValue(asOf, signal), [scopeKey, asOf], {
+    ...q,
     enabled: ready && perms.stockSummary,
   })
   const warehouses = useQuery((signal) => fetchWarehouseSplit(asOf, signal), [scopeKey, asOf], {
+    ...q,
     enabled: ready && perms.warehouseStock,
   })
   const ageing = useQuery((signal) => fetchAgeing(asOf, signal), [scopeKey, asOf], {
+    ...q,
     enabled: ready && perms.ageing,
   })
   const movement = useQuery(
     (signal) => fetchMovementMix(period.from || asOf, period.to || asOf, signal),
     [scopeKey, period.from, period.to, asOf],
-    { enabled: ready && perms.movement },
+    { ...q, enabled: ready && perms.movement },
   )
   const expiry = useQuery((signal) => fetchExpiry(nearExpiryDays, asOf, signal), [scopeKey, nearExpiryDays, asOf], {
+    ...q,
     enabled: ready && perms.nearExpiry,
   })
-  const replenishment = useQuery((signal) => fetchReplenishment(signal), [scopeKey], {
+  const replenishment = useQuery((signal) => fetchReplenishment(warehouseId, signal), [scopeKey, warehouseId], {
+    ...q,
     enabled: ready && perms.replenishment,
   })
   const movements = useQuery((signal) => fetchRecentMovements(signal), [scopeKey], {
+    ...q,
     enabled: ready && perms.movements,
   })
 

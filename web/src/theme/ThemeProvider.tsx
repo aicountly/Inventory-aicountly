@@ -52,7 +52,7 @@ const DEFAULTS: Appearance = {
   customPrimary: '',
   customVars: null,
   fontId: 'noto',
-  sizeId: 'zoomcompact',
+  sizeId: 'zoomnormal',
 }
 
 export interface ThemeContextValue {

@@ -3,11 +3,23 @@
 namespace App\Controllers\Api\V1;
 
 use App\Controllers\Api\BaseController;
+use App\Services\DashboardMetricsService;
 use App\Services\ReconciliationService;
 use App\Services\StockBalanceService;
 
 /**
- * GET /api/v1/dashboard?near_expiry_days=30 — company / FY overview counters.
+ * The dashboard aggregates.
+ *
+ *   GET /api/v1/dashboard?near_expiry_days=30   overview counters
+ *   GET /api/v1/dashboard/operations            a day on the warehouse floor
+ *   GET /api/v1/dashboard/valuation-bridge      opening -> closing value walk
+ *   GET /api/v1/dashboard/demand                observed demand for one item
+ *   GET /api/v1/dashboard/controls              exceptions and Books delivery health
+ *
+ * Every action authorises first and takes its company, financial year and branch
+ * from the session context the authorisation returned — NEVER from a query
+ * parameter. A caller can ask for a date, an item or a warehouse; it cannot ask
+ * for another tenant's books by editing a URL.
  */
 class DashboardController extends BaseController
 {
@@ -129,5 +141,233 @@ class DashboardController extends BaseController
             ],
             'last_reconciliation' => $lastRun ? ReconciliationService::castRun($lastRun) : null,
         ]]);
+    }
+
+    /**
+     * GET /v1/dashboard/operations?date=YYYY-MM-DD
+     *
+     * `date` is a calendar date in the application timezone; it defaults to
+     * today there. Anything unparseable is rejected rather than quietly swapped
+     * for today, because a dashboard that silently ignores the date it was asked
+     * for is a dashboard that shows the wrong day without saying so.
+     */
+    public function operations()
+    {
+        $a = $this->authorize('dashboard.read');
+        if (isset($a['response'])) {
+            return $a['response'];
+        }
+        $ctx = $a['ctx'];
+        $date = $this->isoDateParam('date', date('Y-m-d'));
+        if ($date === null) {
+            return $this->failStructured(422, 'invalid_date', 'date must be an ISO calendar date (YYYY-MM-DD)');
+        }
+
+        try {
+            $data = (new DashboardMetricsService())->operations((int) $ctx['cmp_id'], (int) $ctx['fy_id'], (int) $ctx['bo_id'], $date);
+        } catch (\Throwable $e) {
+            return $this->failFromException($e);
+        }
+
+        return $this->respond(['data' => $this->envelope($ctx, $data, ['as_of' => $date])]);
+    }
+
+    /**
+     * GET /v1/dashboard/valuation-bridge?from=&to=&warehouse_id=
+     *
+     * `from`/`to` default to the financial year so far. The warehouse filter is
+     * validated against this company's own warehouses: an id from another
+     * tenant resolves to nothing rather than to their stock.
+     */
+    public function valuationBridge()
+    {
+        $a = $this->authorize('dashboard.read');
+        if (isset($a['response'])) {
+            return $a['response'];
+        }
+        $ctx = $a['ctx'];
+        $to = $this->isoDateParam('to', date('Y-m-d'));
+        if ($to === null) {
+            return $this->failStructured(422, 'invalid_date', 'to must be an ISO calendar date (YYYY-MM-DD)');
+        }
+        // A year back from the cutoff when the caller sends no start. The real
+        // default the screen sends is the financial year, which Manage owns and
+        // the client knows; the API cannot invent it, so it takes a full year
+        // rather than guessing at a year end.
+        $from = $this->isoDateParam('from', date('Y-m-d', strtotime($to . ' -1 year')));
+        if ($from === null) {
+            return $this->failStructured(422, 'invalid_date', 'from must be an ISO calendar date (YYYY-MM-DD)');
+        }
+        if ($from > $to) {
+            return $this->failStructured(422, 'invalid_range', 'from must not be after to');
+        }
+        $warehouseId = $this->companyWarehouseId((int) $ctx['cmp_id']);
+        if ($warehouseId === false) {
+            return $this->failStructured(404, 'warehouse_not_found', 'That warehouse does not belong to this company');
+        }
+
+        try {
+            $data = (new DashboardMetricsService())->valuationBridge(
+                (int) $ctx['cmp_id'],
+                (int) $ctx['fy_id'],
+                (int) $ctx['bo_id'],
+                $from,
+                $to,
+                $warehouseId,
+            );
+        } catch (\Throwable $e) {
+            return $this->failFromException($e);
+        }
+
+        return $this->respond(['data' => $this->envelope($ctx, $data, ['as_of' => $to, 'period_start' => $from, 'period_end' => $to])]);
+    }
+
+    /**
+     * GET /v1/dashboard/demand?item_id=&warehouse_id=&as_of=&history_days=&horizon_days=
+     *
+     * One item's observed outward demand. `item_id` is required and is checked
+     * against this company's item master before anything is read, so the route
+     * cannot be used to probe whether an id exists elsewhere.
+     */
+    public function demand()
+    {
+        $a = $this->authorize('dashboard.read');
+        if (isset($a['response'])) {
+            return $a['response'];
+        }
+        $ctx = $a['ctx'];
+        $itemId = (int) ($this->request->getGet('item_id') ?? 0);
+        if ($itemId <= 0) {
+            return $this->failStructured(422, 'item_required', 'item_id is required');
+        }
+        if (!$this->itemBelongsToCompany($itemId, (int) $ctx['cmp_id'])) {
+            return $this->failStructured(404, 'item_not_found', 'That item does not belong to this company');
+        }
+        $warehouseId = $this->companyWarehouseId((int) $ctx['cmp_id']);
+        if ($warehouseId === false) {
+            return $this->failStructured(404, 'warehouse_not_found', 'That warehouse does not belong to this company');
+        }
+        $asOf = $this->isoDateParam('as_of', date('Y-m-d'));
+        if ($asOf === null) {
+            return $this->failStructured(422, 'invalid_date', 'as_of must be an ISO calendar date (YYYY-MM-DD)');
+        }
+        $historyDays = max(7, min(365, (int) ($this->request->getGet('history_days') ?? 60)));
+        $horizonDays = max(1, min(180, (int) ($this->request->getGet('horizon_days') ?? 14)));
+
+        try {
+            $data = (new DashboardMetricsService())->demand(
+                (int) $ctx['cmp_id'],
+                (int) $ctx['fy_id'],
+                (int) $ctx['bo_id'],
+                $itemId,
+                $warehouseId,
+                $asOf,
+                $historyDays,
+                $horizonDays,
+            );
+        } catch (\Throwable $e) {
+            return $this->failFromException($e);
+        }
+
+        return $this->respond(['data' => $this->envelope($ctx, $data, ['as_of' => $asOf])]);
+    }
+
+    /** GET /v1/dashboard/controls — the exception register and Books delivery health. */
+    public function controls()
+    {
+        $a = $this->authorize('dashboard.read');
+        if (isset($a['response'])) {
+            return $a['response'];
+        }
+        $ctx = $a['ctx'];
+
+        try {
+            $data = (new DashboardMetricsService())->controls((int) $ctx['cmp_id'], (int) $ctx['fy_id'], (int) $ctx['bo_id']);
+        } catch (\Throwable $e) {
+            return $this->failFromException($e);
+        }
+
+        return $this->respond(['data' => $this->envelope($ctx, $data, ['as_of' => date('Y-m-d')])]);
+    }
+
+    // -----------------------------------------------------------------------
+    // Shared
+    // -----------------------------------------------------------------------
+
+    /**
+     * The scope + freshness envelope every dashboard aggregate travels in.
+     *
+     * The client needs the scope echoed back to know the response it is about to
+     * render answers the filters currently on screen — a company switch in
+     * flight otherwise lands the old company's figures under the new company's
+     * name, which is the one mistake a multi-tenant dashboard may not make.
+     *
+     * @param array<string, mixed> $ctx
+     * @param array<string, mixed> $data
+     * @param array<string, mixed> $scopeExtra
+     *
+     * @return array<string, mixed>
+     */
+    private function envelope(array $ctx, array $data, array $scopeExtra = []): array
+    {
+        return [
+            'scope' => array_merge([
+                'cmp_id'   => (int) $ctx['cmp_id'],
+                'fy_id'    => (int) $ctx['fy_id'],
+                'bo_id'    => (int) $ctx['bo_id'],
+                'timezone' => app_timezone(),
+            ], $scopeExtra),
+            'meta' => [
+                'generated_at' => date('c'),
+                'status'       => 'ready',
+            ],
+            'data' => $data,
+        ];
+    }
+
+    /** An ISO date from the query string, `$fallback` when absent, null when malformed. */
+    private function isoDateParam(string $key, string $fallback): ?string
+    {
+        $raw = trim((string) ($this->request->getGet($key) ?? ''));
+        if ($raw === '') {
+            return $fallback;
+        }
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $raw) !== 1) {
+            return null;
+        }
+        [$y, $m, $d] = array_map('intval', explode('-', $raw));
+
+        return checkdate($m, $d, $y) ? $raw : null;
+    }
+
+    /**
+     * `warehouse_id` from the query string, checked against this company.
+     *
+     * null when absent (no filter), false when it names a warehouse this company
+     * does not own — which the caller turns into a 404 rather than silently
+     * dropping the filter and answering with the whole company's stock.
+     */
+    private function companyWarehouseId(int $cmpId): int|null|false
+    {
+        $raw = trim((string) ($this->request->getGet('warehouse_id') ?? ''));
+        if ($raw === '' || $raw === '0') {
+            return null;
+        }
+        $id = (int) $raw;
+        if ($id <= 0) {
+            return false;
+        }
+        $exists = \Config\Database::connect()->table('inv_warehouses')
+            ->where('warehouse_id', $id)->where('cmp_id', $cmpId)->where('deleted_at', null)
+            ->countAllResults() > 0;
+
+        return $exists ? $id : false;
+    }
+
+    private function itemBelongsToCompany(int $itemId, int $cmpId): bool
+    {
+        return \Config\Database::connect()->table('inv_items')
+            ->where('item_id', $itemId)->where('cmp_id', $cmpId)->where('deleted_at', null)
+            ->countAllResults() > 0;
     }
 }

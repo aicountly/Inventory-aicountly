@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { bomPayload, emptyHeader, headerFromBom, isBomValid, linesFromBom, newLine, validateBom } from './bomForm'
+import {
+  bomPayload,
+  costPreviewLines,
+  emptyHeader,
+  grossQty,
+  headerFromBom,
+  isBomValid,
+  linesForTemplate,
+  linesFromBom,
+  newLine,
+  validateBom,
+} from './bomForm'
 import type { BomHeaderDraft } from './bomForm'
 import type { Bom } from '../../services/masters'
 
@@ -73,5 +84,60 @@ describe('drafts from an API row', () => {
     expect(headerFromBom(bom)).toEqual({ bom_name: 'Chair BOM', finished: { item_id: 10, item_name: 'Chair', item_sku: 'CH-1', unit_id: 1 }, yield_qty: '2', yield_unit_id: '', is_active: true })
     const lines = linesFromBom(bom.lines ?? [])
     expect(lines[0]).toMatchObject({ line_kind: 'component', qty: '4', unit_id: '7', scrap_percent: '0', item: { item_id: 2, item_name: 'Leg' } })
+  })
+})
+
+describe('grossQty', () => {
+  /*
+   * The same uplift the API applies when it explodes a bill into a production
+   * document, so the editor shows what will really be issued rather than what
+   * was typed.
+   */
+  it('uplifts the quantity by the scrap percentage', () => {
+    expect(grossQty('10', '0')).toBe(10)
+    expect(grossQty('10', '10')).toBe(11)
+    expect(grossQty(4, 2.5)).toBe(4.1)
+  })
+
+  it('treats a blank, a negative or an unreadable percentage as none', () => {
+    expect(grossQty('10', '')).toBe(10)
+    expect(grossQty('10', '-5')).toBe(10)
+    expect(grossQty('10', 'abc')).toBe(10)
+  })
+
+  it('has nothing to say about an unreadable quantity', () => {
+    expect(grossQty('', '10')).toBeNull()
+    expect(grossQty('abc', '10')).toBeNull()
+  })
+})
+
+describe('costPreviewLines', () => {
+  it('sends the lines that name an item, in the shape the endpoint wants', () => {
+    const leg = { ...newLine(), item: { item_id: 2, item_name: 'Leg' }, qty: '4', unit_id: '7', scrap_percent: '2.5' }
+    expect(costPreviewLines([leg])).toEqual([
+      { item_id: 2, qty: 4, unit_id: 7, scrap_percent: 2.5, line_kind: 'component' },
+    ])
+  })
+
+  /*
+   * A half-typed row is not a costing question. Sent as a null item it would
+   * come back "unpriced" and make a complete bill look incomplete.
+   */
+  it('drops a row where no item has been chosen yet', () => {
+    expect(costPreviewLines([newLine(), newLine('scrap')])).toEqual([])
+  })
+})
+
+describe('linesForTemplate', () => {
+  it('opens the shape a template describes, with no items in it', () => {
+    const lines = linesForTemplate('manufactured')
+    expect(lines.map((l) => l.line_kind)).toEqual(['component', 'component', 'component', 'component', 'scrap'])
+    expect(lines.every((l) => l.item === null)).toBe(true)
+  })
+
+  it('falls back to one empty component row for a key it does not know', () => {
+    const lines = linesForTemplate('not-a-template')
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toMatchObject({ line_kind: 'component', item: null })
   })
 })

@@ -1,19 +1,25 @@
-import { BookmarkCheck, Clock, Coins, Scale } from 'lucide-react'
+import {
+  BookmarkCheck,
+  Boxes,
+  Coins,
+  Package,
+  Scale,
+  Warehouse,
+} from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { P } from '../../services/access'
 import { reconciliationApi } from '../../services/reconciliationApi'
 import type { ReconciliationRun } from '../../services/reconciliationApi'
-import { pendingApi, reservationsApi } from '../../services/stockApi'
-import type { PendingRow, Reservation } from '../../services/stockApi'
+import { reservationsApi } from '../../services/stockApi'
+import type { Reservation } from '../../services/stockApi'
 import { METHOD_LABELS, REPORT_METHODS, valuationApi } from '../../services/valuationApi'
 import type {
   ReportMethod,
   ValuationSnapshotRow,
   ValuationSnapshotSummary,
 } from '../../services/valuationApi'
-import { labelForCode } from '../../documents/registry'
 import { StatusBadge } from '../../ui/StatusBadge'
-import { formatInt, formatMoney, formatQty, humanize } from '../../utils/format'
+import { formatInt, formatMoney, formatQty } from '../../utils/format'
 import {
   DASH,
   dateColumn,
@@ -26,6 +32,13 @@ import {
 } from '../../reports/configs/common'
 import { buildTotalsRow, totalsLabel } from '../registerTotals'
 import { defineRegister } from '../RegisterConfig'
+import type { ReportColumn } from '../RegisterConfig'
+import { ValuationAnalytics } from '../valuation/ValuationAnalytics'
+import { ValuationHeaderActions } from '../valuation/ValuationHeaderActions'
+import { ValuationRowActions } from '../valuation/ValuationRowActions'
+import { ValuationSelectionActions } from '../valuation/ValuationSelectionActions'
+import { ValuationAddItem } from '../valuation/ValuationAddItem'
+import { WarehouseScopeHint, WarehouseScopeValue } from '../valuation/WarehouseScopeValue'
 import { pageHint, summaryOverRows, withPageSummary } from './pageSummary'
 import type { PageSummary } from './pageSummary'
 
@@ -51,19 +64,87 @@ function documentCell(id: number | null | undefined, no: string | null | undefin
  * average or exactly as each item master prescribes, so a reader can see what
  * the choice is worth before it is made.
  */
+/**
+ * The register's columns, named so the selection export can write exactly what
+ * the table shows rather than a second, drifting list of its own.
+ */
+const VALUATION_COLUMNS: ReportColumn<ValuationSnapshotRow>[] = [
+  {
+    key: 'item_sku',
+    header: 'Item code',
+    configureHint: 'The code on the item master.',
+    minWidth: 110,
+    render: (r) =>
+      r.item_sku ? (
+        <span className="font-medium tabular-nums text-gray-600">{r.item_sku}</span>
+      ) : (
+        DASH
+      ),
+    csv: (r) => r.item_sku ?? '',
+  },
+  {
+    key: 'item_name',
+    header: 'Item name',
+    sortKey: 'item_name',
+    alwaysVisible: true,
+    minWidth: 200,
+    render: (r) => (
+      <Link
+        to={`/valuation/cost-layers?item_id=${r.item_id}`}
+        className="text-gray-900 hover:text-primary"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <strong className="font-semibold">{r.item_name ?? `Item #${r.item_id}`}</strong>
+        {r.item_alias ? <span className="text-gray-400"> · {r.item_alias}</span> : null}
+      </Link>
+    ),
+    csv: (r) => r.item_name ?? `Item #${r.item_id}`,
+  },
+  textColumn<ValuationSnapshotRow>('unit_symbol', 'Unit', false),
+  {
+    key: 'valuation_method',
+    header: 'Item method',
+    configureHint: 'What the item master asks for.',
+    render: (r) => r.valuation_method ?? <span className="text-gray-400">company default</span>,
+    csv: (r) => r.valuation_method ?? '',
+  },
+  qtyColumn<ValuationSnapshotRow>('closing_qty', 'Closing qty', { strong: true }),
+  moneyColumn<ValuationSnapshotRow>('unit_cost', 'Unit cost'),
+  moneyColumn<ValuationSnapshotRow>('stock_value', 'Stock value', { strong: true }),
+  {
+    key: 'valuation_method_applied',
+    header: 'Applied',
+    configureHint: 'What was actually used — differs when an item has no layers.',
+    render: (r) => r.valuation_method_applied ?? DASH,
+  },
+]
+
 export const valuationRegister = defineRegister<ValuationSnapshotRow, ValuationSnapshotSummary>({
   slug: 'valuation',
   path: 'valuation',
   title: 'Valuation register',
   description:
-    'Closing quantity, unit cost and value per item as at a date, under the valuation method you choose',
-  shortDescription: 'Closing value per item, any method, any date',
+    'Item-wise stock valuation as at the selected date, under the valuation method you choose',
+  shortDescription: 'Item-wise stock valuation as at a date, under your chosen method',
   group: 'valuation',
   icon: Coins,
   defaultSort: 'item_name',
-  minWidth: 1000,
+  minWidth: 1080,
   rowNoun: 'item',
   filenameBase: 'valuation',
+  // The panel layout main established: page header, carded filter grid, metric
+  // KPI row. It suits this register for the reason it suits stock balances —
+  // the filters here ARE the question, since a date and a costing method decide
+  // every figure on the screen.
+  layout: 'panel',
+  filterPanel: {
+    description: 'Value stock on hand at a date, under a costing method',
+  },
+  tableTitle: 'Item-wise valuation',
+  tableHint: 'Closing quantity, unit cost and value for each item with stock on hand',
+  tableActions: <ValuationAddItem />,
+  defaultLimit: 50,
+  headerActions: <ValuationHeaderActions />,
   // The snapshot endpoint already answers a real summary; it just does not
   // label itself, so the envelope is completed here.
   fetch: async ({ query, signal }) => ({
@@ -76,56 +157,35 @@ export const valuationRegister = defineRegister<ValuationSnapshotRow, ValuationS
       key: 'method',
       kind: 'select',
       label: 'Method',
+      // Exactly the four ValuationController::REPORT_METHODS. A fifth option
+      // here would be a 422 from the API dressed up as a feature.
       options: REPORT_METHODS.map((m: ReportMethod) => ({ value: m, label: METHOD_LABELS[m] })),
       defaultValue: () => 'AS_PER_MASTER',
     },
-    itemFilter,
+    { ...itemFilter, placeholder: 'Search item code or name…' },
     { ...warehouseFilter, placeholder: 'Whole company' },
   ],
-  columns: [
-    {
-      key: 'item_name',
-      header: 'Item',
-      sortKey: 'item_name',
-      alwaysVisible: true,
-      minWidth: 200,
-      render: (r) => (
-        <Link
-          to={`/valuation/cost-layers?item_id=${r.item_id}`}
-          className="text-gray-900 hover:text-primary"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <strong className="font-semibold">{r.item_name ?? `Item #${r.item_id}`}</strong>
-          {r.item_sku ? <span className="text-gray-400"> · {r.item_sku}</span> : null}
-        </Link>
-      ),
-      csv: (r) => r.item_name ?? `Item #${r.item_id}`,
-    },
-    textColumn<ValuationSnapshotRow>('unit_symbol', 'Unit', false),
-    {
-      key: 'valuation_method',
-      header: 'Item method',
-      configureHint: 'What the item master asks for.',
-      render: (r) => r.valuation_method ?? <span className="text-gray-400">company default</span>,
-      csv: (r) => r.valuation_method ?? '',
-    },
-    qtyColumn<ValuationSnapshotRow>('closing_qty', 'Closing qty', { strong: true }),
-    moneyColumn<ValuationSnapshotRow>('unit_cost', 'Unit cost'),
-    moneyColumn<ValuationSnapshotRow>('stock_value', 'Stock value', { strong: true }),
-    {
-      key: 'valuation_method_applied',
-      header: 'Applied',
-      configureHint: 'What was actually used — differs when an item has no layers.',
-      render: (r) => r.valuation_method_applied ?? DASH,
-    },
-  ],
+  columns: VALUATION_COLUMNS,
   rowKey: (r) => r.item_id,
+  // Ticking rows answers "what are these worth together", which is the one
+  // question a register cannot answer by being read down. Nothing here writes:
+  // the actions are a subtotal and a file.
+  selectable: {
+    idOf: (r) => r.item_id,
+    label: 'Select item',
+    actions: (selected, _clear, summary) => (
+      <ValuationSelectionActions rows={selected} summary={summary} columns={VALUATION_COLUMNS} />
+    ),
+  },
+  // A control, not a column — so it never reaches a CSV or a printed sheet.
+  rowActions: (r) => <ValuationRowActions row={r} />,
   // The cost layers are the working behind the number, so that is where a
   // disputed valuation gets settled.
   drillTo: (r) => `/valuation/cost-layers?item_id=${r.item_id}`,
   totals: (s) =>
     buildTotalsRow(
       [
+        { key: 'item_sku' },
         { key: 'item_name' },
         { key: 'unit_symbol' },
         { key: 'valuation_method' },
@@ -137,34 +197,121 @@ export const valuationRegister = defineRegister<ValuationSnapshotRow, ValuationS
       { closing_qty: formatQty(s.total_qty), stock_value: formatMoney(s.total_value) },
       { label: totalsLabel(s.item_count, 'item'), labelKey: 'item_name' },
     ),
+  // The "Group by" control. Both groupings are over the rows on screen — the
+  // engine says so in each subtotal's own label, and the pinned footer stays the
+  // authority on the whole filtered set.
+  groupBy: [
+    {
+      key: 'valuation_method_applied',
+      label: 'Applied method',
+      of: (r) => ({
+        key: r.valuation_method_applied ?? 'unknown',
+        label: r.valuation_method_applied ?? 'No method applied',
+      }),
+      subtotal: (rows, group) =>
+        buildTotalsRow(
+          [
+            { key: 'item_sku' },
+            { key: 'item_name' },
+            { key: 'closing_qty', align: 'right' },
+            { key: 'stock_value', align: 'right' },
+          ],
+          {
+            closing_qty: formatQty(rows.reduce((a, r) => a + r.closing_qty, 0)),
+            stock_value: formatMoney(rows.reduce((a, r) => a + r.stock_value, 0)),
+          },
+          {
+            label: `${group.label} · ${totalsLabel(rows.length, 'item')} on this page`,
+            labelKey: 'item_name',
+          },
+        ),
+    },
+    {
+      key: 'valuation_method',
+      label: 'Item method',
+      of: (r) => ({
+        key: r.valuation_method ?? 'default',
+        label: r.valuation_method ?? 'Company default',
+      }),
+      subtotal: (rows, group) =>
+        buildTotalsRow(
+          [
+            { key: 'item_sku' },
+            { key: 'item_name' },
+            { key: 'closing_qty', align: 'right' },
+            { key: 'stock_value', align: 'right' },
+          ],
+          {
+            closing_qty: formatQty(rows.reduce((a, r) => a + r.closing_qty, 0)),
+            stock_value: formatMoney(rows.reduce((a, r) => a + r.stock_value, 0)),
+          },
+          {
+            label: `${group.label} · ${totalsLabel(rows.length, 'item')} on this page`,
+            labelKey: 'item_name',
+          },
+        ),
+    },
+  ],
+  // No delta chips: `/v1/valuation` answers one date at a time and sends no
+  // comparative, so a card here has nothing honest to compare against. The
+  // movement between dates is in the trend chart below, where every point is a
+  // date the server was actually asked about.
   kpis: (s) => [
     {
-      key: 'as_of',
-      label: 'As at',
-      value: s.as_of,
-      hint: METHOD_LABELS[s.method as ReportMethod] ?? s.method,
-      icon: Scale,
-      tone: 'slate',
+      key: 'items',
+      label: 'Total items',
+      value: formatInt(s.item_count),
+      hint: 'Items with stock on hand',
+      icon: Package,
+      tone: 'primary',
     },
-    { key: 'items', label: 'Items', value: formatInt(s.item_count), icon: Coins, tone: 'primary' },
-    { key: 'qty', label: 'Total qty', value: formatQty(s.total_qty), icon: Coins, tone: 'info' },
+    {
+      key: 'qty',
+      label: 'Total quantity',
+      value: formatQty(s.total_qty),
+      hint: 'Units in stock',
+      icon: Boxes,
+      tone: 'info',
+    },
     {
       key: 'value',
-      label: 'Total value',
+      label: 'Total stock value',
       value: formatMoney(s.total_value),
+      hint: `As at ${s.as_of} · ${METHOD_LABELS[s.method as ReportMethod] ?? s.method}`,
       icon: Coins,
-      tone: 'success',
+      tone: 'violet',
       current: s.total_value,
       emphasizeNegative: true,
     },
+    {
+      key: 'warehouses',
+      label: 'Warehouses',
+      value: <WarehouseScopeValue />,
+      hint: <WarehouseScopeHint />,
+      icon: Warehouse,
+      tone: 'warning',
+    },
   ],
+  analytics: ({ summary, values, loading }) => (
+    <ValuationAnalytics
+      summary={summary}
+      loading={loading}
+      filters={{
+        asOf: values.as_of ?? '',
+        method: values.method ?? 'AS_PER_MASTER',
+        itemId: values.item_id ?? '',
+        warehouseId: values.warehouse_id ?? '',
+      }}
+    />
+  ),
   summary: (s) => [
     { label: 'As at', value: s.as_of, hint: METHOD_LABELS[s.method as ReportMethod] ?? s.method },
     { label: 'Items', value: formatInt(s.item_count) },
     { label: 'Total qty', value: formatQty(s.total_qty) },
     { label: 'Total value', value: formatMoney(s.total_value), tone: 'good' },
   ],
-  emptyMessage: 'No stock on hand at this date.',
+  emptyMessage:
+    'No stock valuation is available for the selected date and filters. Widen the date or clear a filter and try again.',
 })
 
 /* -------------------------------------------------- reservation register */
@@ -328,186 +475,6 @@ export const reservationRegister = defineRegister<Reservation, PageSummary>({
   ],
   rowClassName: (r) => (r.is_expired ? 'bg-red-50/60' : undefined),
   emptyMessage: 'No reservations match these filters.',
-})
-
-/* ------------------------------------------------------- pending register */
-
-const PENDING_SUM_KEYS = ['qty_original', 'qty_settled', 'qty_open'] as const
-
-interface PendingSummary extends PageSummary {
-  /** The server's own total over the whole filtered set. */
-  qtyOpenAll: number
-}
-
-/**
- * Goods out on challan, in on inward challan, with a job worker, or invoiced
- * and not yet received.
- *
- * Unlike the other plain list endpoints this one does send a real aggregate
- * (`summary.qty_open` over the whole filtered set), so the open-quantity KPI is
- * the true figure and only the two supporting columns are page sums.
- */
-export const pendingRegister = defineRegister<PendingRow, PendingSummary>({
-  slug: 'pending_quantities',
-  path: 'pending-quantities',
-  title: 'Pending quantity register',
-  description:
-    'Goods out on challan, in on inward challan, with a job worker, or invoiced but not received',
-  shortDescription: 'Everything issued or expected and not yet settled',
-  group: 'compliance',
-  icon: Clock,
-  permission: P.documentsRead,
-  // listOpen() is deliberately not FY-scoped — see PendingQuantityService.
-  scopePeriod: 'All financial years',
-  defaultSort: 'document_date',
-  minWidth: 1300,
-  rowNoun: 'line',
-  filenameBase: 'pending-quantities',
-  fetch: async ({ query, signal }) => {
-    const res = await pendingApi.list(query, signal)
-    const base = withPageSummary(res, 'pending_quantities', PENDING_SUM_KEYS)
-    return { ...base, summary: { ...base.summary, qtyOpenAll: res.summary?.qty_open ?? base.summary.sums.qty_open } }
-  },
-  // The server's open-quantity total is already the whole set; only the two
-  // supporting page sums are re-totalled for an export.
-  summaryForRows: (s, rows) => summaryOverRows(s, rows, PENDING_SUM_KEYS),
-  filters: [
-    {
-      key: 'kind',
-      kind: 'select',
-      label: 'Kind',
-      placeholder: 'All kinds',
-      options: [
-        { value: 'challan', label: 'Challan' },
-        { value: 'deferred_purchase', label: 'Deferred purchase' },
-        { value: 'job_work', label: 'Job work' },
-      ],
-    },
-    {
-      key: 'direction',
-      kind: 'select',
-      label: 'Direction',
-      placeholder: 'In and out',
-      options: [
-        { value: 'out', label: 'Out' },
-        { value: 'in', label: 'In' },
-      ],
-    },
-    itemFilter,
-    warehouseFilter,
-    { key: 'party_ref', kind: 'number', label: 'Party ledger', placeholder: 'id' },
-  ],
-  columns: [
-    {
-      key: 'document_no',
-      header: 'Document',
-      alwaysVisible: true,
-      render: (r) => documentCell(r.document_id, r.document_no),
-      csv: (r) => r.document_no ?? `#${r.document_id}`,
-    },
-    {
-      key: 'document_type',
-      header: 'Type',
-      render: (r) => r.document_type_label ?? labelForCode(r.document_type),
-      csv: (r) => r.document_type_label ?? r.document_type,
-    },
-    dateColumn<PendingRow>('document_date', 'Date'),
-    {
-      key: 'pending_kind',
-      header: 'Kind',
-      render: (r) => humanize(r.pending_kind),
-      csv: (r) => r.pending_kind,
-    },
-    {
-      key: 'direction',
-      header: 'Dir.',
-      render: (r) => <StatusBadge value={r.direction} tone={r.direction === 'in' ? 'good' : 'warning'} />,
-      csv: (r) => r.direction,
-    },
-    {
-      key: 'item_name',
-      header: 'Item',
-      alwaysVisible: true,
-      minWidth: 180,
-      render: (r) => (
-        <Link
-          to={`/registers/stock-ledger?item_id=${r.item_id}`}
-          className="font-semibold text-gray-900 hover:text-primary"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {r.item_name ?? `Item #${r.item_id}`}
-        </Link>
-      ),
-      csv: (r) => r.item_name ?? `Item #${r.item_id}`,
-    },
-    textColumn<PendingRow>('warehouse_name', 'Warehouse', false),
-    {
-      key: 'party_ref',
-      header: 'Party',
-      render: (r) => (r.party_ref ? `#${r.party_ref}` : DASH),
-      csv: (r) => r.party_ref,
-    },
-    qtyColumn<PendingRow>('qty_original', 'Original'),
-    qtyColumn<PendingRow>('qty_settled', 'Settled'),
-    {
-      ...qtyColumn<PendingRow>('qty_open', 'Open', { strong: true }),
-      alwaysVisible: true,
-      render: (r) => (
-        <strong className="font-semibold text-gray-900">
-          {formatQty(r.qty_open)} {r.unit_symbol ?? ''}
-        </strong>
-      ),
-      csv: (r) => r.qty_open,
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      render: (r) => <StatusBadge value={r.status} tone={r.status === 'partial' ? 'info' : 'warning'} />,
-      csv: (r) => r.status,
-    },
-  ],
-  rowKey: (r) => r.pending_id,
-  drillTo: (r) => (r.document_id ? `/documents/${r.document_id}` : null),
-  totals: (s) =>
-    buildTotalsRow(
-      [
-        { key: 'document_no' },
-        { key: 'qty_original', align: 'right' },
-        { key: 'qty_settled', align: 'right' },
-        { key: 'qty_open', align: 'right' },
-      ],
-      {
-        qty_original: formatQty(s.sums.qty_original),
-        qty_settled: formatQty(s.sums.qty_settled),
-        // The one figure on this row that covers the whole filtered set.
-        qty_open: formatQty(s.qtyOpenAll),
-      },
-      { label: totalsLabel(s.total, 'line'), labelKey: 'document_no' },
-    ),
-  kpis: (s) => [
-    { key: 'rows', label: 'Open lines', value: formatInt(s.total), icon: Clock, tone: 'primary' },
-    {
-      key: 'open',
-      label: 'Open quantity',
-      value: formatQty(s.qtyOpenAll),
-      hint: 'all matching rows',
-      icon: Clock,
-      tone: 'warning',
-    },
-    {
-      key: 'settled',
-      label: 'Settled so far',
-      value: formatQty(s.sums.qty_settled),
-      hint: pageHint(s),
-      icon: Clock,
-      tone: 'success',
-    },
-  ],
-  summary: (s) => [
-    { label: 'Open lines', value: formatInt(s.total) },
-    { label: 'Open quantity', value: formatQty(s.qtyOpenAll), tone: 'warning' },
-  ],
-  emptyMessage: 'Nothing is pending.',
 })
 
 /* ------------------------------------------------ reconciliation register */

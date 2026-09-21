@@ -28,6 +28,22 @@ export const DOCUMENT_STATUSES: DocumentStatus[] = [
   'FAILED',
 ]
 
+/**
+ * `GET /v1/inventory-documents?summary=1` — figures for EVERY matching document,
+ * not the page served (DocumentsController::summarise).
+ *
+ * `valuation_total` is SUM(inv_document_lines.valuation_amount): what the stock
+ * cost. It is not the commercial amount agreed with the party, which Books owns.
+ * `warehouses_impacted` counts the distinct warehouses the matching documents'
+ * lines post to or from.
+ */
+export interface DocumentListSummary {
+  documents: number
+  line_count: number
+  valuation_total: number
+  warehouses_impacted: number
+}
+
 export type LineDirection = 'in' | 'out' | 'none'
 
 export interface LineSerial {
@@ -233,8 +249,33 @@ export interface ChallanSettlement {
   warehouse_id?: number | null
 }
 
+/** Packing header metadata.package_info — box/shipment physical details, all optional. */
+export interface PackagePackingInfo {
+  boxes?: number
+  total_weight_kg?: number
+  /** Free text, e.g. "40 x 30 x 20" — printed as entered, parsed loosely for the volume estimate. */
+  dimensions_cm?: string
+  transport_mode?: string
+}
+
+/** Packing header metadata.additional — logistics detail beyond the core fields. */
+export interface PackingAdditionalInfo {
+  carrier?: string
+  vehicle_no?: string
+  lr_awb_no?: string
+  dispatch_date?: string
+  expected_delivery?: string
+  contact_person?: string
+  contact_mobile?: string
+}
+
 export interface DocumentMetadata {
   bom_id?: number
+  /** Workflow labels the user picked on the entry screen (Direct GRN, Sample Goods…). */
+  tags?: string[]
+  /** Purchases' id for the order this receipt was raised against; never a local copy of one. */
+  purchase_order_id?: string
+  purchase_order_no?: string
   production_qty?: number
   finished_rate?: number
   warehouse_id?: number | null
@@ -242,6 +283,36 @@ export interface DocumentMetadata {
   challan_settlements?: ChallanSettlement[]
   linked_source_document_id?: number
   box_marks?: string[]
+  /** LANDED_COST: the receipts the charges are loaded onto. */
+  target_document_ids?: number[]
+  target_document_id?: number
+  /** Packing: free-form reference (Sales Order / DC / customer PO / internal). */
+  reference?: string
+  /** Packing: delivery address text. */
+  delivery_address?: string
+  /** Packing: box/package physical details. */
+  package_info?: PackagePackingInfo
+  /** Packing: selected handling-instruction chips (Fragile, Keep dry, …). */
+  handling_instructions?: string[]
+  /** Packing: carrier / dispatch / contact detail. */
+  additional?: PackingAdditionalInfo
+  /*
+   * Job work paperwork. These are the details a job-work challan carries and
+   * inv_documents has no column for — the transporter's number, the job worker's
+   * own reference, what the job is. They are held in metadata rather than
+   * migrated into columns because nothing in Inventory reads them: they are
+   * printed and searched, not posted on, and a column per printed field is how a
+   * document table stops being a document table.
+   */
+  challan_no?: string
+  challan_date?: string
+  reference_no?: string
+  job_work_type?: string
+  processing_instructions?: string
+  job_work_priority?: 'normal' | 'high' | 'urgent'
+  responsible_person?: string
+  /** Job Work Inward: the dispatch this receipt was raised against. */
+  reference_outward_document_id?: number
   [key: string]: unknown
 }
 
@@ -249,6 +320,17 @@ export interface CreateDocumentPayload {
   document_type: string
   document_date: string
   document_no?: string | null
+  /**
+   * The party's own number for the consignment — a supplier challan no., invoice no. or PO no.
+   * Held by the server as `source_document_no` and searched by the documents register's `q`.
+   *
+   * `source_document_id` stays null on these: the duplicate-posting guard
+   * (uq_inv_documents_source) only binds when an id is present, so a free-text
+   * reference never collides with another document's.
+   */
+  source_document_no?: string | null
+  /** The date on that paperwork, when it carries one. */
+  source_document_date?: string | null
   party_ref?: number | null
   party_name?: string | null
   from_warehouse_id?: number | null

@@ -22,6 +22,8 @@
 import { api } from './../services/api'
 import type { ListResponse } from '../services/api'
 import { fetchReport } from '../services/reportsApi'
+import { REPORT_METHODS, valuationApi } from '../services/valuationApi'
+import type { MethodSnapshot } from './valuationMethods'
 import type {
   MovementAnalysisSummary,
   NearExpirySummary,
@@ -109,10 +111,10 @@ export interface ReplenishmentSnapshot {
   total: number
 }
 
-export async function fetchReplenishment(signal?: AbortSignal): Promise<ReplenishmentSnapshot> {
+export async function fetchReplenishment(warehouseId: number | null = null, signal?: AbortSignal): Promise<ReplenishmentSnapshot> {
   const res = await fetchReport<ReplenishmentRow, ReplenishmentSummary>(
     'replenishment',
-    { only_triggered: 1, limit: WIDGET_ROWS, page: 1 },
+    { only_triggered: 1, warehouse_id: warehouseId ?? undefined, limit: WIDGET_ROWS, page: 1 },
     signal,
   )
   return { summary: res.summary, rows: res.data, total: res.meta.total }
@@ -156,4 +158,60 @@ export async function fetchRecentMovements(signal?: AbortSignal): Promise<StockM
     { signal },
   )
   return (res as ListResponse<StockMovementRow>).data
+}
+
+// ---------------------------------------------------------------------------
+// The same stock under each valuation method
+// ---------------------------------------------------------------------------
+
+/**
+ * One `GET /v1/valuation` per method, in parallel — the same four questions
+ * MethodComparisonPage asks, and the same contract: the report's `summary` is
+ * computed over the whole filtered set before the page is sliced, so `limit: 1`
+ * buys the company total for a few hundred bytes.
+ *
+ * A method whose request fails resolves to `summary: null` instead of rejecting
+ * the batch. One method the engine cannot cost at this date must not take the
+ * other three off the screen, and `null` is what makes the panel print
+ * "Unavailable" rather than a zero.
+ *
+ * Four valuation walks is the heaviest thing on this dashboard, which is why
+ * the panel defers it until the figures people came for have landed.
+ */
+export async function fetchMethodComparison(
+  asOf: string,
+  warehouseId: number | null,
+  signal?: AbortSignal,
+): Promise<MethodSnapshot[]> {
+  // `allSettled`, not `all`: four requests can fail, and `all` rejects on the
+  // first while leaving the other three rejections unhandled — which Node
+  // reports as an unhandled rejection and which, in a browser, is a warning
+  // nobody can act on. Every outcome is collected, then judged here.
+  const settled = await Promise.allSettled(
+    REPORT_METHODS.map((method) =>
+      valuationApi.snapshot(
+        { as_of: asOf, method, warehouse_id: warehouseId ?? undefined, limit: SUMMARY_ONLY, page: 1 },
+        signal,
+      ),
+    ),
+  )
+
+  // An abort is the page moving on, not an answer of "unavailable" — it has to
+  // reach useQuery so the stale result is discarded rather than rendered.
+  const aborted = settled.find(
+    (r) => r.status === 'rejected' && ((r.reason as Error)?.name === 'AbortError' || signal?.aborted),
+  )
+  if (aborted && aborted.status === 'rejected') throw aborted.reason
+
+  const failures = settled.filter((r) => r.status === 'rejected')
+  // One method the engine cannot cost is a row that reads "Unavailable". EVERY
+  // method failing is not a comparison with nothing in it — it is a failed
+  // request, and it has to surface as one so the card offers Retry and the
+  // page's status stops claiming the data is in sync.
+  if (failures.length === REPORT_METHODS.length && failures[0].status === 'rejected') throw failures[0].reason
+
+  return REPORT_METHODS.map((method, i) => {
+    const result = settled[i]
+    return { method, summary: result.status === 'fulfilled' ? result.value.summary : null }
+  })
 }

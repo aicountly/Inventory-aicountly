@@ -14,11 +14,12 @@
 import type { ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import type { PermissionKey } from '../access/AccessContext'
-import type { ListQuery, ListResponse } from '../services/api'
+import type { ListQuery, ListResponse, SortOrder } from '../services/api'
 import type { ReportResponse } from '../services/reportsApi'
 import type { ReportConfig } from '../reports/types'
 import type { IconTone } from '../ui/IconTile'
 import type { BadgeTone } from '../ui/Badge'
+import type { RegisterInsightSet } from './RegisterInsightStrip'
 
 export type { ReportConfig, ReportColumn, ReportFilter, FilterContext, FilterKind } from '../reports/types'
 
@@ -35,7 +36,32 @@ export interface StatCardSpec {
   to?: string
   /** Only for the red-when-negative case; never a fabricated comparison. */
   current?: number | null
+  /**
+   * The same figure at a past date, so the card can show a delta.
+   *
+   * Only ever a number the SERVER measured. Most Inventory endpoints send no
+   * comparatives and pass nothing here, and StatCard's contract is that an
+   * absent `previous` renders the hint line and no delta chip — that is the
+   * designed fallback, not a gap. A percentage computed from a figure nobody
+   * measured is a number on a manager's screen that no server ever produced.
+   */
+  previous?: number | null
+  /** For the figures where down is the good direction: ageing, overdue lines. */
+  invertDelta?: boolean
+  /** A measured series behind the figure. Same rule as `previous`. */
+  sparkline?: ReactNode
   emphasizeNegative?: boolean
+  /**
+   * Renders instead of the card, keeping its cell in the KPI grid.
+   *
+   * For the one tile in a strip that is not a figure — a written observation, say. It is
+   * still declared as a card so it takes the same track, the same height and the same
+   * place in the reading order; only its insides differ. A card with `node` carries no
+   * label, value or tone of its own, and the export skips it (toSheetCards keeps only
+   * string / number values), which is right: a sentence about the figures is not one of
+   * the figures the sheet is a record of.
+   */
+  node?: ReactNode
 }
 
 /** Sections of the registers hub. */
@@ -68,20 +94,117 @@ export interface RegisterGrouping<T> {
  * `columns` on purpose — the checkbox is a control, not data, and a register
  * whose CSV carried an empty first column would be exporting its own chrome.
  */
-export interface RegisterSelection<T> {
+export interface RegisterSelection<T, S> {
   /** Stable identity for a row, unique across pages. */
   idOf: (row: T) => string | number
   /** Column header text for screen readers. Defaults to "Select". */
   label?: string
   /** Why this row cannot be picked, or null when it can. */
   disabledReason?: (row: T) => string | null
-  /** Rendered in the toolbar while at least one row is selected. */
-  actions: (selected: readonly T[], clear: () => void) => ReactNode
+  /**
+   * Rendered in the toolbar while at least one row is selected.
+   *
+   * `summary` is the server's aggregate over the whole filtered set, so a
+   * selection can say what share of it has been ticked — "62% of stock value"
+   * is the reason to tick rows on a valuation register at all, and it cannot
+   * be worked out from the selected rows alone.
+   */
+  actions: (selected: readonly T[], clear: () => void, summary: S) => ReactNode
 }
 
 export interface RegisterFetchArgs {
   query: ListQuery
   signal?: AbortSignal
+  /**
+   * Why the rows are being fetched.
+   *
+   * `page` is the screen; `export` is the pager walking every page for a CSV,
+   * a sheet or a print. A register that asks its endpoint for an aggregate over
+   * the whole filtered set wants it once, with the page — asking again on each
+   * of seventeen export pages re-runs the same aggregate for figures the
+   * caller already holds.
+   */
+  purpose?: 'page' | 'export'
+}
+
+/**
+ * The filter *panel* arrangement: heading, quick period chips, a labelled grid
+ * and an overflow popover.
+ *
+ * Declaring this is what opts a register out of the one-row toolbar. It changes
+ * the arrangement only — the filters, their keys, their values and the moment
+ * they apply are the `filters` array's business either way.
+ */
+export interface RegisterFilterPanelSpec {
+  /** Card heading. Defaults to "Filters". */
+  title?: string
+  /** One line under the heading, naming what the filters are for. */
+  description?: string
+  /**
+   * Period presets offered as chips, by id (see registers/dateRangePresets).
+   * Only meaningful on a register that declares a `date_range` filter.
+   */
+  quickRanges?: readonly string[]
+  /** What the "no period at all" chip is called here — "All documents". */
+  allRangeLabel?: string
+  /**
+   * Filter keys that get a cell in the grid. Everything else declared moves
+   * behind "More filters", which carries the count of those that are set.
+   * Omit and every filter is in the grid.
+   */
+  primaryKeys?: readonly string[]
+}
+
+/**
+ * One way of reading the same register.
+ *
+ * A view is NOT a second screen. It is the same question, the same filters and
+ * the same endpoint, read a different way: the pending register's Follow-up view
+ * is its own rows narrowed to the ones someone has to chase, and its Summary view
+ * is those rows aggregated. That is the whole constraint — a "view" that fetched
+ * a different dataset would be a page wearing a tab.
+ *
+ * `query` is how a view narrows: it is merged into the filters the register sends,
+ * so the narrowing happens in SQL and the totals, the KPI cards and the pager all
+ * describe the set the reader is actually looking at. A view that filtered rows
+ * after they arrived would page over the wrong count.
+ */
+export interface RegisterView<T, S> {
+  /** URL value (`?view=follow_up`) and identity. The first view is the default. */
+  key: string
+  label: string
+  icon?: LucideIcon
+  /** One line under the table heading while this view is on. */
+  hint?: string
+  /** Extra filter values merged into the register's query while this view is on. */
+  query?: Record<string, string>
+  /** Column keys this view shows, in this order. Omit to keep the register's own. */
+  columns?: readonly string[]
+  /** Sort applied when the reader switches to this view and has not chosen one. */
+  defaultSort?: string
+  defaultOrder?: SortOrder
+  /**
+   * Replaces the table entirely — the aggregated view.
+   *
+   * It is handed the same summary and rows the table would have had, so a
+   * breakdown cannot quietly answer a differently filtered question.
+   */
+  render?: (args: AnalyticsArgs<T, S>) => ReactNode
+  emptyMessage?: string
+}
+
+/** What an analytics band is handed. See `RegisterConfig.analytics`. */
+export interface AnalyticsArgs<T, S> {
+  /** The server's aggregate over the whole filtered set. */
+  summary: S
+  /** The rows on this page — never the basis of a figure about the whole set. */
+  rows: readonly T[]
+  /** Effective filter values, defaults resolved: what the register was asked. */
+  values: Record<string, string>
+  /** The filters as the API received them. */
+  query: ListQuery
+  /** True while the register itself is refetching. */
+  loading: boolean
 }
 
 export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
@@ -116,8 +239,50 @@ export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
    */
   headerActions?: ReactNode
 
+  /**
+   * How the screen is arranged.
+   *
+   * `toolbar` (the default) is the one-row filter bar and the compact
+   * breadcrumb header every register has always had. `panel` is the wider
+   * treatment: a page header with the title and its description, the filter
+   * panel below it, and KPI cards laid out four to a row. It suits a register
+   * with many filters that people work in all day rather than glance at.
+   */
+  layout?: 'toolbar' | 'panel'
+
+  /** Panel arrangement for the filters. Implies `layout: 'panel'` is wanted. */
+  filterPanel?: RegisterFilterPanelSpec
+
+  /**
+   * Decoration beside the title in `page` layout, rendered only at ≥1536px and
+   * hidden from assistive technology. Nothing a reader needs belongs here.
+   */
+  headerAside?: ReactNode
+
+  /**
+   * The scope line's period, decided from the live filter values.
+   *
+   * `scopePeriod` is a constant, which is right for a register that is never
+   * read inside the selected year. A register carrying a filter that WIDENS the
+   * scope — "every financial year" — has to be able to say so, because the
+   * scope line is stamped on the printed sheet and is the only record there of
+   * what was asked for. Takes precedence over `scopePeriod` when it returns a
+   * string; return undefined to fall back to it.
+   */
+  scopePeriodFor?: (values: Record<string, string>) => string | undefined
+
   /** Row selection and the bulk actions it enables. */
-  selectable?: RegisterSelection<T>
+  selectable?: RegisterSelection<T, S>
+
+  /**
+   * A per-row control pinned to the right of the table — the "⋮" menu.
+   *
+   * Declared here rather than as a column for the same reason the checkbox is:
+   * it is chrome, not data. A CSV whose last column was an empty string under
+   * the header "" would be exporting the screen's furniture, and the column
+   * configurator would offer to hide a menu.
+   */
+  rowActions?: (row: T) => ReactNode
 
   /**
    * What the scope line says about the period, when the selected financial
@@ -134,6 +299,7 @@ export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
 
   /** Row → destination URL. Enables click / Enter drill-through. */
   drillTo?: (row: T) => string | null
+
 
   /**
    * The pinned `<tfoot>`, keyed by column key.
@@ -159,8 +325,127 @@ export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
    */
   summaryForRows?: (summary: S, rows: readonly T[]) => S
 
-  /** Clickable KPI cards above the table. Falls back to `summary` when absent. */
-  kpis?: (summary: S, response: ReportResponse<T, S>) => StatCardSpec[]
+  /**
+   * Clickable KPI cards above the table. Falls back to `summary` when absent.
+   *
+   * `values` is the effective filter set, defaults resolved — what the register was
+   * asked. A card that drills down needs it: a link built from the summary alone
+   * silently drops the reader's warehouse or date and lands them on a wider set than
+   * the figure they clicked, which is the one thing a drill-down must never do.
+   * Optional, because most cards build no link and the configs written before it
+   * existed pass two arguments.
+   */
+  kpis?: (
+    summary: S,
+    response: ReportResponse<T, S>,
+    values?: Record<string, string>,
+  ) => StatCardSpec[]
+
+  /**
+   * An analytics band under the KPI cards.
+   *
+   * Distinct from `insights`, which states facts about the rows in words. This
+   * is for a register whose question is about the SHAPE of the set — "where is
+   * my stock value, and how has it moved" is not answerable by any one row, nor
+   * by a sentence about them.
+   *
+   * Opt-in, because most registers are read as a list and a chart strip over
+   * one is noise. It is handed the server's own summary and the page's rows so
+   * it charts what the register reports rather than a second, differently
+   * filtered answer; anything more it must fetch itself, from the same
+   * endpoints under the same filters. Screen only — the printed sheet carries
+   * the figures, not the pictures.
+   */
+  analytics?: (args: AnalyticsArgs<T, S>) => ReactNode
+
+  /**
+   * The intelligence rail: a column of cards beside the table, about the same filtered
+   * set the table is showing.
+   *
+   * For a register a reader works in rather than glances at, where the answer to "and
+   * what else should I know" is a handful of small, stable panels — where the stock
+   * sits, what is moving, what needs attention — that would each be a poor use of a
+   * whole row above the table. It is handed the same summary and rows as `analytics`,
+   * so a figure in the rail cannot disagree with the figure in the footer.
+   *
+   * Screen only (`print:hidden`, like every other piece of chrome): the sheet carries
+   * the rows, the KPI cards and the totals, which are the record. A register that
+   * declares one stops filling the viewport and takes a bounded table instead — a rail
+   * and a viewport-locked table cannot share one height.
+   */
+  aside?: (args: AnalyticsArgs<T, S>) => ReactNode
+
+  /**
+   * The analytics band's own geometry while the FIRST response is in flight.
+   *
+   * `analytics` is handed a summary, so it cannot render before one exists and the band
+   * would otherwise appear from nothing and shove the table down the page. Same contract
+   * as the KPI cards' skeleton: first load only — a refresh keeps the charts on screen
+   * and dims them rather than replacing a figure a reader is looking at with a grey bar.
+   */
+  analyticsSkeleton?: ReactNode
+
+  /**
+   * The operational strip under the KPI cards — what the rows on screen say
+   * about the state of things, rather than what they sum to.
+   *
+   * Derive it from the summary and the rows the register already has; never
+   * fetch for it, and never state a count more widely than the data supports.
+   * On an endpoint whose summary is the served page, say "on this page" in the
+   * hint the same way the cards and the footer do. A register that declares
+   * none simply shows no strip.
+   */
+  insights?: (
+    summary: S,
+    response: ReportResponse<T, S>,
+    args: AnalyticsArgs<T, S>,
+  ) => RegisterInsightSet
+
+
+  /**
+   * Heading on the empty state, when filters are set and nothing matched.
+   *
+   * "No rows match these filters" is right for a register with no better word
+   * for its rows, and vague for one that has: a reader who filtered a stock
+   * grid is looking for stock, and being told about "rows" makes them check
+   * whether they are on the screen they think they are. Defaults to that
+   * sentence; `emptyMessage` remains the line under it.
+   */
+  emptyTitle?: string
+
+  /**
+   * Heading over the table card. Defaults to the register's own title.
+   *
+   * A node rather than a string because a register with `views` puts its view
+   * switcher here: the switcher belongs at the head of the card whose contents
+   * it changes, on the left, where a heading would otherwise sit.
+   */
+  tableTitle?: ReactNode
+  /** One line under that heading, saying what the rows on screen are. */
+  tableHint?: string
+  /**
+   * A register's own control in the table card's header, beside Customize
+   * columns — "Add item" on the valuation register.
+   *
+   * Here rather than in `extra` because `extra` renders ABOVE the card: a
+   * register that put its heading and button there would draw a second heading
+   * over the one the card already has.
+   *
+   * As a function it is handed the same summary and rows the table has, which is
+   * what lets a register pin live operational figures there — the pending
+   * register's inbound / outbound / net exposure chips — without fetching them
+   * a second time or restating them from the page instead of the filtered set.
+   */
+  tableActions?: ReactNode | ((args: AnalyticsArgs<T, S>) => ReactNode)
+
+  /**
+   * Ways of reading this register, offered as a switcher at the head of the
+   * table card. The first is the default; the choice lives in the URL as
+   * `?view=`, so a link to the follow-up list is a link to the follow-up list.
+   *
+   * Declare none and the register renders exactly as it always has.
+   */
+  views?: readonly RegisterView<T, S>[]
 
   /**
    * Groupings the reader can switch between, with per-group subtotals. The
@@ -191,10 +476,37 @@ export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
   group?: RegisterGroup
   icon?: LucideIcon
   tone?: IconTone
-  /** Shown on the hub tile instead of `description` when the full text is long. */
+  /**
+   * The lead line, where the full `description` is too long to be one.
+   *
+   * Used by the hub tile and by the `page` header. `description` stays the
+   * register's full self-description and is what the export and the printed
+   * sheet carry — a caveat that belongs on paper ("this type carries no
+   * valuation…") should not also be the screen's subtitle when the screen
+   * already states it in its own callout.
+   */
   shortDescription?: string
   /** Register is reachable at `/registers/<path>` unless this overrides it. */
   routePath?: string
+  /**
+   * What to show when the register is empty and it is NOT the filters' doing.
+   *
+   * "No rows match these filters. Widen the period or clear a filter" is the
+   * wrong sentence for a company that has simply never entered one of these —
+   * it sends the reader hunting for a filter that is not there. Registers that
+   * can be legitimately empty supply the other screen; the rest fall back to
+   * the filtered message, which is right often enough.
+   *
+   * As a NODE it is shown whenever no filter is set, which is the best guess
+   * available without asking the server. As a FUNCTION the register decides,
+   * because some endpoints can tell the two apart properly: the pending
+   * register's answers whether anything is outstanding at all, filters aside,
+   * so a reader with a narrow filter and an empty company is told they are all
+   * square rather than sent to widen a filter that was never the problem.
+   * Return null to fall through to the filtered message.
+   */
+  emptyUnfiltered?: ReactNode | ((summary: S, activeFilterCount: number) => ReactNode | null)
+
   /** Noun used in the totals label: "Total (412 movements)". */
   rowNoun?: string
   rowNounPlural?: string

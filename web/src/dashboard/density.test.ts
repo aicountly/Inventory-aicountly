@@ -3,14 +3,14 @@ import type { ReactElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
-import { DashboardHeader } from './components/DashboardHeader'
+import { DashboardPageHeader } from './components/DashboardPageHeader'
 import { KpiStrip } from './components/KpiStrip'
 import type { KpiCardSpec } from './model'
 
 /**
  * Density, against Books rather than against the eye.
  *
- * Both products now rem-scale off the same 13px root, so any spacing this screen
+ * Both products now rem-scale off the same 16px root, so any spacing this screen
  * tightens by hand is a divergence, not a correction — the same markup would
  * then read differently in the two apps, which is the one thing a verbatim port
  * is for. The Books originals are
@@ -63,22 +63,49 @@ describe('KPI strip density', () => {
   })
 })
 
-describe('dashboard greeting', () => {
-  it('uses the Books heading scale', () => {
-    const html = render(
-      createElement(DashboardHeader, {
+describe('dashboard heading', () => {
+  const header = () =>
+    render(
+      createElement(DashboardPageHeader, {
+        title: 'Inventory overview',
+        description: 'Your stock position and the things that need attention first.',
         companyName: 'Acme Traders',
         fyLabel: '2026-27',
         branchLabel: 'All branches',
         asOf: '2026-09-14',
-        lastSyncedAt: null,
+        onAsOf: () => {},
+        maxDate: '2026-09-15',
+        warehouses: [],
+        warehouseId: null,
+        onWarehouseId: () => {},
         refreshing: false,
         onRefresh: () => {},
-        nearExpiryDays: 30,
-        nearExpiryChoices: [15, 30],
-        onNearExpiryDays: () => {},
+        lastSyncedAt: null,
       }),
     )
-    expect(html).toContain('text-xl md:text-2xl')
+
+  it('uses the Books heading scale', () => {
+    // Asserted as two classes on the h1 rather than as one literal string:
+    // the exact order of utility classes is a formatting detail, and pinning it
+    // makes the test fail on a rename that changed nothing a reader can see.
+    const h1 = /<h1[^>]*class="([^"]*)"/.exec(header())?.[1] ?? ''
+    expect(h1, 'no h1 was rendered').not.toBe('')
+    expect(h1).toContain('text-xl')
+    expect(h1).toContain('md:text-2xl')
+  })
+
+  it('states the whole scope every figure below it is counted in', () => {
+    // The scope line is the contract between a card and the register behind it.
+    // Drop any one of these and a figure stops being reconcilable.
+    const html = header()
+    for (const part of ['Acme Traders', '2026-27', 'All branches', 'All warehouses', '14 Sept 2026']) {
+      expect(html, `scope line is missing ${part}`).toContain(part)
+    }
+  })
+
+  it('will not offer a date in the future', () => {
+    // A dashboard reports what has happened. A cutoff after today would ask the
+    // server for figures that do not exist yet.
+    expect(header()).toContain('max="2026-09-15"')
   })
 })

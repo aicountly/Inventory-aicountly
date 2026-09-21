@@ -5,7 +5,7 @@
 
 import { api } from './api'
 import type { ItemResponse, ListQuery, ListResponse } from './api'
-import type { CreateDocumentPayload, DocumentListRow, DocumentTypeRow, InventoryDocument, PrintSnapshot } from '../documents/types'
+import type { CreateDocumentPayload, DocumentLine, DocumentListRow, DocumentListSummary, DocumentTypeRow, InventoryDocument, PrintSnapshot } from '../documents/types'
 
 const BASE = 'v1/inventory-documents'
 
@@ -23,6 +23,18 @@ export interface DocumentListFilters extends ListQuery {
   source_app?: string
   party_ref?: number | string
   all_fy?: boolean
+  /**
+   * Ask for the aggregate over the whole filtered set (`summary=1`).
+   *
+   * Off by default: it is two extra reads, and a caller walking every page for
+   * an export wants them once, with the first page, not once per page.
+   */
+  summary?: number
+}
+
+/** The list, with the aggregate when `summary=1` was asked for. */
+export interface DocumentListResponse extends ListResponse<DocumentListRow> {
+  summary?: DocumentListSummary
 }
 
 export interface MutationResponse<T> extends ItemResponse<T> {
@@ -53,13 +65,31 @@ function idempotent(): { headers: Record<string, string> } {
 }
 
 export const documentsApi = {
-  list(filters: DocumentListFilters = {}, signal?: AbortSignal): Promise<ListResponse<DocumentListRow>> {
+  list(filters: DocumentListFilters = {}, signal?: AbortSignal): Promise<DocumentListResponse> {
     return api.list<DocumentListRow>(BASE, filters, { signal })
   },
 
   async get(id: number, signal?: AbortSignal): Promise<InventoryDocument> {
     const res = await api.get<ItemResponse<InventoryDocument>>(`${BASE}/${id}`, { signal })
     return res.data
+  },
+
+  /**
+   * Lines for several documents in one call, keyed by document id (DocumentsController::lines).
+   *
+   * The list endpoint carries a line COUNT and nothing about the lines themselves, so a screen
+   * that wants to say what a document actually did — which finished item an assembly built, out
+   * of how many components — would otherwise fetch each document separately. The server answers
+   * for every id it was asked about (an id that is not this company's comes back as an empty
+   * list, never as a gap), so the caller can index straight into the map.
+   */
+  async lines(documentIds: number[], signal?: AbortSignal): Promise<Record<number, DocumentLine[]>> {
+    const ids = [...new Set(documentIds.filter((id) => Number.isFinite(id) && id > 0))]
+    if (ids.length === 0) return {}
+    const res = await api.get<ItemResponse<Record<string, DocumentLine[]>>>(`${BASE}/lines`, { query: { document_ids: ids.join(',') }, signal })
+    const out: Record<number, DocumentLine[]> = {}
+    for (const [id, rows] of Object.entries(res.data ?? {})) out[Number(id)] = Array.isArray(rows) ? rows : []
+    return out
   },
 
   async create(payload: CreateDocumentPayload): Promise<InventoryDocument> {

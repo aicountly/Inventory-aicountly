@@ -22,6 +22,7 @@ export const warehouseFilter: ReportFilter = { key: 'warehouse_id', kind: 'wareh
 export const batchFilter: ReportFilter = { key: 'batch_id', kind: 'batch', label: 'Batch' }
 export const itemGroupFilter: ReportFilter = { key: 'item_grp_id', kind: 'item_group', label: 'Item group' }
 export const stockCategoryFilter: ReportFilter = { key: 'stock_cat_id', kind: 'stock_category', label: 'Category' }
+export const brandFilter: ReportFilter = { key: 'brand_id', kind: 'brand', label: 'Brand' }
 export const nonzeroFilter: ReportFilter = { key: 'nonzero', kind: 'toggle', label: 'Hide zero rows', defaultOn: true }
 export const byWarehouseFilter: ReportFilter = { key: 'by_warehouse', kind: 'toggle', label: 'Split by warehouse', defaultOn: false }
 
@@ -100,8 +101,14 @@ export function intColumn<T>(key: keyof T & string, header: string, sortable = t
   return { key, header, align: 'right', sortKey: sortable ? key : undefined, format: 'int' }
 }
 
+/**
+ * `cellClassName` is not decoration: a date is one token, and a narrow column
+ * in a squeezed table breaks "28 Sept 2026" across three lines and takes the
+ * whole row's height with it. The table already scrolls sideways when the
+ * columns want more room than the viewport has.
+ */
 export function dateColumn<T>(key: keyof T & string, header: string, sortable = true): ReportColumn<T> {
-  return { key, header, sortKey: sortable ? key : undefined, format: 'date', render: (r) => formatDate(r[key]) }
+  return { key, header, sortKey: sortable ? key : undefined, format: 'date', cellClassName: 'whitespace-nowrap', render: (r) => formatDate(r[key]) }
 }
 
 export function dateTimeColumn<T>(key: keyof T & string, header: string, sortable = true): ReportColumn<T> {
@@ -110,6 +117,7 @@ export function dateTimeColumn<T>(key: keyof T & string, header: string, sortabl
     header,
     sortKey: sortable ? key : undefined,
     format: 'datetime',
+    cellClassName: 'whitespace-nowrap',
     render: (r) => formatDateTime(r[key]),
   }
 }
