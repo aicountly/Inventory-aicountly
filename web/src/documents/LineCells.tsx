@@ -1,11 +1,11 @@
 import { memo } from 'react'
 import type { KeyboardEvent } from 'react'
 import { AlertTriangle, Hash, Layers, X } from 'lucide-react'
-import { Badge } from '../../ui/Badge'
-import { Tooltip } from '../../ui/Tooltip'
-import { cx } from '../../ui/cx'
-import { FIELD_BASE, FIELD_INVALID, FIELD_OK } from '../../ui/Input'
-import type { LineDraft } from '../formModel'
+import { Badge } from '../ui/Badge'
+import { Tooltip } from '../ui/Tooltip'
+import { cx } from '../ui/cx'
+import { FIELD_BASE, FIELD_INVALID, FIELD_OK } from '../ui/Input'
+import type { LineDraft } from './formModel'
 
 /**
  * The cells shared by both line tables. Small, memoised and free of data fetching, because these

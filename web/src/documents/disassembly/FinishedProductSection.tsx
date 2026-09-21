@@ -15,7 +15,7 @@ import { SerialPicker } from '../SerialPicker'
 import { WarehouseSelect } from '../WarehouseSelect'
 import { lineBaseQty } from '../formModel'
 import type { LineDraft } from '../formModel'
-import { AvailabilityCell, CellMessage, NumberCell, PickedItemCell } from './LineCells'
+import { AvailabilityCell, CellMessage, NumberCell, PickedItemCell } from '../LineCells'
 import type { DisassemblyIssue } from './validation'
 
 export interface FinishedProductSectionProps {

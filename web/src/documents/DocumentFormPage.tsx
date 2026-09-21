@@ -13,6 +13,7 @@ import { DocumentForm } from './DocumentForm'
 import { BatchAdjustmentPage } from './batch/BatchAdjustmentPage'
 import { DeliveryChallanForm } from './challan/DeliveryChallanForm'
 import { ConsumptionForm } from './consumption/ConsumptionForm'
+import { AssemblyPage } from './assembly/AssemblyPage'
 import { DisassemblyPage } from './disassembly/DisassemblyPage'
 import { InwardChallanForm } from './grn/InwardChallanForm'
 import { JobWorkPage } from './jobwork/JobWorkPage'
@@ -260,8 +261,21 @@ export function DocumentFormPage() {
         />
       )
     }
-    // Disassembly brings its own page shell — breadcrumbs, context panel, sticky footer — so it
-    // replaces the wrapper rather than sitting inside it, like every screen in this list.
+    // Assembly and disassembly each bring their own page shell — breadcrumbs, context panel,
+    // sticky footer — so they replace the wrapper rather than sitting inside it, like every
+    // screen in this list.
+    if (spec.formKind === 'assembly') {
+      return (
+        <AssemblyPage
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          statusBadge={<Badge tone={STATUS_BADGE_TONE[statusTone(doc.status)]}>{STATUS_LABELS[doc.status as DocumentStatus] ?? doc.status}</Badge>}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
     if (spec.formKind === 'disassembly') {
       return <DisassemblyPage key={doc.document_id} spec={spec} documentId={doc.document_id} initial={initial} document={doc} />
     }
@@ -395,6 +409,9 @@ export function DocumentFormPage() {
   }
   if (s.code === 'CONSUMPTION') {
     return <ConsumptionForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
+  if (s.formKind === 'assembly') {
+    return <AssemblyPage key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
   }
   if (s.formKind === 'disassembly') return <DisassemblyPage spec={s} />
   if (s.formKind === 'landed_cost') return <LandedCostAllocationPage key={s.code} spec={s} />

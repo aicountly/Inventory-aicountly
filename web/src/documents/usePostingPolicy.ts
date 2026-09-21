@@ -9,11 +9,11 @@
  */
 
 import { useMemo } from 'react'
-import { useCompany } from '../../company/CompanyContext'
-import { useQuery } from '../../hooks/useQuery'
-import { isApiError } from '../../services/api'
-import { settingsApi } from '../../services/settingsApi'
-import type { NegativeStockPolicy, ValuationMethod } from '../../services/settingsApi'
+import { useCompany } from '../company/CompanyContext'
+import { useQuery } from '../hooks/useQuery'
+import { isApiError } from '../services/api'
+import { settingsApi } from '../services/settingsApi'
+import type { NegativeStockPolicy, ValuationMethod } from '../services/settingsApi'
 
 export interface PostingPolicy {
   /** ISO 4217 code of the company's base currency; null until settings load. */
