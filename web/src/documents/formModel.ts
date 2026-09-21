@@ -33,6 +33,12 @@ export interface LineDraft {
   from_warehouse_id: number | null
   batch_id: number | null
   batch_no: string | null
+  /**
+   * UI only: the expiry of the chosen batch, or the expiry a batch created on this line will
+   * carry. Expiry belongs to the batch, never to the line, so nothing sends it in the payload —
+   * it is here so a receiving grid can show an Expiry column beside Batch without a second read.
+   */
+  expiry_date: string | null
   direction: 'in' | 'out' | null
   qty: string
   rate: string
@@ -51,6 +57,13 @@ export interface HeaderDraft {
   document_type: string
   document_date: string
   document_no: string
+  /**
+   * The supplier's own number for this consignment — PO no. / challan no. / invoice no.
+   * Stored as `source_document_no`, which is what the documents register searches on.
+   */
+  reference: string
+  /** The date on that paperwork. Stored as `source_document_date`. */
+  reference_date: string
   party_ref: string
   party_name: string
   from_warehouse_id: number | null
@@ -101,6 +114,7 @@ export function newLine(spec: DocumentTypeSpec, partial: Partial<LineDraft> = {}
     from_warehouse_id: null,
     batch_id: null,
     batch_no: null,
+    expiry_date: null,
     direction: defaultDirection(spec),
     qty: '',
     rate: '',
@@ -121,6 +135,8 @@ export function newHeader(spec: DocumentTypeSpec, today: string): HeaderDraft {
     document_type: spec.code,
     document_date: today,
     document_no: '',
+    reference: '',
+    reference_date: '',
     party_ref: '',
     party_name: '',
     from_warehouse_id: null,
@@ -184,6 +200,8 @@ export function draftFromDocument(doc: InventoryDocument, spec: DocumentTypeSpec
     document_type: doc.document_type,
     document_date: doc.document_date?.slice(0, 10) ?? '',
     document_no: doc.document_no ?? '',
+    reference: doc.source_document_no ?? '',
+    reference_date: doc.source_document_date?.slice(0, 10) ?? '',
     party_ref: doc.party_ref !== null && doc.party_ref !== undefined ? String(doc.party_ref) : '',
     party_name: doc.party_name ?? '',
     from_warehouse_id: doc.from_warehouse_id,
@@ -227,6 +245,7 @@ export function lineFromStored(l: DocumentLine, spec: DocumentTypeSpec): LineDra
     from_warehouse_id: isTransfer ? l.warehouse_id : null,
     batch_id: l.batch_id,
     batch_no: l.batch_no ?? null,
+    expiry_date: l.expiry_date ?? null,
     direction: spec.lineMode === 'by_line' ? (l.direction === 'in' || l.direction === 'out' ? l.direction : null) : defaultDirection(spec),
     qty: numStr(l.qty),
     rate: numStr(l.source_transaction_rate),
@@ -276,6 +295,9 @@ export function validateDraft(header: HeaderDraft, lines: LineDraft[], spec: Doc
   }
   if (header.returnable && header.expected_return_date && !/^\d{4}-\d{2}-\d{2}$/.test(header.expected_return_date)) {
     errors.push('Expected return date must be YYYY-MM-DD.')
+  }
+  if (header.reference_date && !/^\d{4}-\d{2}-\d{2}$/.test(header.reference_date)) {
+    errors.push('Reference date must be YYYY-MM-DD.')
   }
   if (spec.formKind === 'inward_challan' && header.stock_effect === 'settle_deferred' && !header.metadata.linked_source_document_id) {
     errors.push('Pick the deferred purchase this inward challan settles.')
@@ -391,6 +413,8 @@ export function toPayload(header: HeaderDraft, lines: LineDraft[], spec: Documen
     document_type: spec.code,
     document_date: header.document_date,
     document_no: header.document_no.trim() || null,
+    source_document_no: header.reference.trim() || null,
+    source_document_date: header.reference_date || null,
     narration: header.narration.trim() || null,
     lines: lines.filter((l) => !isBlankLine(l)).map((l) => lineToPayload(l, spec, header)),
   }
