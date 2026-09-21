@@ -1,4 +1,4 @@
-import { Boxes, Layers, ScanBarcode, Warehouse } from 'lucide-react'
+import { Boxes, Layers, ScanBarcode } from 'lucide-react'
 import type { ReportMethod } from '../../services/valuationApi'
 import { METHOD_LABELS, REPORT_METHODS } from '../../services/valuationApi'
 import type {
@@ -8,13 +8,10 @@ import type {
   SerialStockSummary,
   StockSummaryRow,
   StockSummarySummary,
-  WarehouseStockRow,
-  WarehouseStockSummary,
 } from '../../services/reportsApi'
 import { buildTotalsRow, totalsLabel } from '../../registers/registerTotals'
 import type { RegisterConfig } from '../../registers/RegisterConfig'
 import { StatusBadge } from '../../ui/StatusBadge'
-import { Card } from '../../ui/Card'
 import { formatInt, formatMoney, formatQty } from '../../utils/format'
 import { expiryTone } from '../helpers'
 import type { ReportFilter } from '../types'
@@ -114,76 +111,15 @@ export const stockSummaryConfig: RegisterConfig<StockSummaryRow, StockSummarySum
   ],
 }
 
-export const warehouseStockConfig: RegisterConfig<WarehouseStockRow, WarehouseStockSummary> = {
-  slug: 'warehouse_stock',
-  path: 'warehouse-stock',
-  title: 'Warehouse stock',
-  description: 'Closing stock per item and warehouse as at a date',
-  group: 'stock',
-  icon: Warehouse,
-  defaultSort: 'item_name',
-  minWidth: 900,
-  filters: [
-    { key: 'to', kind: 'date', label: 'As at', defaultValue: (c) => c.today },
-    itemFilter,
-    warehouseFilter,
-    methodFilter,
-    nonzeroFilter,
-  ],
-  columns: [
-    itemColumn<WarehouseStockRow>(),
-    textColumn<WarehouseStockRow>('warehouse_name', 'Warehouse'),
-    textColumn<WarehouseStockRow>('unit_symbol', 'Unit', false),
-    qtyColumn<WarehouseStockRow>('closing_qty', 'Closing', { strong: true }),
-    moneyColumn<WarehouseStockRow>('unit_cost', 'Unit cost'),
-    moneyColumn<WarehouseStockRow>('closing_value', 'Value', { strong: true }),
-  ],
-  rowKey: (r) => `${r.item_id}:${r.warehouse_id ?? 0}`,
-  drillTo: (r) => ledgerLink(r.item_id, r.warehouse_id),
-  totals: (s) =>
-    buildTotalsRow(
-      [
-        { key: 'item_name' },
-        { key: 'warehouse_name' },
-        { key: 'unit_symbol' },
-        { key: 'closing_qty', align: 'right' },
-        { key: 'unit_cost', align: 'right' },
-        { key: 'closing_value', align: 'right' },
-      ],
-      { closing_qty: formatQty(s.closing_qty), closing_value: formatMoney(s.closing_value) },
-      { label: totalsLabel(s.rows, 'row'), labelKey: 'item_name' },
-    ),
-  summary: (s) => [
-    { label: 'Rows', value: formatInt(s.rows) },
-    { label: 'Closing qty', value: formatQty(s.closing_qty) },
-    { label: 'Closing value', value: formatMoney(s.closing_value), tone: 'good' },
-  ],
-  extra: (s) =>
-    s.by_warehouse?.length ? (
-      <Card padding="none" className="shrink-0 overflow-hidden print:hidden">
-        <div className="border-b border-gray-100 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
-          By warehouse
-        </div>
-        <div className="max-h-40 overflow-auto">
-          <table className="w-full text-sm">
-            <tbody>
-              {s.by_warehouse.map((w) => (
-                <tr key={w.warehouse_id ?? 0} className="border-b border-gray-50 last:border-0">
-                  <td className="px-3 py-1.5 text-gray-700">{w.warehouse_name ?? '(no warehouse)'}</td>
-                  <td className="px-3 py-1.5 text-right tabular-nums text-gray-700">
-                    {formatQty(w.closing_qty)}
-                  </td>
-                  <td className="px-3 py-1.5 text-right tabular-nums font-semibold text-gray-900">
-                    {formatMoney(w.closing_value)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Card>
-    ) : null,
-}
+/**
+ * Warehouse stock.
+ *
+ * Declared in `registers/warehouse/`, which is where its cells, its rail and its
+ * deterministic insight rules live, and re-exported here so `reports/configs/index.ts`
+ * and every existing import of it are unchanged. It stays a `RegisterConfig` served by
+ * the same engine at both `/reports/warehouse-stock` and `/registers/warehouse-stock`.
+ */
+export { warehouseStockConfig } from '../../registers/warehouse/warehouseStockRegister'
 
 export const batchStockConfig: RegisterConfig<BatchStockRow, BatchStockSummary> = {
   slug: 'batch_stock',
