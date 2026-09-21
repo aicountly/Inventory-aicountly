@@ -225,9 +225,23 @@ export interface BomLine {
   unit_symbol?: string | null
 }
 
+/** One chip in the list's Components column — the API's `components_preview`. */
+export interface BomComponentPreview {
+  item_id: number
+  item_name: string | null
+  item_sku: string | null
+  qty: number
+  unit_symbol: string | null
+  scrap_percent: number
+  /** 0 when the component item has since been deactivated. */
+  item_is_active: number | null
+}
+
 export interface Bom extends AuditFields {
   bom_id: number
   bom_uuid?: string
+  /** `BOM-007` — formatted by the API from the row's id, not stored. */
+  bom_code?: string
   bom_name: string
   finished_item_id: number
   yield_qty: number
@@ -236,9 +250,104 @@ export interface Bom extends AuditFields {
   finished_item_name: string | null
   finished_item_sku: string | null
   finished_item_unit_id?: number | null
+  finished_item_is_active?: number | null
+  finished_item_grp_id?: number | null
+  finished_item_group_name?: string | null
   yield_unit_symbol: string | null
   line_count: number
+  /** Component lines only; `line_count` also counts by-products and scrap. */
+  component_count?: number
+  by_product_count?: number
+  scrap_count?: number
+  /** Present when the list was asked for `with_preview`. */
+  components_preview?: BomComponentPreview[]
+  /** Resolved from the company's member roster; null for a service actor. */
+  created_by_name?: string | null
+  updated_by_name?: string | null
   lines?: BomLine[]
+}
+
+/** `GET /v1/bill-of-materials` — everything the workspace can narrow by. */
+export interface BomListQuery extends ListQuery {
+  status?: 'active' | 'inactive' | ''
+  finished_item_id?: number | ''
+  component_item_id?: number | ''
+  item_grp_id?: number | ''
+  min_components?: number | ''
+  max_components?: number | ''
+  has_scrap?: 0 | 1 | ''
+  has_by_products?: 0 | 1 | ''
+  created_from?: string
+  created_to?: string
+  created_by?: string
+  updated_from?: string
+  updated_to?: string
+  updated_by?: string
+  /** Ask for the component chips and the per-kind counts in the same request. */
+  with_preview?: 0 | 1
+}
+
+/**
+ * `GET /v1/bill-of-materials/summary` — the figures above the list.
+ *
+ * `estimated_material_cost` is null when NOTHING could be priced. It is not a
+ * zero: a zero would read as "these bills cost nothing to build", which is a
+ * costing claim the API is not in a position to make.
+ */
+export interface BomSummary {
+  total: number
+  active: number
+  inactive: number
+  average_components: number
+  component_lines: number
+  linked_finished_items: number
+  linked_finished_items_active: number
+  created_last_30_days: number
+  created_previous_30_days: number
+  estimated_material_cost: number | null
+  costed_boms: number
+  partially_costed_boms: number
+  currency: string
+}
+
+/** One costed line of `GET /v1/bill-of-materials/{id}/cost`. */
+export interface BomCostLine extends BomLine {
+  gross_qty: number
+  cost_per_unit: number | null
+  cost_source: 'weighted_average' | 'standard_cost' | null
+  estimated_cost: number | null
+}
+
+export interface BomCostTotals {
+  currency: string
+  lines: BomCostLine[]
+  component_cost: number
+  wastage_cost: number
+  total_cost: number
+  cost_per_unit: number | null
+  priced_components: number
+  unpriced_components: number
+  /** False when not one component could be priced — show "Cost unavailable". */
+  cost_available: boolean
+  /** True only when EVERY component has a rate. */
+  cost_complete: boolean
+}
+
+export interface BomCost extends BomCostTotals {
+  bom_id: number
+  bom_code: string
+  bom_name: string
+  yield_qty: number
+  yield_unit_symbol: string | null
+}
+
+/** One unsaved component line, as `cost-preview` wants it. */
+export interface BomCostPreviewLine {
+  item_id: number
+  qty: number
+  unit_id?: number | null
+  scrap_percent?: number
+  line_kind?: BomLineKind | string
 }
 
 export type BatchStatus = 'active' | 'quarantine' | 'recalled' | 'expired' | 'closed'
@@ -527,7 +636,45 @@ export const warehousesApi = {
   },
 }
 export const locationsApi = crud<Location>('locations')
-export const bomApi = crud<Bom>('bill-of-materials')
+/**
+ * Bills of materials: the shared CRUD contract plus the four verbs the
+ * workspace needs.
+ *
+ * It still satisfies `CrudApi<Bom>`, so `MasterPage`, the editor and the export
+ * machinery keep working against it unchanged.
+ */
+export const bomApi = {
+  ...crud<Bom>('bill-of-materials'),
+
+  summary: async (signal?: AbortSignal): Promise<BomSummary> =>
+    (await api.get<ItemResponse<BomSummary>>('v1/bill-of-materials/summary', { signal })).data,
+
+  cost: async (id: number, signal?: AbortSignal): Promise<BomCost> =>
+    (await api.get<ItemResponse<BomCost>>(`v1/bill-of-materials/${id}/cost`, { signal })).data,
+
+  /**
+   * Cost a bill that has not been saved — what the editor shows while it is
+   * still being typed. It reads valuation and writes nothing.
+   */
+  costPreview: async (
+    body: { yield_qty: number; lines: BomCostPreviewLine[] },
+    signal?: AbortSignal,
+  ): Promise<BomCostTotals> =>
+    (await api.post<ItemResponse<BomCostTotals>>('v1/bill-of-materials/cost-preview', body, { signal })).data,
+
+  duplicate: async (id: number, bomName?: string): Promise<Bom> =>
+    (await api.post<ItemResponse<Bom>>(`v1/bill-of-materials/${id}/duplicate`, bomName ? { bom_name: bomName } : {})).data,
+
+  /*
+   * Activate / deactivate.
+   *
+   * A PUT with no `lines` key updates the header and leaves the lines exactly
+   * as they are (BomController::update), so this cannot silently rewrite a
+   * recipe on its way to flipping a flag.
+   */
+  setActive: async (id: number, active: boolean): Promise<Bom> =>
+    (await api.put<ItemResponse<Bom>>(`v1/bill-of-materials/${id}`, { is_active: active ? 1 : 0 })).data,
+}
 export const batchesApi = crud<Batch>('batches')
 export const serialsApi = {
   ...crud<Serial>('serials'),

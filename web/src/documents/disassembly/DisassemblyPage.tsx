@@ -83,8 +83,8 @@ import {
 } from './model'
 import type { DisassemblyRole } from './model'
 import { useDisassemblyForm } from './useDisassemblyForm'
-import { usePostingPolicy } from './usePostingPolicy'
-import { useUnitCosts } from './useUnitCosts'
+import { usePostingPolicy } from '../usePostingPolicy'
+import { useUnitCosts } from '../useUnitCosts'
 import { errorsOf, fieldErrors, headerErrors, validateDisassembly, warningsOf } from './validation'
 
 export interface DisassemblyPageProps {

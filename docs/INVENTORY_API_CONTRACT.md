@@ -20,7 +20,7 @@ Idempotency: `Idempotency-Key` header on `POST …/post`, `/{id}/reverse`, `/{id
 * Error: `{ "error": { "code", "message", "details": {…} }, "message" }` with codes `validation_failed` (422), `not_found` (404), `conflict` (409), `forbidden` (403), `negative_stock_blocked` (422), `period_locked` (422), `invalid_state` (409), `context_required` (400), `idempotency_conflict` (409).
 
 ## Masters
-`GET/POST /v1/items`, `GET/PUT/DELETE /v1/items/{id}`, `GET /v1/items/form-options`, `GET /v1/items/search?q=`, `GET /v1/items/by-barcode/{code}`, `POST /v1/items/bulk-lookup {ids|barcodes}`, `POST /v1/items/bulk-delete`, `GET /v1/items/{id}/stock`, `GET|PUT /v1/items/{id}/openings` (rows `{fy_id, warehouse_id, unit_id, opening_qty, opening_valuation_rate}`; `fy_id 0` = inception).
+`GET/POST /v1/items`, `GET/PUT/DELETE /v1/items/{id}`, `GET /v1/items/form-options`, `GET /v1/items/search?q=`, `GET /v1/items/by-barcode/{code}`, `POST /v1/items/bulk-lookup {item_ids[]|item_skus[]}`, `POST /v1/items/bulk-delete`, `GET /v1/items/{id}/stock`, `GET|PUT /v1/items/{id}/openings` (rows `{fy_id, warehouse_id, unit_id, opening_qty, opening_valuation_rate}`; `fy_id 0` = inception).
 Item fields: `item_name, item_alias, print_name, item_sku, item_upc, hsn_sac, mrp, unit_id (base), item_grp_id, stock_cat_id, brand_id, valuation_method (FIFO|LIFO|WAC|null=company default), track_batch, track_serial, track_expiry, shelf_life_days, reorder_point, min_stock, max_stock, lead_time_days, books_sales_acc_id, books_purchase_acc_id, books_tax_cat_id, itc_eligibility, is_active, uoms:[{unit_id, is_default, conversion_factor (base units per 1 of this unit), mc_qty_wise}]`.
 
 #### `itc_eligibility` — an attribute of the goods
@@ -56,6 +56,12 @@ Warehouse group fields: `grp_name` (required, unique per company), `grp_code` (o
 `POST /v1/stock-categories/bulk-status {ids:[…], is_active:0|1}` → `{updated, is_active}`. Only rows whose status actually moves are touched, so an unchanged row keeps its `updated_at`, and each row that does move writes its own `stock_category.activate` / `.deactivate` audit entry with before / after.
 
 `POST /v1/bill-of-materials/{id}/explode {production_qty, warehouse_id?, finished_rate?, document_date?, narration?}` → the ready-to-create PRODUCTION payload (component OUT lines scaled by `production_qty / yield_qty` plus scrap %, by-product IN lines, finished IN line at `finished_rate`, `metadata{bom_id, production_qty, finished_rate, warehouse_id}`). Nothing is saved.
+
+The bill-of-materials list also takes `with_preview=1` (adds `components_preview[]`, `component_count`, `by_product_count`, `scrap_count` — one extra query for the page, never one per row), `item_grp_id`, `min_components`, `max_components`, `has_scrap`, `has_by_products`, `created_from|created_to|created_by`, `updated_from|updated_to|updated_by`, and sorts by `component_count` and `is_active`. Every row carries `bom_code` (`BOM-007`, formatted from the id — not stored) and the actor display names `created_by_name` / `updated_by_name`.
+
+`GET /v1/bill-of-materials/summary` → `{total, active, inactive, average_components, component_lines, linked_finished_items, linked_finished_items_active, created_last_30_days, created_previous_30_days, estimated_material_cost, costed_boms, partially_costed_boms, currency}`. Company-wide, not filtered.
+`GET /v1/bill-of-materials/{id}/cost` and `POST /v1/bill-of-materials/cost-preview {yield_qty, lines[]}` → the costed component breakdown `{lines[{gross_qty, cost_per_unit, cost_source, estimated_cost}], component_cost, wastage_cost, total_cost, cost_per_unit, priced_components, unpriced_components, cost_available, cost_complete, currency}`. The rate is Inventory's own: `inv_wac_state.average_cost` blended by value across warehouses, falling back to `inv_items.standard_cost`. **A component with neither has `cost_per_unit: null`, and `estimated_material_cost` is `null` when nothing could be priced — never `0`.** The preview form saves nothing.
+`POST /v1/bill-of-materials/{id}/duplicate {bom_name?}` → a copy with `is_active = 0`, audited as `bom.duplicate`.
 
 ## Availability
 `GET /v1/availability?item_id&warehouse_id&batch_id` → `{on_hand, reserved, packed, job_worker, committed, available}`.
