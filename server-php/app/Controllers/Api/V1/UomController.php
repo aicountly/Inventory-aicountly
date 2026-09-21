@@ -96,13 +96,29 @@ class UomController extends MasterController
         }
     }
 
-    protected function sortExpression(string $sort, int $cmpId): ?string
+    /**
+     * Ordering by a figure that is not a column.
+     *
+     * usage_count is counted per row at read time, so it has to be selected as a correlated
+     * subquery before it can be ordered by. Same shape as BrandsController's item_count, with the
+     * unit name as the tie-break: without it every unit with no items would come back in whatever
+     * order the planner chose, and a reader paging through them would see rows repeat and rows go
+     * missing. $indexCmpId is set by the base before this runs, so the subquery is scoped to the
+     * same tenant as the list.
+     */
+    protected function applySort($builder, string $sort, string $order): void
     {
         if ($sort !== 'usage_count') {
-            return null;
+            parent::applySort($builder, $sort, $order);
+
+            return;
         }
 
-        return '(SELECT COUNT(DISTINCT t.item_id) FROM ' . $this->usageRowsSql($cmpId, 'inv_uom.unit_id') . ' t)';
+        $builder
+            ->select('inv_uom.*')
+            ->select('(SELECT COUNT(DISTINCT t.item_id) FROM ' . $this->usageRowsSql($this->indexCmpId, 'inv_uom.unit_id') . ' t) AS usage_sort', false)
+            ->orderBy('usage_sort', $order)
+            ->orderBy('unit_name', 'ASC');
     }
 
     // ---- derived columns ------------------------------------------------------------------

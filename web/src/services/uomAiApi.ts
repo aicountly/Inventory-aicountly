@@ -15,7 +15,7 @@
  * answer: a panel that pretends to work is worse than one that says it does not
  * yet, because the first is discovered by someone acting on it.
  *
- * When the endpoint lands, set VITE_AI_ASSISTANT_PATH and only `askAssistant`
+ * When the endpoint lands, set VITE_INVENTORY_AI_PATH and only `askAssistant`
  * changes — the five analyses stay local, because a round trip to be told which
  * of 21 units nothing uses is a round trip for nothing.
  */
@@ -45,7 +45,11 @@ export type AiOutcome<T> =
   | { status: 'unavailable'; reason: string; integration: string }
   | { status: 'error'; message: string }
 
-const ASSISTANT_PATH = (import.meta.env.VITE_AI_ASSISTANT_PATH ?? '').trim()
+// The same variable the other masters' AI panels read
+// (masters/warehouseGroups/warehouseGroupsAi.ts). One seam for one service:
+// two names for one endpoint is how half the screens end up connected and the
+// other half quietly are not.
+const ASSISTANT_PATH = (import.meta.env.VITE_INVENTORY_AI_PATH ?? '').trim().replace(/^\/+/, '')
 
 // ---------------------------------------------------------------------------
 // Derived analyses — real answers, computed from the rows on hand
@@ -151,7 +155,7 @@ export interface AssistantContext {
  * Ask the assistant a free-text question about units of measure.
  *
  * Returns `unavailable` until an Inventory AI endpoint exists and
- * VITE_AI_ASSISTANT_PATH points at it. The shape of the call is settled here so
+ * VITE_INVENTORY_AI_PATH points at it. The shape of the call is settled here so
  * that wiring it later is a configuration change rather than a rewrite of the
  * panel.
  */
@@ -164,7 +168,7 @@ export async function askAssistant(
     return {
       status: 'unavailable',
       reason: 'The Aicountly AI assistant service is not connected to Inventory yet.',
-      integration: 'Set VITE_AI_ASSISTANT_PATH to the assistant endpoint; this panel already posts { message, context } to it.',
+      integration: 'Set VITE_INVENTORY_AI_PATH to the Aicountly AI endpoint; this panel already posts { message, context } to it.',
     }
   }
   try {

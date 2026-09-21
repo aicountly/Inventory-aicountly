@@ -27,13 +27,6 @@ abstract class MasterController extends BaseController
     /** @var list<string> */
     protected array $searchColumns = [];
     /**
-     * Sort keys the subclass accepts beyond its own columns — a flag the table
-     * orders by, or a derived figure resolved through sortExpression().
-     *
-     * @var list<string>
-     */
-    protected array $extraSortColumns = [];
-    /**
      * The company the list being built belongs to.
      *
      * Set immediately before applyIndexFilters() runs, so an override that has
@@ -47,6 +40,16 @@ abstract class MasterController extends BaseController
     protected string $entityType = 'master';
     /** Master kind Books mirrors (uom | warehouse): every write enqueues an upsert event in the same transaction. null = not mirrored. */
     protected ?string $mirrorKind = null;
+    /**
+     * Sort keys accepted beyond the name, the pk, the timestamps and $columns.
+     *
+     * For a key that is NOT a column of the table — a derived figure such as a brand's item count.
+     * Naming it here only makes it acceptable; applySort() below decides what it orders by, so a
+     * subclass cannot let a client order by an arbitrary string.
+     *
+     * @var list<string>
+     */
+    protected array $extraSortColumns = [];
 
     public function index()
     {
@@ -79,18 +82,7 @@ abstract class MasterController extends BaseController
         $total = (clone $b)->countAllResults(false);
         $sortable = array_merge([$this->nameColumn, $this->pk, 'created_at', 'updated_at'], $this->columns, $this->extraSortColumns);
         $sort = in_array($p['sort'], $sortable, true) ? $p['sort'] : $this->nameColumn;
-        $expr = $this->sortExpression($sort, $cmpId);
-        if ($expr !== null) {
-            $b->orderBy($expr . ' ' . $p['order'], '', false);
-        } else {
-            $b->orderBy($sort, $p['order']);
-        }
-        // A deterministic tie-break, so paging a column full of equal values
-        // (every unit carrying the same updated_at, say) cannot show one row on
-        // two pages and another on none.
-        if ($sort !== $this->nameColumn) {
-            $b->orderBy($this->nameColumn, 'ASC');
-        }
+        $this->applySort($b, $sort, $p['order']);
         $rows = $b->limit($p['limit'], $p['offset'])->get()->getResultArray();
 
         return $this->respondList($this->decorateRows($cmpId, array_map([$this, 'present'], $rows)), $total, $p['limit'], $p['offset']);
@@ -248,17 +240,27 @@ abstract class MasterController extends BaseController
     }
 
     /**
-     * Raw ORDER BY for a sort key that is not a column of this table.
+     * Apply the (already whitelisted) sort to the list builder.
      *
-     * Returning null (the default) orders by the column of that name, which is
-     * every master's case bar the derived figures a subclass decorates its rows
-     * with. The string is emitted unescaped, so an override must build it from
-     * literals and cast integers — never from request input.
+     * The default is the plain ORDER BY every master has always used, plus a tie-break on the name.
+     * The tie-break is not decoration: a master whose rows were all written in one migration carries
+     * the same updated_at on every row, and ordering by a column of equal values leaves the order
+     * to the planner — so paging it can show one row on two pages and another on none. An override
+     * that orders by something else does its own tie-break (BrandsController) and never reaches
+     * this.
+     *
+     * A subclass overrides this only for a key it declared in $extraSortColumns — a derived figure
+     * that has to be computed before it can be ordered by. The count above is taken before this
+     * runs, so a subquery added here cannot change the total.
      */
-    protected function sortExpression(string $sort, int $cmpId): ?string
+    protected function applySort($builder, string $sort, string $order): void
     {
-        return null;
+        $builder->orderBy($sort, $order);
+        if ($sort !== $this->nameColumn) {
+            $builder->orderBy($this->nameColumn, 'ASC');
+        }
     }
+
 
     /** @return array<string, mixed>|null */
     protected function find(int $cmpId, int $id): ?array

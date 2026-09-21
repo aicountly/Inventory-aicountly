@@ -13,13 +13,12 @@ interface ImportMetaEnv {
   /** Generic GA4 measurement ID fallback, checked when the product-specific one is unset. */
   readonly VITE_GA4_MEASUREMENT_ID?: string
   /**
-   * API path of the Aicountly AI assistant, relative to the API base.
-   *
-   * Unset — the default — means the assistant's free-text box reports itself
-   * unconnected rather than answering. The panel's derived analyses (duplicate,
-   * unused and un-coded units) do not use it and work regardless.
+   * API path that answers Aicountly AI requests, e.g. `v1/ai/suggest`.
+   * Unset (the default) and the masters AI panels offer themselves as not yet
+   * connected rather than inventing an answer — see
+   * masters/warehouseGroups/warehouseGroupsAi.ts and services/uomAiApi.ts.
    */
-  readonly VITE_AI_ASSISTANT_PATH?: string
+  readonly VITE_INVENTORY_AI_PATH?: string
 }
 
 interface ImportMeta {

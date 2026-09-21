@@ -55,6 +55,8 @@ const ALL = [
   'reports.near_expiry.read',
   'reports.replenishment.read',
   'reports.stock_ledger.read',
+  'reports.valuation.read',
+  'valuation.recalculate',
   'masters.items.read',
 ]
 
@@ -80,16 +82,27 @@ function scopeStub() {
   }
 }
 
+/**
+ * Valuation reports the outcome of a recalculation through the shared toast, so
+ * it needs a provider the way it has one under AppShell. Mounting the real
+ * ToastProvider rather than stubbing `useToast` keeps the test honest about the
+ * page's actual dependencies.
+ */
 async function render(module: string, viewId: string): Promise<string> {
   const mod = await import(module)
   const { viewById } = await import('./views')
+  const { ToastProvider } = await import('../ui/ToastContext')
   const Component = mod.default
   return renderToStaticMarkup(
     createElement(
       MemoryRouter,
       null,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test double
-      createElement(Component, { scope: scopeStub() as any, view: viewById(viewId as never) }),
+      createElement(
+        ToastProvider,
+        null,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test double
+        createElement(Component, { scope: scopeStub() as any, view: viewById(viewId as never) }),
+      ),
     ),
   )
 }
@@ -157,5 +170,57 @@ describe('permission gating', () => {
   it('offers the run button to a user who may resolve reconciliations', async () => {
     const html = await render('./pages/ControlsDashboard', 'controls')
     expect(html).toContain('Run reconciliation')
+  })
+})
+
+describe('valuation and stock health', () => {
+  it('hides Run valuation from a user who may not recalculate', async () => {
+    permissions.value = new Set(ALL.filter((p) => p !== 'valuation.recalculate'))
+    const html = await render('./pages/ValuationDashboard', 'valuation')
+    expect(html).not.toContain('Run valuation')
+  })
+
+  it('offers Run valuation to a user who may', async () => {
+    expect(await render('./pages/ValuationDashboard', 'valuation')).toContain('Run valuation')
+  })
+
+  it('leaves out the method comparison without the valuation report permission', async () => {
+    permissions.value = new Set(ALL.filter((p) => p !== 'reports.valuation.read'))
+    const html = await render('./pages/ValuationDashboard', 'valuation')
+    expect(html).not.toContain('Valuation method comparison')
+  })
+
+  it('never claims an AI insight', async () => {
+    // There is no AI service behind this product. pulse.ts sets out the
+    // reasoning; this pins it on the screen that would be most tempted.
+    // (The hero's own wording is asserted in valuationRender.test.ts, where it
+    // has data to render; at first paint it is a skeleton.)
+    const html = await render('./pages/ValuationDashboard', 'valuation')
+    expect(html).not.toMatch(/\bAI\b/)
+  })
+
+  it('shows no health score at all before the figures behind it land', async () => {
+    // The hero holds its own geometry as a skeleton, so the score does not pop
+    // in over a collapsed panel — and no score is asserted until one exists.
+    const html = await render('./pages/ValuationDashboard', 'valuation')
+    expect(html).toContain('skeleton')
+    expect(html).not.toContain('/100')
+  })
+
+  it('never puts an internal identifier on the page', async () => {
+    // The screen this replaced rendered "Company context required (cmp_id,
+    // fy_id, bo_id)" onto a card.
+    const html = await render('./pages/ValuationDashboard', 'valuation')
+    for (const internal of ['cmp_id', 'fy_id', 'bo_id', 'SQLSTATE', 'inv_stock']) {
+      expect(html, `"${internal}" reached the page`).not.toContain(internal)
+    }
+  })
+
+  it('carries no realizable-value card, because nothing can compute one', async () => {
+    // Inventory records cost. Net realizable value needs an expected selling
+    // price net of the cost to sell, which this product does not hold — MRP is
+    // a printed ceiling and selling prices belong to Books.
+    const html = await render('./pages/ValuationDashboard', 'valuation')
+    expect(html.toLowerCase()).not.toContain('realizable value')
   })
 })

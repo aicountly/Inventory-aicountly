@@ -99,17 +99,49 @@ final class UomUsageGuardTest extends CIUnitTestCase
         $this->assertContains('OTH', $codes);
     }
 
-    public function testSortExpressionOnlyAnswersForTheDerivedColumn(): void
+    public function testSortByUsageCountSelectsTheCountAndTieBreaksOnTheName(): void
     {
         $ctrl = new UomController();
-        $m = (new \ReflectionClass($ctrl))->getMethod('sortExpression');
-        $m->setAccessible(true);
+        $cmp = (new \ReflectionClass($ctrl))->getProperty('indexCmpId');
+        $cmp->setAccessible(true);
+        $cmp->setValue($ctrl, 9);
 
-        $this->assertNull($m->invoke($ctrl, 'unit_name', 1), 'a real column must order by itself');
-        $expr = $m->invoke($ctrl, 'usage_count', 9);
-        $this->assertIsString($expr);
-        $this->assertStringContainsString('COUNT(DISTINCT t.item_id)', $expr);
-        $this->assertStringContainsString('inv_uom.unit_id', $expr);
+        $builder = new class () {
+            /** @var list<array{0:string, 1:mixed, 2:mixed}> */
+            public array $calls = [];
+
+            public function select($what, $escape = null): self
+            {
+                $this->calls[] = ['select', $what, $escape];
+
+                return $this;
+            }
+
+            public function orderBy($what, $order = '', $escape = null): self
+            {
+                $this->calls[] = ['orderBy', $what, $order];
+
+                return $this;
+            }
+        };
+
+        $m = (new \ReflectionClass($ctrl))->getMethod('applySort');
+        $m->setAccessible(true);
+        $m->invoke($ctrl, $builder, 'usage_count', 'DESC');
+
+        $selected = array_values(array_filter($builder->calls, static fn ($c) => $c[0] === 'select'));
+        $ordered = array_values(array_filter($builder->calls, static fn ($c) => $c[0] === 'orderBy'));
+
+        $subquery = (string) $selected[1][1];
+        $this->assertStringContainsString('COUNT(DISTINCT t.item_id)', $subquery);
+        $this->assertStringContainsString('inv_uom.unit_id', $subquery);
+        $this->assertStringContainsString('cmp_id = 9', $subquery, "the subquery must be scoped to the list's tenant");
+        $this->assertFalse($selected[1][2], 'the correlated subquery must not be escaped as an identifier');
+
+        $this->assertSame(['orderBy', 'usage_sort', 'DESC'], $ordered[0]);
+        // Without the tie-break every unit with no items comes back in whatever
+        // order the planner chose, and paging repeats rows and drops others.
+        $this->assertSame(['orderBy', 'unit_name', 'ASC'], $ordered[1]);
     }
 
     public function testUsageCountIsAdvertisedAsSortable(): void

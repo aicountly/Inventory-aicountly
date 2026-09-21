@@ -257,16 +257,28 @@ describe('WidgetCard states', () => {
     expect(html).not.toContain('content')
   })
 
-  it('offers a retry for this card alone when it fails', () => {
+  it('offers a retry for this card alone when it fails, without quoting the API', () => {
     let retried = 0
     const html = render(
       createElement(WidgetCard, {
         ...base,
-        state: { loading: false, error: new Error('valuation timed out'), empty: false, reload: () => (retried += 1) },
+        errorSubject: 'stock ageing',
+        state: {
+          loading: false,
+          error: new Error('SQLSTATE[42P01]: undefined_table inv_stock_layers'),
+          empty: false,
+          reload: () => (retried += 1),
+        },
       }),
     )
-    expect(html).toContain('valuation timed out')
+    // The reader is told what failed and what to do, in their own vocabulary.
+    expect(html).toContain('We couldn’t load stock ageing')
     expect(html).toContain('Retry')
+    // And never the server's note to us. This is the whole point of errorCopy:
+    // the screen this replaced printed "Company context required (cmp_id,
+    // fy_id, bo_id)" onto a card a customer was looking at.
+    expect(html).not.toContain('SQLSTATE')
+    expect(html).not.toContain('inv_stock_layers')
     expect(retried).toBe(0)
   })
 
