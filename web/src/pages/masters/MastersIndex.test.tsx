@@ -173,9 +173,15 @@ describe('MastersIndex', () => {
     renderPage()
 
     const panel = screen.getByRole('complementary', { name: 'Master insights' })
-    await waitFor(() => expect(within(panel).getByText('Missing setup')).toBeTruthy())
+    // Wait on the SENTENCE, not on "Missing setup". That string is a static
+    // legend row beside the ring — it is on screen from the first paint, before
+    // a single count has landed, so waiting on it waits for nothing and the
+    // assertion below it races the fetches. The sentence is what the counts
+    // actually produce.
+    await waitFor(() =>
+      expect(within(panel).getByText('1 essential master has no records yet.')).toBeTruthy(),
+    )
     expect(within(panel).queryByText('Great! Your master data is in good shape.')).toBeNull()
-    expect(within(panel).getByText('1 essential master has no records yet.')).toBeTruthy()
   })
 
   it('neither shows nor scores a master the profile cannot read', async () => {
