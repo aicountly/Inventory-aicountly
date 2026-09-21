@@ -483,6 +483,11 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
         />
       ) : null}
       {spec.formKind === 'physical_count' ? <PhysicalCountPanel spec={spec} warehouses={warehouses} defaultWarehouseId={defaultWarehouseId} disabled={disabled} onLoad={(generated) => replaceOrigin(['count', 'manual'], generated, false)} /> : null}
+      {/* The charges block, embedded in the generic form. The ROUTED landed cost screen is
+          documents/landedCost/LandedCostAllocationPage — DocumentFormPage sends the type there,
+          because a five-step allocation over several receipts needs its own header, sidebar and
+          action bar. This panel stays as the single-receipt editor for any caller that composes
+          DocumentForm directly, and it is the one the policy tests exercise. */}
       {spec.formKind === 'landed_cost' ? (
         <LandedCostPanel
           initial={header.metadata}

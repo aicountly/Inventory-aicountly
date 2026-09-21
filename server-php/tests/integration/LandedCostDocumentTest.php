@@ -522,7 +522,9 @@ final class LandedCostDocumentTest extends IntegrationTestCase
         $e = $this->refusal(fn () => $this->landedCost((int) $receipt['document_id'], [
             ['cost_type' => 'freight', 'amount' => 100, 'allocation_basis' => 'manual', 'lines' => [['line_id' => (int) $other['lines'][0]['line_id'], 'amount' => 100]]],
         ]));
-        $this->assertStringContainsString('not a valued inward line of the receipt being loaded', $e->getMessage());
+        // "any receipt", plural: the allocator is handed the union of the lines of every receipt
+        // the document names, so a line belonging to none of them is what is being refused.
+        $this->assertStringContainsString('not a valued inward line of any receipt being loaded', $e->getMessage());
     }
 
     public function testManualSharesThatDoNotTieToTheChargeAreRefused(): void
