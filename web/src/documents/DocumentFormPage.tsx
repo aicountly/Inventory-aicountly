@@ -14,6 +14,7 @@ import { ConsumptionForm } from './consumption/ConsumptionForm'
 import { InwardChallanForm } from './grn/InwardChallanForm'
 import { MaterialIssuePage } from './materialIssue/MaterialIssuePage'
 import { MaterialReceiptForm } from './receipt/MaterialReceiptForm'
+import { PhysicalStockCountPage } from './physicalCount/PhysicalStockCountPage'
 import { StockTransferWorkspace } from './transfer/StockTransferWorkspace'
 import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS, statusTone } from './actions'
 import type { StatusTone } from './actions'
@@ -220,6 +221,21 @@ export function DocumentFormPage() {
         />
       )
     }
+    // The count has its own workspace; everything under it — the draft shape,
+    // the validation, the payload and the endpoints — is still shared.
+    if (spec.formKind === 'physical_count') {
+      return (
+        <PhysicalStockCountPage
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          status={doc.status}
+          documentNo={doc.document_no}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
     return (
       <PageShell paddingBottom>
         <BreadcrumbHeader
@@ -254,6 +270,9 @@ export function DocumentFormPage() {
     return <InwardChallanForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
   }
   if (isReceipt) return <MaterialReceiptForm key={s.code} spec={s} />
+  if (s.formKind === 'physical_count') {
+    return <PhysicalStockCountPage key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
   return (
     <PageShell paddingBottom>
       <BreadcrumbHeader
