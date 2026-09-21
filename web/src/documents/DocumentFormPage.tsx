@@ -1,3 +1,4 @@
+import { useCallback, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useAccess } from '../access/AccessContext'
 import { Notice } from '../components/Notice'
@@ -14,6 +15,7 @@ import { ConsumptionForm } from './consumption/ConsumptionForm'
 import { InwardChallanForm } from './grn/InwardChallanForm'
 import { JobWorkPage } from './jobwork/JobWorkPage'
 import { MaterialIssuePage } from './materialIssue/MaterialIssuePage'
+import { ProductionWorkspace } from './production/ProductionWorkspace'
 import { MaterialReceiptForm } from './receipt/MaterialReceiptForm'
 import { StockTransferWorkspace } from './transfer/StockTransferWorkspace'
 import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS, statusTone } from './actions'
@@ -49,6 +51,13 @@ export function DocumentFormPage() {
   const { can } = useAccess()
   const documentId = id ? Number(id) : null
   const editing = documentId !== null && Number.isFinite(documentId)
+  /*
+   * "Save, post & new" starts a second run without leaving the screen. Bumping this remounts the
+   * editor with a fresh draft, which is what a storekeeper entering a shift's worth of runs wants;
+   * navigating to the same route would not remount anything.
+   */
+  const [freshKey, setFreshKey] = useState(0)
+  const startAnother = useCallback(() => setFreshKey((n) => n + 1), [])
 
   const existing = useQuery((signal) => documentsApi.get(documentId as number, signal), [documentId], { enabled: editing, keepData: false })
 
@@ -162,6 +171,22 @@ export function DocumentFormPage() {
     const reapproval = doc.status === 'APPROVED' || doc.status === 'PENDING_APPROVAL'
       ? <Notice kind="info">Saving changes returns the document to draft; it will need approval again.</Notice>
       : null
+    // Some types have a screen of their own — transfer, consumption, receiving, issue, production.
+    // Each brings its own page shell, breadcrumbs and header, so it is returned whole rather than
+    // wrapped by the one below. Every other native type still uses the shared DocumentForm.
+    if (spec.formKind === 'production') {
+      return (
+        <ProductionWorkspace
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          document={doc}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+          onNew={() => navigate('/documents/new/production')}
+        />
+      )
+    }
     if (spec.code === 'STOCK_TRANSFER') {
       return (
         <StockTransferWorkspace
@@ -267,6 +292,21 @@ export function DocumentFormPage() {
   }
 
   const s = spec as NonNullable<typeof spec>
+  /*
+   * Production has its own screen. Same route, same spec, same draft shape and the same
+   * create / post calls — what differs is that the editor reads live availability, cost, batch
+   * and serial stock while the run is being built.
+   */
+  if (s.formKind === 'production') {
+    return (
+      <ProductionWorkspace
+        key={`production-${freshKey}`}
+        spec={s}
+        onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        onNew={startAnother}
+      />
+    )
+  }
   if (s.code === 'STOCK_TRANSFER') {
     return <StockTransferWorkspace key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
   }
