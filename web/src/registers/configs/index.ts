@@ -15,11 +15,11 @@ import {
   stockLedgerRegister,
 } from './stockRegisters'
 import {
-  pendingRegister,
   reconciliationRegister,
   reservationRegister,
   valuationRegister,
 } from './opsRegisters'
+import { pendingRegister } from '../pending/pendingRegister'
 
 export {
   movementRegister,
@@ -27,12 +27,21 @@ export {
   stockLedgerRegister,
 } from './stockRegisters'
 export {
-  pendingRegister,
   reconciliationRegister,
   reservationRegister,
   valuationRegister,
   differenceTone,
 } from './opsRegisters'
+/**
+ * The pending register lives in its own folder rather than in `opsRegisters`.
+ *
+ * It outgrew a shared file: it carries a detail drawer, a follow-up worklist, an
+ * aggregated view, an insight ruleset and a selection export, and none of those
+ * are declarations — they are components that belong beside the config that
+ * declares them.
+ */
+export { pendingRegister } from '../pending/pendingRegister'
+export type { PendingSummary } from '../pending/pendingRegister'
 
 /** Registers that live only here (the reports keep their own module). */
 export const NATIVE_REGISTERS: AnyRegisterConfig[] = [

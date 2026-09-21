@@ -6,7 +6,7 @@ import { Card } from '../../ui/Card'
 import { IconTile } from '../../ui/IconTile'
 import type { IconTone } from '../../ui/IconTile'
 import { EmptyState } from '../../ui/EmptyState'
-import { errorMessage } from '../../services/api'
+import { cardErrorCopy } from '../errorCopy'
 
 /**
  * The shell every dashboard widget sits in, so all of them behave the same way.
@@ -43,6 +43,11 @@ export interface WidgetCardProps {
   emptyTitle?: ReactNode
   emptyDescription?: ReactNode
   emptyIcon?: LucideIcon
+  /**
+   * What this card is about, in the user's words — "inventory value", "stock
+   * ageing". Used to write the failure message; never the API's own text.
+   */
+  errorSubject?: string
   /** Pinned under the content — a total, a count, a secondary link. */
   footer?: ReactNode
   className?: string
@@ -60,11 +65,15 @@ export function WidgetCard({
   emptyTitle = 'Nothing to show',
   emptyDescription,
   emptyIcon,
+  errorSubject,
   footer,
   className = '',
   children,
 }: WidgetCardProps) {
   const { loading, error, empty, reload } = state
+  // The card says what the reader can do about it. The API's own message —
+  // status codes, column names, SQL — goes to the console for us instead.
+  const failure = error ? cardErrorCopy(error, errorSubject ?? 'this') : null
 
   return (
     <Card padding="md" className={`flex flex-col ${className}`.trim()}>
@@ -88,17 +97,30 @@ export function WidgetCard({
       </div>
 
       <div className="flex-1 min-h-0">
-        {error ? (
-          <div className="rounded-lg border border-red-100 bg-red-50/60 p-3 text-xs text-red-700">
-            <p className="font-semibold">Could not load this card.</p>
-            <p className="mt-0.5 text-red-600/90 break-words">{errorMessage(error)}</p>
-            {reload ? (
+        {failure ? (
+          <div
+            role="status"
+            className={
+              failure.tone === 'notice'
+                ? 'rounded-lg border border-amber-200 bg-amber-50/60 p-3 text-xs text-amber-900'
+                : 'rounded-lg border border-red-100 bg-red-50/60 p-3 text-xs text-red-700'
+            }
+          >
+            <p className="font-semibold">{failure.title}</p>
+            <p className={failure.tone === 'notice' ? 'mt-0.5 text-amber-800' : 'mt-0.5 text-red-600/90'}>
+              {failure.message}
+            </p>
+            {reload && failure.retryable ? (
               <button
                 type="button"
                 onClick={reload}
-                className="mt-2 inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-2 py-1 font-semibold text-red-700 hover:border-red-300 print:hidden"
+                className={
+                  failure.tone === 'notice'
+                    ? 'mt-2 inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-white px-2 py-1 font-semibold text-amber-900 hover:border-amber-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 print:hidden'
+                    : 'mt-2 inline-flex items-center gap-1 rounded-lg border border-red-200 bg-white px-2 py-1 font-semibold text-red-700 hover:border-red-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 print:hidden'
+                }
               >
-                <RefreshCw className="w-3 h-3" />
+                <RefreshCw className="w-3 h-3" aria-hidden />
                 Retry
               </button>
             ) : null}
