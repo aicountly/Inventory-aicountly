@@ -48,6 +48,9 @@ $routes->group('', ['namespace' => 'App\Controllers\Api', 'filter' => 'cors'], s
         $routes->post('settings/period-locks', 'SettingsController::lockPeriod');
         $routes->delete('settings/period-locks/(:num)', 'SettingsController::releasePeriodLock/$1');
         $routes->get('document-types', 'SettingsController::documentTypes');
+        // The parties Inventory's documents reference, for register filters. A
+        // picker over inv_documents.party_ref — never a party master.
+        $routes->get('document-parties', 'SettingsController::documentParties');
         $routes->get('dashboard', 'DashboardController::index');
         // The four dashboards the overview counters do not answer. Registered
         // BEFORE the bare 'dashboard' segment would ever be matched as an id,
