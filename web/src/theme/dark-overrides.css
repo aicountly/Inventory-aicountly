@@ -168,9 +168,10 @@
 .dark .bg-emerald-100 {
   background-color: rgb(6 78 59 / 0.3);
 }
-/* The -100 step of each hue: the badge behind a small status glyph, and the
-   hover state of a wash-backed card. Same treatment as the -50 above, one notch
-   stronger so the glyph still reads as sitting on something. */
+/* The -100 step of each ramp: a touch stronger than the -50 wash, the same way
+   emerald-100 is above — the badge behind a small status glyph, the insight
+   severity dots, and the quick-link and wash-backed tiles, whose hover is a
+   deepening of their own tint rather than a grey. */
 .dark .bg-amber-100,
 .dark .hover\:bg-amber-100:hover {
   background-color: rgb(120 53 15 / 0.3);
@@ -178,7 +179,8 @@
 .dark .bg-red-100 {
   background-color: rgb(127 29 29 / 0.3);
 }
-.dark .bg-sky-100 {
+.dark .bg-sky-100,
+.dark .hover\:bg-sky-100:hover {
   background-color: rgb(12 74 110 / 0.3);
 }
 .dark .bg-violet-100,
@@ -187,22 +189,6 @@
 }
 .dark .bg-amber-50 {
   background-color: rgb(120 53 15 / 0.22);
-}
-/* The -100 step of each ramp: a touch stronger than the -50 wash, the same way
-   emerald-100 is above — used by the insight severity dots and by the quick-link
-   tiles, whose hover is a deepening of their own tint rather than a grey. */
-.dark .bg-amber-100,
-.dark .hover\:bg-amber-100:hover {
-  background-color: rgb(120 53 15 / 0.3);
-}
-.dark .bg-red-100 {
-  background-color: rgb(127 29 29 / 0.3);
-}
-.dark .hover\:bg-sky-100:hover {
-  background-color: rgb(12 74 110 / 0.3);
-}
-.dark .hover\:bg-violet-100:hover {
-  background-color: rgb(76 29 149 / 0.3);
 }
 .dark .bg-red-50,
 .dark .hover\:bg-red-50:hover,
