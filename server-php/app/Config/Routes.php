@@ -58,6 +58,12 @@ $routes->group('', ['namespace' => 'App\Controllers\Api', 'filter' => 'cors'], s
         $routes->get('dashboard/controls', 'DashboardController::controls');
 
         // Masters
+        //
+        // Registered before the generic master loop below: `brands/(:num)` only matches digits, so
+        // there is no collision either way, but a literal segment that must win belongs above the
+        // placeholder that could one day be widened.
+        $routes->get('brands/metrics', 'BrandsController::metrics');
+        $routes->get('brands/sales', 'BrandsController::sales');
         foreach ([
             'item-groups'      => 'ItemGroupsController',
             'stock-categories' => 'StockCategoriesController',
@@ -139,6 +145,7 @@ $routes->group('', ['namespace' => 'App\Controllers\Api', 'filter' => 'cors'], s
         $routes->get('valuation/recalculations/(:num)', 'ValuationController::recalcJob/$1');
         $routes->post('valuation/recalculations/(:num)/run', 'ValuationController::runRecalc/$1');
         $routes->get('valuation/revisions', 'ValuationController::revisions');
+        $routes->get('valuation/revisions/summary', 'ValuationController::revisionsSummary');
         $routes->post('valuation/revisions/ack', 'ValuationController::ackRevisions');
         $routes->get('valuation/carry-forward', 'ValuationController::carryForwardPreview');
         $routes->post('valuation/carry-forward', 'ValuationController::carryForward');

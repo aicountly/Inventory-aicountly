@@ -47,11 +47,12 @@ export function PageHeader({
         className,
       )}
     >
-      {/* `md:basis-72`, not `basis-72`: below md the header is a COLUMN, where flex-basis
-          is the main size — the height. A bare `basis-72` therefore reserved 18rem of
-          empty space under the title on a phone and pushed the action row most of a
-          screen down. From md up the row is horizontal again and the basis does what it
-          was written for: a sensible starting width for the title beside the actions. */}
+      {/*
+        `md:basis-72`, not a bare `basis-72`: flex-basis sizes the MAIN axis,
+        and below md this container is a column — so the unqualified class was
+        giving the title block an 18rem HEIGHT and leaving a blank half-screen
+        between the description and the actions on every phone-width page.
+      */}
       <div className="min-w-0 flex-1 md:basis-72 flex items-start gap-3">
         {backTo ? (
           <Link
@@ -83,11 +84,11 @@ export function PageHeader({
         </div>
       ) : null}
       {actions ? (
-        // `flex-wrap` without `shrink-0`, for the same reason BreadcrumbHeader's compact
-        // row dropped it: a shrink-proof row cannot fall below its max-content width, so
-        // the buttons never wrap and at 768px the last of them — Export and Print on a
-        // register — are simply cut off at the viewport edge with no way to reach them.
-        // Letting the row shrink costs nothing where there is room, since it is
+        // `min-w-0` rather than `shrink-0`, for the reason BreadcrumbHeader's
+        // compact row already records: a shrink-proof row cannot fall below its
+        // max-content width, so a header carrying five or six buttons never
+        // wraps them and scrolls the whole page sideways on a tablet instead.
+        // Letting it shrink costs nothing where there is room — the row is
         // max-content anyway.
         <div className="flex items-center flex-wrap gap-2 min-w-0 print:hidden">{actions}</div>
       ) : null}

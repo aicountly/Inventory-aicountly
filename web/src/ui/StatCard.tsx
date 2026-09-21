@@ -41,6 +41,15 @@ export interface StatCardProps {
   /** Makes the whole card a link — the drill-down contract. */
   to?: string
   /**
+   * One extra row under the delta — a progress bar, a share, a second figure.
+   *
+   * Optional and unstyled on purpose: it is for a card that genuinely has a
+   * fourth thing to say (22 of 24 brands are active), not a slot to be filled
+   * on every card because it exists. Cards with and without it keep the same
+   * top three rows, so a strip of them still lines up.
+   */
+  footer?: ReactNode
+  /**
    * `stacked` (the default) is the dashboard tile: tile on top, then the label
    * and the figure. `metric` puts the tile beside them, which reads better in a
    * row of four wide cards over a table — the eye runs down one column of
@@ -82,6 +91,7 @@ export function StatCard({
   invertDelta = false,
   emphasizeNegative = false,
   to,
+  footer,
   layout = 'stacked',
   className,
 }: StatCardProps) {
@@ -144,6 +154,7 @@ export function StatCard({
           </div>
           <p className={cx(METRIC_VALUE_CLASS, valueClass)}>{value}</p>
           <div className={METRIC_DELTA_ROW_CLASS}>{delta}</div>
+          {footer ? <div className="mt-2">{footer}</div> : null}
         </div>
       </Card>
     )
@@ -175,6 +186,7 @@ export function StatCard({
         </p>
       </div>
       <div className={DELTA_ROW_CLASS}>{delta}</div>
+      {footer ? <div>{footer}</div> : null}
     </Card>
   )
 }

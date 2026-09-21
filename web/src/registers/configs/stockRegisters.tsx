@@ -30,6 +30,7 @@ import { formatDate, formatInt, formatMoney, formatQty } from '../../utils/forma
 import {
   DASH,
   batchFilter,
+  brandFilter,
   dateColumn,
   dateTimeColumn,
   itemFilter,
@@ -623,6 +624,7 @@ export const movementRegister = defineRegister<StockMovementRow, MovementRegiste
     // that are set, so a filter cannot be on without the reader being told.
     itemFilter,
     itemGroupFilter,
+    brandFilter,
     { key: 'all_fy', kind: 'toggle', label: 'All financial years', defaultOn: false },
     // Not shown, but declared: /documents/:id and the dashboard link straight to
     // "the movements this document made", and StockMovementsController reads it.

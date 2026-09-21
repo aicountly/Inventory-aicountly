@@ -283,8 +283,19 @@ export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
    */
   summaryForRows?: (summary: S, rows: readonly T[]) => S
 
-  /** Clickable KPI cards above the table. Falls back to `summary` when absent. */
-  kpis?: (summary: S, response: ReportResponse<T, S>) => StatCardSpec[]
+  /**
+   * Clickable KPI cards above the table. Falls back to `summary` when absent.
+   *
+   * `values` is the effective filter set, defaults resolved — what the register was
+   * asked. A card that drills down needs it: a link built from the summary alone
+   * silently drops the reader's warehouse or date and lands them on a wider set than
+   * the figure they clicked, which is the one thing a drill-down must never do.
+   */
+  kpis?: (
+    summary: S,
+    response: ReportResponse<T, S>,
+    values?: Record<string, string>,
+  ) => StatCardSpec[]
 
   /**
    * An analytics band under the KPI cards.
