@@ -67,6 +67,30 @@ final class BooksOwnedStatutoryFieldGuardTest extends TestCase
         $this->assertNull($this->owned(self::HUMAN, ['item_name' => 'Renamed'], ['hsn_sac' => '7407']));
     }
 
+    /**
+     * The bulk path compares against the stored row too.
+     *
+     * `POST /v1/items/bulk-update` used to run this check before it had read the items, so every
+     * value looked like a change from nothing: a batch that merely restated an item's stored HSN
+     * — a price list re-applied, a template re-run — came back 409 with nothing written and
+     * nothing wrong. The comparison is the same one either way; only the caller changed.
+     */
+    public function testABulkRowThatRestatesTheStoredHsnIsNotAnEdit(): void
+    {
+        $this->assertNull(
+            $this->owned(self::HUMAN, ['hsn_sac' => '7407', 'mrp' => 250], ['hsn_sac' => '7407', 'mrp' => 100]),
+            'a batch changing the MRP must not be refused over an HSN it restated unchanged',
+        );
+    }
+
+    public function testABulkRowThatReallyChangesTheHsnIsStillRefused(): void
+    {
+        $r = $this->owned(self::HUMAN, ['hsn_sac' => '12345678'], ['hsn_sac' => '']);
+
+        $this->assertNotNull($r, 'setting an HSN in bulk is the write Books will overwrite');
+        $this->assertSame('hsn_sac', $r['field']);
+    }
+
     /** A non-Books service key is not Books, and gets no exemption. */
     public function testAnotherServiceKeyGetsNoExemption(): void
     {
