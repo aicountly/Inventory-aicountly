@@ -190,8 +190,10 @@ final class LandedCostReceiptTest extends IntegrationTestCase
 
         // The same document allocated again, this time as one charge instead of three.
         $write = new \ReflectionMethod(DocumentPostingService::class, 'writeLandedCostAllocation');
-        $write->invoke($this->posting, $this->db, $this->cmpId, $documentId, $documentId, [
-            ['cost_type' => 'freight', 'allocation_basis' => 'value', 'line_id' => $lineId, 'base_qty' => 10.0, 'amount' => 250.0],
+        // A share names the receipt it belongs to: the parent rows are grouped by
+        // (cost type, receipt) now that one document may load several.
+        $write->invoke($this->posting, $this->db, $this->cmpId, $documentId, [
+            ['cost_type' => 'freight', 'allocation_basis' => 'value', 'line_id' => $lineId, 'target_document_id' => $documentId, 'base_qty' => 10.0, 'amount' => 250.0],
         ]);
 
         $costs = $this->db->table('inv_landed_costs')->where('document_id', $documentId)->get()->getResultArray();
@@ -200,7 +202,7 @@ final class LandedCostReceiptTest extends IntegrationTestCase
         $this->assertSame(1, $this->db->table('inv_landed_cost_lines')->where('cmp_id', $this->cmpId)->countAllResults(), 'and no orphaned children left behind');
 
         // Allocating nothing clears it, so a draft edited to drop its freight leaves no detail.
-        $write->invoke($this->posting, $this->db, $this->cmpId, $documentId, $documentId, []);
+        $write->invoke($this->posting, $this->db, $this->cmpId, $documentId, []);
         $this->assertSame(0, $this->db->table('inv_landed_costs')->where('document_id', $documentId)->countAllResults());
         $this->assertSame(0, $this->db->table('inv_landed_cost_lines')->where('cmp_id', $this->cmpId)->countAllResults());
     }

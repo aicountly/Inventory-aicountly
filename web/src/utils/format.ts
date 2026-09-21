@@ -100,6 +100,20 @@ export function formatCompactMoney(value: unknown, currencyCode = 'INR', empty =
   return `${sign}${symbol} ${INT_FORMAT.format(Math.round(abs))}`
 }
 
+/**
+ * An amount with its currency symbol: `₹ 15,900.00`, `$ 15,900.00`.
+ *
+ * The symbol comes from the company's base currency, never from a literal in a component —
+ * Aicountly is multi-currency, and a hard-coded rupee sign is simply wrong for every company
+ * that is not Indian. Full precision, Indian digit grouping, and the sign in front of the symbol
+ * so a negative reads as `-₹ 100.00` rather than `₹ -100.00`.
+ */
+export function formatCurrency(value: unknown, currencyCode: string | null | undefined = 'INR', empty = '—'): string {
+  const n = toNumber(value)
+  if (n === null) return empty
+  return `${n < 0 ? '-' : ''}${currencySymbol(currencyCode)} ${MONEY_FORMAT.format(Math.abs(n))}`
+}
+
 /** `2025-04-01` (or a timestamp) → `01 Apr 2025`. Invalid → the empty marker. */
 export function formatDate(value: unknown, empty = '—'): string {
   if (value === null || value === undefined || value === '') return empty

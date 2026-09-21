@@ -35,6 +35,15 @@ export interface ReportListShellProps extends ReportCompactShellProps {
   insights?: ReactNode
   /** Grid the KPI cards are laid out in. Defaults to the six-up strip. */
   summaryClassName?: string
+  /**
+   * The intelligence rail: a narrow column of cards to the right of the table.
+   *
+   * Below `xl` it stacks under the table rather than squeezing both into half a
+   * viewport — at that width the table is already scrolling sideways and a 17rem
+   * column beside it would cost the rows more than the rail is worth. Marked
+   * `print:hidden`: the sheet carries the rows and the totals, not the commentary.
+   */
+  aside?: ReactNode
 }
 
 /**
@@ -49,6 +58,7 @@ export function ReportListShell({
   summary,
   summaryClassName,
   insights,
+  aside,
   children,
   ...shell
 }: ReportListShellProps) {
@@ -66,9 +76,28 @@ export function ReportListShell({
         </div>
       ) : null}
       {toolbar ? <div className="shrink-0 print:hidden">{toolbar}</div> : null}
-      {summary ? <div className={summaryClassName ?? SUMMARY_CARD_GRID}>{summary}</div> : null}
+      {summary ? (
+        // A named landmark, not a bare div: the KPI strip is the answer a reader came for,
+        // and on a register this long it is worth being able to jump to by region rather
+        // than tabbing past the whole filter panel to reach it.
+        <section aria-label="Key figures" className={summaryClassName ?? SUMMARY_CARD_GRID}>
+          {summary}
+        </section>
+      ) : null}
       {insights}
-      <div className="flex flex-col flex-1 min-h-0">{children}</div>
+      {aside ? (
+        <div className="flex flex-1 min-h-0 flex-col gap-3 xl:grid xl:grid-cols-[minmax(0,1fr)_17rem] xl:items-start xl:gap-3">
+          <div className="flex min-w-0 flex-col">{children}</div>
+          <aside
+            aria-label="Stock intelligence"
+            className="flex flex-col gap-2.5 print:hidden xl:min-w-0"
+          >
+            {aside}
+          </aside>
+        </div>
+      ) : (
+        <div className="flex flex-col flex-1 min-h-0">{children}</div>
+      )}
     </ReportCompactShell>
   )
 }

@@ -71,7 +71,7 @@ export const DASHBOARD_VIEWS: readonly DashboardView[] = [
   {
     id: 'valuation',
     label: 'Valuation',
-    description: 'Understand inventory cost, ageing and capital tied up in stock.',
+    description: 'Understand inventory cost, ageing, stock health and capital tied up in stock.',
     icon: Coins,
     sequence: ['g', '4'],
     permissions: [P.report('stock_summary'), P.report('stock_ageing')],

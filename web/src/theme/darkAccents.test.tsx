@@ -25,9 +25,16 @@ const SRC = resolve(process.cwd(), 'src')
  * top (-600 and darker). Solid accents (-500 and up as a background) are left
  * out on purpose: they are already dark-safe, and a button is not a surface
  * this file should be repainting.
+ *
+ * The grey washes are in the list too, and for a reason worth stating: an
+ * opacity modifier makes a NEW class name, so `bg-gray-50/70` is not covered by
+ * the rule that remaps `bg-gray-50`. A table footer band written that way stayed
+ * a pale strip on a dark card with its emerald and red totals painted
+ * dark-on-light inside it, because the tone utilities on top ARE remapped and
+ * only the band was left. Nothing in the build can see that; this can.
  */
 const USAGE =
-  /(?:hover:|focus:|group-hover:|focus-visible:)?(?:bg-(?:emerald|amber|red|sky|violet|rose|teal|blue|orange|green|indigo|purple|fuchsia|cyan|lime|yellow|pink)-(?:50|100)|border-(?:emerald|amber|red|sky|violet|rose|teal|blue|orange)-(?:50|100|200|300)|text-(?:emerald|amber|red|sky|violet|rose|teal|blue|orange)-(?:600|700|800|900))(?:\/\d+)?(?![\d])/g
+  /(?:hover:|focus:|group-hover:|focus-visible:)?(?:bg-(?:emerald|amber|red|sky|violet|rose|teal|blue|orange|green|indigo|purple|fuchsia|cyan|lime|yellow|pink|gray|slate)-(?:50|100)|border-(?:emerald|amber|red|sky|violet|rose|teal|blue|orange)-(?:50|100|200|300)|text-(?:emerald|amber|red|sky|violet|rose|teal|blue|orange)-(?:600|700|800|900))(?:\/\d+)?(?![\d])/g
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
@@ -104,6 +111,24 @@ function computed(className: string): CSSStyleDeclaration {
 
 const DARK_SHEET = readFileSync(resolve(process.cwd(), 'src/theme/dark-overrides.css'), 'utf8')
 
+/**
+ * The surface tokens the dark sheet resolves its grey washes through, lifted from the `.dark` block
+ * of theme/tokens.css.
+ *
+ * They have to be mounted or `rgb(var(--color-surface-2))` computes to nothing and the wash check
+ * below reads "no colour" rather than a luminance. Only the handful the sheet actually names, and
+ * only their dark values — this file exists to read the dark cascade back.
+ */
+const DARK_TOKENS = `:root {
+  --color-surface: 18 24 30;
+  --color-surface-2: 27 34 42;
+  --color-surface-3: 36 45 54;
+  --color-fg: 226 232 240;
+  --color-fg-muted: 148 163 184;
+  --color-fg-subtle: 100 116 139;
+  --color-border: 39 48 58;
+}`
+
 afterEach(() => {
   document.querySelectorAll('style[data-sheet]').forEach((el) => el.remove())
   document.documentElement.className = ''
@@ -123,7 +148,7 @@ describe('accent surfaces in dark mode', () => {
     const classes = usedClasses()
     // :hover cannot be provoked here; the coverage test above pins those.
     const plain = classes.filter((c) => !c.includes(':'))
-    mount((await utilitiesFor(classes)) + DARK_SHEET)
+    mount(DARK_TOKENS + (await utilitiesFor(classes)) + DARK_SHEET)
 
     for (const className of plain) {
       const style = computed(className)

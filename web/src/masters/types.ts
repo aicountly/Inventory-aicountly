@@ -33,6 +33,16 @@ export interface FieldDef<T> {
   name: string
   label: string
   type: FieldType
+  /**
+   * Heading this field sits under, e.g. `Location`.
+   *
+   * A master with a handful of fields wants one uninterrupted grid, and that
+   * is still what it gets: sections only appear once a config names them. A
+   * form long enough to need them (the warehouse has five groups of fields)
+   * reads as a form rather than a wall of inputs, and the heading gives the
+   * fields under it a programmatic group a screen reader can announce.
+   */
+  section?: string
   required?: boolean
   placeholder?: string
   help?: string

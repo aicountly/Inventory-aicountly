@@ -1,7 +1,7 @@
 import { ActiveBadge, StatusBadge, statusBadgeLabel } from '../components/StatusBadge'
-import { batchesApi, brandsApi, itemGroupsApi, locationsApi, stockCategoriesApi, uomApi, warehouseGroupsApi, warehousesApi, BATCH_STATUSES, LOCATION_TYPES, WAREHOUSE_TYPES } from '../services/masters'
-import type { Batch, Brand, ItemGroup, Location, StockCategory, Uom, Warehouse, WarehouseGroup } from '../services/masters'
-import { formatDate, formatDateTime, formatInt, formatQty, humanize } from '../utils/format'
+import { batchesApi, itemGroupsApi, locationsApi, warehouseGroupsApi, warehousesApi, AREA_UNITS, AREA_UNIT_LABELS, BATCH_STATUSES, LOCATION_TYPES, WAREHOUSE_TYPES } from '../services/masters'
+import type { AreaUnit, Batch, ItemGroup, Location, Warehouse } from '../services/masters'
+import { formatDate, formatDateTime, formatInt, formatQty, humanize, toNumber } from '../utils/format'
 import { isPickedItem } from './formValues'
 import { buildTree, descendantIds } from './tree'
 import type { MasterConfig, SelectOption } from './types'
@@ -77,126 +77,140 @@ export const itemGroupsConfig: MasterConfig<ItemGroup> = {
   },
 }
 
-export const stockCategoriesConfig: MasterConfig<StockCategory> = {
-  slug: 'stock-categories',
-  permissionSlug: 'stock_categories',
-  title: 'Stock categories',
-  singular: 'Stock category',
-  idKey: 'stock_cat_id',
-  nameOf: (r) => r.cat_name,
-  api: stockCategoriesApi,
-  defaultSort: 'cat_name',
-  needsFormOptions: false,
-  columns: [
-    { key: 'cat_name', header: 'Category', sortKey: 'cat_name', render: (r) => <strong>{r.cat_name}</strong> },
-    { key: 'cat_alias', header: 'Alias', sortKey: 'cat_alias' },
-    activeColumn<StockCategory>(),
-    updatedAt<StockCategory>(),
-  ],
-  fields: [
-    { name: 'cat_name', label: 'Category name', type: 'text', required: true, maxLength: 255, span: 2 },
-    { name: 'cat_alias', label: 'Alias', type: 'text', maxLength: 64 },
-    { name: 'is_active', label: 'Active', type: 'checkbox' },
-  ],
-}
+/*
+ * No stockCategoriesConfig.
+ *
+ * Stock categories outgrew the generic master screen the same way Brands and
+ * Units of measure did — company-wide figures over the list, a usage count per
+ * row with the actions that count implies, a selection that survives paging —
+ * and is rendered by `pages/masters/stockCategories/StockCategoriesPage.tsx`.
+ * A config left here would be a second, silent definition of that screen.
+ */
 
-export const brandsConfig: MasterConfig<Brand> = {
-  slug: 'brands',
-  permissionSlug: 'brands',
-  title: 'Brands',
-  singular: 'Brand',
-  idKey: 'brand_id',
-  nameOf: (r) => r.brand_name,
-  api: brandsApi,
-  defaultSort: 'brand_name',
-  needsFormOptions: false,
-  columns: [
-    { key: 'brand_name', header: 'Brand', sortKey: 'brand_name', render: (r) => <strong>{r.brand_name}</strong> },
-    { key: 'brand_alias', header: 'Alias', sortKey: 'brand_alias' },
-    activeColumn<Brand>(),
-    updatedAt<Brand>(),
-  ],
-  fields: [
-    { name: 'brand_name', label: 'Brand name', type: 'text', required: true, maxLength: 255, span: 2 },
-    { name: 'brand_alias', label: 'Alias', type: 'text', maxLength: 64 },
-    { name: 'is_active', label: 'Active', type: 'checkbox' },
-  ],
-}
+/*
+ * No brandsConfig.
+ *
+ * Brands outgrew the generic master screen — an item count worth clicking
+ * through, a revenue column owned by another product, a create form with more
+ * than three fields — and is rendered by `pages/masters/brands/BrandsPage.tsx`.
+ * A config left here would be a second, silent definition of that screen: a
+ * column added to it would change nothing, which is exactly the kind of edit
+ * that gets made twice before anyone notices.
+ */
 
-export const uomConfig: MasterConfig<Uom> = {
-  slug: 'uom',
-  permissionSlug: 'uom',
-  title: 'Units of measure',
-  singular: 'Unit',
-  idKey: 'unit_id',
-  nameOf: (r) => r.unit_name,
-  api: uomApi,
-  defaultSort: 'unit_name',
-  needsFormOptions: false,
-  columns: [
-    { key: 'unit_name', header: 'Unit', sortKey: 'unit_name', render: (r) => <strong>{r.unit_name}</strong> },
-    { key: 'unit_symbol', header: 'Symbol', sortKey: 'unit_symbol' },
-    { key: 'print_name', header: 'Print name', sortKey: 'print_name' },
-    { key: 'uqc_gst', header: 'GST UQC', sortKey: 'uqc_gst', render: (r) => <span className="mono">{r.uqc_gst ?? '—'}</span> },
-    { key: 'decimal_places', header: 'Decimals', align: 'right', sortKey: 'decimal_places' },
-    activeColumn<Uom>(),
-    updatedAt<Uom>(),
-  ],
-  fields: [
-    { name: 'unit_name', label: 'Unit name', type: 'text', required: true, maxLength: 128, placeholder: 'Pieces' },
-    { name: 'unit_symbol', label: 'Symbol', type: 'text', required: true, maxLength: 16, placeholder: 'Pcs' },
-    { name: 'print_name', label: 'Print name', type: 'text', maxLength: 128, help: 'Defaults to the symbol.' },
-    { name: 'uqc_gst', label: 'GST UQC code', type: 'text', maxLength: 16, placeholder: 'PCS', help: 'Unit quantity code used on GST returns.' },
-    { name: 'decimal_places', label: 'Decimal places', type: 'number', min: 0, max: 4, step: 1, help: '0 to 4.' },
-    { name: 'is_active', label: 'Active', type: 'checkbox' },
-  ],
-  toValues: (row) => ({
-    unit_name: row?.unit_name ?? '',
-    unit_symbol: row?.unit_symbol ?? '',
-    print_name: row?.print_name ?? '',
-    uqc_gst: row?.uqc_gst ?? '',
-    decimal_places: row ? String(row.decimal_places ?? 4) : '4',
-    is_active: row ? Number(row.is_active) === 1 : true,
-  }),
-}
+/*
+ * Units of measure has no config.
+ *
+ * It is the one master with a screen of its own (pages/masters/uom), so a
+ * `uomConfig` left here would be a definition nothing renders — the kind that
+ * gets edited in good faith and changes nothing on screen.
+ */
 
-export const warehouseGroupsConfig: MasterConfig<WarehouseGroup> = {
-  slug: 'warehouse-groups',
-  permissionSlug: 'warehouse_groups',
-  title: 'Warehouse groups',
-  singular: 'Warehouse group',
-  idKey: 'warehouse_group_id',
-  nameOf: (r) => r.grp_name,
-  api: warehouseGroupsApi,
-  defaultSort: 'grp_name',
-  needsFormOptions: false,
-  tree: { parentKey: 'parent_grp_id' },
-  columns: [
-    { key: 'grp_name', header: 'Group', sortKey: 'grp_name', render: (r) => <strong>{r.grp_name}</strong> },
-    activeColumn<WarehouseGroup>(),
-    updatedAt<WarehouseGroup>(),
-  ],
-  fields: [
-    { name: 'grp_name', label: 'Group name', type: 'text', required: true, maxLength: 255, span: 2 },
-    {
-      name: 'parent_grp_id',
-      label: 'Parent group',
-      type: 'select',
-      emptyLabel: '— No parent —',
-      options: (ctx) => {
-        const self = ctx.row ? idNum(ctx.row.warehouse_group_id) : null
-        const blocked = self !== null ? descendantIds(buildTree(ctx.rows, { idKey: 'warehouse_group_id', parentKey: 'parent_grp_id', labelOf: (r) => r.grp_name }), self) : new Set<number>()
-        return ctx.rows
-          .filter((r) => !blocked.has(r.warehouse_group_id))
-          .sort((a, b) => a.grp_name.localeCompare(b.grp_name))
-          .map((r) => ({ value: r.warehouse_group_id, label: r.grp_name }))
-      },
-    },
-    { name: 'is_active', label: 'Active', type: 'checkbox' },
-  ],
-}
+/*
+ * Warehouse groups used to be described here. It now has a screen of its own —
+ * masters/warehouseGroups/WarehouseGroupsPage — because a MasterConfig cannot
+ * express what that screen does: three views of the same rows, live figures
+ * counted over the whole master, a contextual structure panel and a form with
+ * a suggested code. `warehouseGroupsApi` is still the same endpoint, and the
+ * warehouse form below still reads its options from it.
+ */
 
 const warehouseTypeOptions: SelectOption[] = WAREHOUSE_TYPES.map((t) => ({ value: t, label: humanize(t) }))
+const areaUnitOptions: SelectOption[] = AREA_UNITS.map((u) => ({ value: u, label: AREA_UNIT_LABELS[u] }))
+
+/*
+ * The warehouse form's five sections. Long enough to need them: without the
+ * headings, a capacity field and a pincode field sit in the same undifferentiated
+ * grid and the form reads as a list of twenty inputs.
+ */
+const BASIC = 'Basic information'
+const LOCATION = 'Location'
+const CAPACITY = 'Capacity'
+const CONTROLS = 'Inventory controls'
+const ADVANCED = 'Advanced'
+
+/*
+ * The label helpers below are shared by the table cell and the exported cell so
+ * the sheet cannot drift from the screen — the rule this repo already applies to
+ * every other master column.
+ */
+const branchLabel = (r: Warehouse): string => (Number(r.bo_id) > 0 ? `Branch #${r.bo_id}` : 'All branches')
+
+const placeLabel = (r: Warehouse): string | null => {
+  const address = (r.address ?? {}) as Record<string, unknown>
+  const parts = ['city', 'state', 'country']
+    .map((k) => (typeof address[k] === 'string' ? (address[k] as string).trim() : ''))
+    .filter((v) => v !== '')
+  return parts.length === 0 ? null : parts.slice(0, 2).join(', ')
+}
+
+/** "50,000 Units", or the honest answer when nobody has set a ceiling. */
+const capacityLabel = (r: Warehouse): string => {
+  const capacity = toNumber(r.capacity_units)
+  return capacity !== null && capacity > 0 ? `${formatQty(capacity)} Units` : 'Not configured'
+}
+
+const areaLabel = (r: Warehouse): string => {
+  const area = toNumber(r.area)
+  if (area === null || area <= 0) return 'Not configured'
+  const unit = r.area_unit ? (AREA_UNIT_LABELS[r.area_unit as AreaUnit] ?? String(r.area_unit)) : ''
+  return unit ? `${formatQty(area)} ${unit}` : formatQty(area)
+}
+
+const negativeStockLabel = (r: Warehouse): string =>
+  r.allow_negative === null || r.allow_negative === undefined ? 'Company policy' : Number(r.allow_negative) === 1 ? 'Allowed' : 'Blocked'
+
+/** A key of the warehouse's stored address, as form text. */
+const addressField = (row: Warehouse | null, key: string): string => {
+  const value = (row?.address as Record<string, unknown> | null)?.[key]
+  return typeof value === 'string' || typeof value === 'number' ? String(value) : ''
+}
+
+/** A stored number as form text; blank for null, so the input shows empty, not 0. */
+const numText = (value: unknown): string => (value === null || value === undefined || value === '' ? '' : String(value))
+
+const nullableText = (value: unknown): string | null => {
+  const text = String(value ?? '').trim()
+  return text === '' ? null : text
+}
+
+/**
+ * A number field's payload value.
+ *
+ * Blank means "not configured" and must reach the API as null, never 0: a
+ * warehouse whose capacity saved as 0 would read as permanently full on every
+ * screen that divides by it.
+ */
+const nullableNum = (value: unknown): number | null => {
+  const text = String(value ?? '').trim()
+  if (text === '') return null
+  const n = Number(text)
+  return Number.isFinite(n) ? n : null
+}
+
+const nonNegative = (value: unknown, label: string): string | null => {
+  const text = String(value ?? '').trim()
+  if (text === '') return null
+  const n = Number(text)
+  if (!Number.isFinite(n)) return `${label} must be a number`
+  return n < 0 ? `${label} cannot be negative` : null
+}
+
+/**
+ * A coordinate is valid alone only when its partner is blank too.
+ *
+ * Half a point plots nothing, so the API refuses it; catching it here means the
+ * message lands on the field rather than arriving as a form-level error after a
+ * round trip.
+ */
+const coordinateError = (value: unknown, partner: unknown, limit: number, label: string): string | null => {
+  const text = String(value ?? '').trim()
+  const partnerText = String(partner ?? '').trim()
+  if (text === '') return partnerText === '' ? null : `${label} is required when the other coordinate is set`
+  const n = Number(text)
+  if (!Number.isFinite(n)) return `${label} must be a number`
+  return n < -limit || n > limit ? `${label} must be between -${limit} and ${limit}` : null
+}
 
 export const warehousesConfig: MasterConfig<Warehouse> = {
   slug: 'warehouses',
@@ -224,34 +238,78 @@ export const warehousesConfig: MasterConfig<Warehouse> = {
     },
     { key: 'warehouse_code', header: 'Code', sortKey: 'warehouse_code', render: (r) => <span className="mono">{r.warehouse_code ?? '—'}</span> },
     { key: 'warehouse_type', header: 'Type', sortKey: 'warehouse_type', render: (r) => humanize(r.warehouse_type), exportValue: (r) => humanize(r.warehouse_type) },
-    { key: 'bo_id', header: 'Branch', sortKey: 'bo_id', render: (r) => (Number(r.bo_id) > 0 ? `Branch #${r.bo_id}` : 'All branches'), exportValue: (r) => (Number(r.bo_id) > 0 ? `Branch #${r.bo_id}` : 'All branches') },
-    { key: 'allow_negative', header: 'Negative stock', render: (r) => (r.allow_negative === null || r.allow_negative === undefined ? 'Company policy' : Number(r.allow_negative) === 1 ? 'Allowed' : 'Blocked'), exportValue: (r) => (r.allow_negative === null || r.allow_negative === undefined ? 'Company policy' : Number(r.allow_negative) === 1 ? 'Allowed' : 'Blocked') },
+    { key: 'bo_id', header: 'Branch', sortKey: 'bo_id', render: (r) => branchLabel(r), exportValue: (r) => branchLabel(r) },
+    { key: 'location', header: 'Location', render: (r) => placeLabel(r) ?? '—', exportValue: (r) => placeLabel(r) ?? '' },
+    { key: 'capacity_units', header: 'Capacity', sortKey: 'capacity_units', align: 'right', render: (r) => capacityLabel(r), exportValue: (r) => capacityLabel(r) },
+    { key: 'area', header: 'Area', sortKey: 'area', align: 'right', render: (r) => areaLabel(r), exportValue: (r) => areaLabel(r) },
+    { key: 'allow_negative', header: 'Negative stock', render: (r) => negativeStockLabel(r), exportValue: (r) => negativeStockLabel(r) },
     activeColumn<Warehouse>(),
     updatedAt<Warehouse>(),
   ],
   fields: [
-    { name: 'warehouse_name', label: 'Warehouse name', type: 'text', required: true, maxLength: 255, span: 2 },
-    { name: 'warehouse_code', label: 'Code', type: 'text', maxLength: 32, help: 'Unique within the company.' },
-    { name: 'warehouse_type', label: 'Type', type: 'select', required: true, options: warehouseTypeOptions },
+    { section: BASIC, name: 'warehouse_name', label: 'Warehouse name', type: 'text', required: true, maxLength: 255, span: 2 },
+    { section: BASIC, name: 'warehouse_code', label: 'Code', type: 'text', maxLength: 32, help: 'Unique within the company.' },
+    { section: BASIC, name: 'warehouse_type', label: 'Type', type: 'select', required: true, options: warehouseTypeOptions },
     {
+      section: BASIC,
       name: 'warehouse_group_id',
       label: 'Warehouse group',
       type: 'select',
       loadOptions: async (_ctx, signal) => {
         const res = await warehouseGroupsApi.list({ limit: 1000, status: 'active', sort: 'grp_name' }, signal)
-        return res.data.map((g) => ({ value: g.warehouse_group_id, label: g.grp_name }))
+        return res.data.map((g) => ({ value: g.warehouse_group_id, label: g.grp_code ? `${g.grp_name} (${g.grp_code})` : g.grp_name }))
       },
     },
     {
+      section: BASIC,
       name: 'parent_warehouse_id',
       label: 'Parent warehouse',
       type: 'select',
       options: (ctx) => (ctx.options?.warehouses ?? []).filter((w) => !ctx.row || w.warehouse_id !== ctx.row.warehouse_id).map((w) => ({ value: w.warehouse_id, label: w.warehouse_name })),
     },
-    { name: 'bo_id', label: 'Branch id', type: 'number', min: 0, step: 1, help: '0 = shared by all branches. Otherwise the Manage branch id.' },
-    { name: 'allow_negative', label: 'Negative stock', type: 'select', emptyLabel: 'Follow company policy', options: [{ value: 1, label: 'Allow' }, { value: 0, label: 'Block' }] },
-    { name: 'is_default', label: 'Default warehouse', type: 'checkbox', help: 'Used when a document does not name one.' },
-    { name: 'is_active', label: 'Active', type: 'checkbox' },
+    { section: BASIC, name: 'bo_id', label: 'Branch id', type: 'number', min: 0, step: 1, help: '0 = shared by all branches. Otherwise the Manage branch id.' },
+
+    { section: LOCATION, name: 'address_line1', label: 'Address', type: 'text', maxLength: 255, span: 2 },
+    { section: LOCATION, name: 'address_city', label: 'City', type: 'text', maxLength: 120 },
+    { section: LOCATION, name: 'address_state', label: 'State', type: 'text', maxLength: 120 },
+    { section: LOCATION, name: 'address_country', label: 'Country', type: 'text', maxLength: 120 },
+    { section: LOCATION, name: 'address_pincode', label: 'Pincode', type: 'text', maxLength: 16 },
+    {
+      section: LOCATION,
+      name: 'latitude',
+      label: 'Latitude',
+      type: 'number',
+      min: -90,
+      max: 90,
+      help: 'Optional. Set both coordinates to plot this warehouse on the map.',
+      validate: (value, ctx) => coordinateError(value, ctx.values.longitude, 90, 'Latitude'),
+    },
+    {
+      section: LOCATION,
+      name: 'longitude',
+      label: 'Longitude',
+      type: 'number',
+      min: -180,
+      max: 180,
+      validate: (value, ctx) => coordinateError(value, ctx.values.latitude, 180, 'Longitude'),
+    },
+
+    {
+      section: CAPACITY,
+      name: 'capacity_units',
+      label: 'Maximum stock units',
+      type: 'number',
+      min: 0,
+      help: 'Leave empty if this warehouse has no set ceiling — utilisation is then reported as not configured.',
+      validate: (value) => nonNegative(value, 'Maximum stock units'),
+    },
+    { section: CAPACITY, name: 'area', label: 'Area', type: 'number', min: 0, validate: (value) => nonNegative(value, 'Area') },
+    { section: CAPACITY, name: 'area_unit', label: 'Area unit', type: 'select', emptyLabel: '— None —', options: areaUnitOptions },
+
+    { section: CONTROLS, name: 'allow_negative', label: 'Negative stock', type: 'select', emptyLabel: 'Follow company policy', options: [{ value: 1, label: 'Allow' }, { value: 0, label: 'Block' }] },
+    { section: CONTROLS, name: 'is_default', label: 'Default warehouse', type: 'checkbox', help: 'Used when a document does not name one.' },
+
+    { section: ADVANCED, name: 'is_active', label: 'Active', type: 'checkbox' },
   ],
   toValues: (row) => ({
     warehouse_name: row?.warehouse_name ?? '',
@@ -260,17 +318,46 @@ export const warehousesConfig: MasterConfig<Warehouse> = {
     warehouse_group_id: row?.warehouse_group_id ? String(row.warehouse_group_id) : '',
     parent_warehouse_id: row?.parent_warehouse_id ? String(row.parent_warehouse_id) : '',
     bo_id: row ? String(row.bo_id ?? 0) : '0',
+    address_line1: addressField(row, 'line1'),
+    address_city: addressField(row, 'city'),
+    address_state: addressField(row, 'state'),
+    address_country: addressField(row, 'country'),
+    address_pincode: addressField(row, 'pincode'),
+    latitude: numText(row?.latitude),
+    longitude: numText(row?.longitude),
+    capacity_units: numText(row?.capacity_units),
+    area: numText(row?.area),
+    area_unit: row?.area_unit ? String(row.area_unit) : '',
     allow_negative: row && row.allow_negative !== null && row.allow_negative !== undefined ? String(Number(row.allow_negative)) : '',
     is_default: row ? Number(row.is_default) === 1 : false,
     is_active: row ? Number(row.is_active) === 1 : true,
   }),
-  toPayload: (values) => ({
+  toPayload: (values, row) => ({
     warehouse_name: String(values.warehouse_name ?? '').trim(),
     warehouse_code: String(values.warehouse_code ?? '').trim() || null,
     warehouse_type: String(values.warehouse_type || 'standard'),
     warehouse_group_id: idNum(values.warehouse_group_id),
     parent_warehouse_id: idNum(values.parent_warehouse_id),
     bo_id: Math.max(0, Number(values.bo_id) || 0),
+    /*
+     * Spread the stored address first so a key this form does not show — an
+     * address line 2 typed by an older build, a landmark imported from Books —
+     * survives a save made from this screen. Only the five fields below are
+     * ours to overwrite.
+     */
+    address: {
+      ...((row?.address as Record<string, unknown> | null) ?? {}),
+      line1: nullableText(values.address_line1),
+      city: nullableText(values.address_city),
+      state: nullableText(values.address_state),
+      country: nullableText(values.address_country),
+      pincode: nullableText(values.address_pincode),
+    },
+    latitude: nullableNum(values.latitude),
+    longitude: nullableNum(values.longitude),
+    capacity_units: nullableNum(values.capacity_units),
+    area: nullableNum(values.area),
+    area_unit: String(values.area_unit ?? '').trim() || null,
     allow_negative: values.allow_negative === '' || values.allow_negative === null || values.allow_negative === undefined ? null : Number(values.allow_negative),
     is_default: values.is_default ? 1 : 0,
     is_active: values.is_active ? 1 : 0,

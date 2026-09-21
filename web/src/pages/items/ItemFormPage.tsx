@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useLocation, useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   Activity,
   ClipboardList,
@@ -17,6 +17,7 @@ import { useCompany } from '../../company/CompanyContext'
 import { ConfirmDialog } from '../../components/ConfirmDialog'
 import { Notice } from '../../components/Notice'
 import { useBaseCurrencySymbol } from '../../hooks/useBaseCurrency'
+import { useMediaQuery } from '../../hooks/useMediaQuery'
 import { invalidateFormOptions, useFormOptions } from '../../hooks/useFormOptions'
 import { useQuery } from '../../hooks/useQuery'
 import { useUnsavedChanges } from '../../hooks/useUnsavedChanges'
@@ -36,10 +37,12 @@ import { AIC, cx } from '../../ui/cx'
 import { formatDateTime, toNumber } from '../../utils/format'
 import { ItemAccountingCard } from './ItemAccountingCard'
 import { ItemAdditionalCard } from './ItemAdditionalCard'
+import { BarcodeScanDialog, barcodeScanSupported } from './BarcodeScanDialog'
 import { ItemAiInsightsCard } from './ItemAiInsightsCard'
 import { ItemAiSuggestDrawer } from './ItemAiSuggestDrawer'
 import { ItemBasicDetailsCard } from './ItemBasicDetailsCard'
 import { ItemClassificationCard } from './ItemClassificationCard'
+import { ItemDuplicateNotice } from './ItemDuplicateNotice'
 import { ItemEditHeader } from './ItemEditHeader'
 import { ItemEditSkeleton } from './ItemEditSkeleton'
 import { ItemMediaDocumentsCard } from './ItemMediaDocumentsCard'
@@ -52,8 +55,11 @@ import { ItemSectionNav } from './ItemSectionNav'
 import { ItemStockLocationsCard } from './ItemStockLocationsCard'
 import { ItemUnitsPackagingCard } from './ItemUnitsPackagingCard'
 import { ItemViewDrawer } from './ItemViewDrawer'
+import { ItemWizardBar } from './ItemWizardBar'
 import { fieldId } from './ItemWorkspaceKit'
 import {
+  duplicateDraft,
+  duplicateItemForm,
   emptyItemForm,
   itemPayload,
   itemToForm,
@@ -61,8 +67,10 @@ import {
   validateItemForm,
 } from './itemForm'
 import type { ItemFormState, OpeningDraft } from './itemForm'
-import { ITEM_SECTIONS, sectionDomId } from './itemSections'
+import type { InsightSection } from '../../services/inventoryAiService'
+import { ITEM_SECTIONS, sectionDomId, sectionFromDomId, sectionOfField } from './itemSections'
 import { useSectionSpy } from './useSectionSpy'
+import { useDuplicateCheck } from './useDuplicateCheck'
 
 const LIST = '/items'
 
@@ -71,7 +79,14 @@ interface Loaded {
   openings: ItemOpeningsResponse
 }
 
-/** Duplicating an item hands the next page a draft through router state. */
+/**
+ * Duplicating an item hands the next page a draft through router state.
+ *
+ * That works from the item form, which already holds the draft. The items list
+ * does not — it holds a row, not a form — so it names the source with
+ * `/items/new?from=<id>` instead and this page fetches it. Two doors, one rule:
+ * both seed the form through `duplicateDraft`.
+ */
 interface ItemRouteState {
   duplicate?: ItemFormState
 }
@@ -103,6 +118,7 @@ export function ItemFormPage() {
   const itemId = id && /^\d+$/.test(id) ? Number(id) : null
   const navigate = useNavigate()
   const location = useLocation()
+  const [searchParams] = useSearchParams()
   const toast = useToast()
   const { scope, fy } = useCompany()
   const { can, loading: accessLoading } = useAccess()
@@ -147,6 +163,11 @@ export function ItemFormPage() {
   const [insightsLoading, setInsightsLoading] = useState(false)
   const [insightsTick, setInsightsTick] = useState(0)
   const [pendingNav, setPendingNav] = useState<(() => void) | null>(null)
+  const [scanOpen, setScanOpen] = useState(false)
+  const [duplicatesDismissed, setDuplicatesDismissed] = useState(false)
+  /* Which section the phone is on. Ignored entirely on a wide screen, where every section
+     is on the page at once and the nav is an anchor. */
+  const [wizardSection, setWizardSection] = useState<InsightSection>('basic')
 
   /*
    * Which record is on screen.
@@ -169,14 +190,36 @@ export function ItemFormPage() {
     setInsights(null)
   }
 
+  /*
+   * `/items/new?from=7214` — Duplicate, from the items list.
+   *
+   * Read only when creating: on an edit route the id in the path is the record,
+   * and a stray `from` in the query string must not quietly reshape it. Its
+   * openings are deliberately not fetched — a copied opening would be stock
+   * that was never physically received.
+   */
+  const fromParam = searchParams.get('from')
+  const duplicateOf = itemId === null && fromParam && /^\d+$/.test(fromParam) ? Number(fromParam) : null
+  const source = useQuery(
+    (signal) => itemsApi.get(duplicateOf as number, signal),
+    [duplicateOf, scope?.cmp_id],
+    { enabled: !!scope && duplicateOf !== null, keepData: false },
+  )
+
   const effectiveFyId = loaded.data?.openings.effective_fy_id ?? 0
 
   useEffect(() => {
     if (initialised) return
     if (itemId === null) {
       if (!options) return
-      // A duplicate arrives as a draft on the router state; anything else starts empty.
-      const duplicate = (location.state as ItemRouteState | null)?.duplicate
+      // A duplicate arrives either as a draft on the router state (from the item
+      // form) or as a source id in the query string (from the items list). Wait
+      // for the fetch rather than filling a blank form the copy would then
+      // overwrite under the reader's cursor.
+      if (duplicateOf !== null && !source.data) return
+      const duplicate =
+        (location.state as ItemRouteState | null)?.duplicate ??
+        (source.data ? duplicateItemForm(source.data) : null)
       const next = duplicate ?? emptyItemForm(options.default_valuation_method)
       setForm(next)
       setBaseline(JSON.stringify(next))
@@ -191,7 +234,7 @@ export function ItemFormPage() {
       setManageConversions(next.unitLines.length > 0)
       setInitialised(true)
     }
-  }, [itemId, loaded.data, options, initialised, location.state])
+  }, [itemId, loaded.data, options, initialised, location.state, duplicateOf, source.data])
 
   const formJson = useMemo(() => JSON.stringify(form), [form])
   const dirty = initialised && baseline !== null && formJson !== baseline
@@ -229,6 +272,47 @@ export function ItemFormPage() {
 
   const spy = useSectionSpy(SECTION_DOM_IDS, initialised)
   const { scrollTo, register: registerSection } = spy
+
+  /*
+   * Below 1024px the workspace walks its sections one at a time instead of stacking all eight.
+   * `true` by default so a DOM without matchMedia — the test environment — renders the whole page
+   * rather than one section and seven hidden ones.
+   */
+  const wideLayout = useMediaQuery('(min-width: 1024px)', true)
+  const showSection = useCallback(
+    (id: InsightSection): boolean => wideLayout || wizardSection === id,
+    [wideLayout, wizardSection],
+  )
+  /* Hidden rather than unmounted: the card keeps its own state across steps, and the section
+     elements stay registered with the spy for the moment the viewport widens again. */
+  const sectionClass = useCallback((id: InsightSection) => (showSection(id) ? undefined : 'hidden'), [showSection])
+
+  /** Bring a section forward on a narrow screen, where only one is on show. */
+  const revealSection = useCallback(
+    (id: InsightSection) => {
+      if (wideLayout) {
+        scrollTo(sectionDomId(id))
+        return
+      }
+      setWizardSection(id)
+      document.querySelector('.app-main')?.scrollTo({ top: 0, behavior: 'auto' })
+    },
+    [wideLayout, scrollTo],
+  )
+
+  /*
+   * Items this company already has that look like the one being typed.
+   *
+   * Read-only and advisory: the API refuses a repeated name or SKU with a 409 of its own, so this
+   * never gates the Save button — it just says so while the name is still cheap to change.
+   */
+  const { matches: duplicates } = useDuplicateCheck({ form, excludeItemId: itemId, enabled: !readOnly && initialised })
+
+  // "Continue anyway" answers the duplicates on screen, not every duplicate this item will ever
+  // have: a new name is a new question and has to be asked again.
+  useEffect(() => {
+    setDuplicatesDismissed(false)
+  }, [form.item_name, form.item_sku, form.item_upc])
 
   /* ---------------------------------------------------------------------- */
   /* Insights                                                               */
@@ -314,6 +398,18 @@ export function ItemFormPage() {
   const revealFirstError = useCallback(
     (found: Record<string, string>) => {
       for (const key of Object.keys(found)) {
+        // On a narrow screen the field may be in a section that is not on show. Bring its section
+        // forward first, then focus on the next frame — the element is display:none until then.
+        const section = sectionOfField(key)
+        if (section && !showSection(section)) {
+          revealSection(section)
+          setTimeout(() => {
+            const later = document.getElementById(fieldId(key))
+            later?.scrollIntoView({ block: 'center' })
+            later?.focus({ preventScroll: true })
+          }, 0)
+          return
+        }
         if (key.startsWith('unitLines.')) {
           scrollTo(sectionDomId('units'))
           return
@@ -332,7 +428,7 @@ export function ItemFormPage() {
         }
       }
     },
-    [scrollTo],
+    [scrollTo, showSection, revealSection],
   )
 
   const doSave = useCallback(
@@ -399,10 +495,26 @@ export function ItemFormPage() {
     [form, itemId, isStock, openingsDirty, effectiveFyId, loaded, activity, navigate, toast, revealFirstError],
   )
 
+  /*
+   * The camera scanner, where the browser has one.
+   *
+   * `BarcodeDetector` is Chrome and Edge; Safari and Firefox have nothing equivalent and no
+   * library was added for this. So the button stays exactly where it was and says so honestly on
+   * a device that cannot scan — the field is a plain text input either way, which is what a USB
+   * scanner types into anyway.
+   */
+  const openScanner = useCallback(() => {
+    if (barcodeScanSupported()) {
+      setScanOpen(true)
+      return
+    }
+    toast.info('This browser cannot scan with the camera — type or paste the barcode, or use a USB scanner.')
+  }, [toast])
+
   useFormKeyboard({
     onSave: () => void doSave(false),
     saving,
-    enabled: !readOnly && initialised && !viewOpen && !suggestOpen,
+    enabled: !readOnly && initialised && !viewOpen && !suggestOpen && !scanOpen,
   })
 
   useUnsavedChanges({
@@ -480,16 +592,9 @@ export function ItemFormPage() {
   }
 
   const duplicate = () => {
-    const draft: ItemFormState = {
-      ...form,
-      item_name: `${form.item_name} (copy)`.trim(),
-      // Both are unique per company; carrying them over guarantees a conflict on the first save.
-      item_sku: '',
-      item_upc: '',
-      // Opening stock belongs to the item it was counted for, not to a copy of its settings.
-      openings: [],
-      unitLines: form.unitLines.map((l) => ({ ...l })),
-    }
+    // `duplicateDraft` owns what a copy keeps and what it drops — the same rule
+    // the items list's Duplicate goes through.
+    const draft = duplicateDraft(form)
     setBaseline(formJson)
     navigate('/items/new', { state: { duplicate: draft } satisfies ItemRouteState })
   }
@@ -702,7 +807,16 @@ export function ItemFormPage() {
         synchronised on a schedule.
       </p>
 
-      <ItemSectionNav sections={ITEM_SECTIONS} active={spy.active} onSelect={scrollTo} />
+      {/* Anchors on a wide screen, steps on a phone — same strip, same eight labels. */}
+      <ItemSectionNav
+        sections={ITEM_SECTIONS}
+        active={wideLayout ? spy.active : sectionDomId(wizardSection)}
+        onSelect={(domId) => {
+          const id = sectionFromDomId(domId)
+          if (id) revealSection(id)
+          else scrollTo(domId)
+        }}
+      />
 
       {optionsError ? <Notice kind="warning">{optionsError}</Notice> : null}
       {loaded.error && loaded.data ? (
@@ -724,55 +838,74 @@ export function ItemFormPage() {
         )}
       >
         <div className="flex min-w-0 flex-col gap-3">
-          <ItemBasicDetailsCard
-            {...cardProps}
-            onSuggest={() => void openSuggestions()}
-            suggestBusy={suggestBusy}
-            currencySymbol={currency}
-            onScanBarcode={() =>
-              toast.info('Barcode scanning is not available on this device yet — type or paste the code for now.')
-            }
-          />
+          <div className={sectionClass('basic')}>
+            <ItemBasicDetailsCard
+              {...cardProps}
+              onSuggest={() => void openSuggestions()}
+              suggestBusy={suggestBusy}
+              currencySymbol={currency}
+              onScanBarcode={openScanner}
+              duplicates={
+                duplicates.length > 0 && !duplicatesDismissed ? (
+                  <ItemDuplicateNotice matches={duplicates} onDismiss={() => setDuplicatesDismissed(true)} />
+                ) : null
+              }
+            />
+          </div>
 
-          <ItemClassificationCard
-            {...cardProps}
-            options={options}
-            masterLinks={{
-              groups: can(P.masters('item_groups', 'write')) ? '/masters/item-groups' : null,
-              categories: can(P.masters('stock_categories', 'write')) ? '/masters/stock-categories' : null,
-              brands: can(P.masters('brands', 'write')) ? '/masters/brands' : null,
-            }}
-          />
+          <div className={sectionClass('classification')}>
+            <ItemClassificationCard
+              {...cardProps}
+              options={options}
+              masterLinks={{
+                groups: can(P.masters('item_groups', 'write')) ? '/masters/item-groups' : null,
+                categories: can(P.masters('stock_categories', 'write')) ? '/masters/stock-categories' : null,
+                brands: can(P.masters('brands', 'write')) ? '/masters/brands' : null,
+              }}
+            />
+          </div>
 
-          <ItemUnitsPackagingCard
-            {...cardProps}
-            units={units}
-            manageConversions={manageConversions}
-            onManageConversions={setManageConversions}
-          />
+          <div className={sectionClass('units')}>
+            <ItemUnitsPackagingCard
+              {...cardProps}
+              units={units}
+              manageConversions={manageConversions}
+              onManageConversions={setManageConversions}
+            />
+          </div>
 
-          <ItemPricingValuationCard
-            {...cardProps}
-            options={options}
-            currencySymbol={currency}
-            hasHistory={onHand !== null && onHand !== 0}
-          />
+          <div className={sectionClass('pricing')}>
+            <ItemPricingValuationCard
+              {...cardProps}
+              options={options}
+              currencySymbol={currency}
+              hasHistory={onHand !== null && onHand !== 0}
+            />
+          </div>
 
-          <ItemStockLocationsCard
-            {...cardProps}
-            options={options}
-            itemUnits={itemUnits}
-            openings={form.openings}
-            onOpeningsChange={setOpenings}
-            openingScopeNote={openingScopeNote}
-            currencySymbol={currency}
-          />
+          <div className={sectionClass('stock')}>
+            <ItemStockLocationsCard
+              {...cardProps}
+              options={options}
+              itemUnits={itemUnits}
+              openings={form.openings}
+              onOpeningsChange={setOpenings}
+              openingScopeNote={openingScopeNote}
+              currencySymbol={currency}
+            />
+          </div>
 
-          <ItemAccountingCard {...cardProps} options={options} item={item} />
+          <div className={sectionClass('accounting')}>
+            <ItemAccountingCard {...cardProps} options={options} item={item} />
+          </div>
 
-          <ItemAdditionalCard {...cardProps} />
+          <div className={sectionClass('additional')}>
+            <ItemAdditionalCard {...cardProps} />
+          </div>
 
-          <ItemMediaDocumentsCard registerSection={registerSection} />
+          <div className={sectionClass('media')}>
+            <ItemMediaDocumentsCard registerSection={registerSection} />
+          </div>
         </div>
 
         <aside className="flex min-w-0 flex-col gap-3 xl:sticky xl:top-14">
@@ -799,6 +932,26 @@ export function ItemFormPage() {
           />
         </aside>
       </div>
+
+      {wideLayout ? null : (
+        <ItemWizardBar
+          sections={ITEM_SECTIONS}
+          active={wizardSection}
+          onSelect={revealSection}
+          onSave={() => void doSave(false)}
+          saving={saving}
+          canSave={initialised && !saving}
+          readOnly={readOnly}
+          dirty={dirty}
+          isNew={itemId === null}
+        />
+      )}
+
+      <BarcodeScanDialog
+        open={scanOpen}
+        onClose={() => setScanOpen(false)}
+        onDetected={(value) => set('item_upc', value)}
+      />
 
       <ItemAiSuggestDrawer
         open={suggestOpen}

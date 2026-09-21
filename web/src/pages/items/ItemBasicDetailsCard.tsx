@@ -1,4 +1,5 @@
 import { FileText, ScanLine, Sparkles } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { ITEM_TYPES } from '../../services/items'
 import { Button } from '../../ui/Button'
 import { Tooltip } from '../../ui/Tooltip'
@@ -19,8 +20,15 @@ export interface ItemBasicDetailsCardProps extends ItemCardBaseProps {
   suggestBusy: boolean
   /** Null when the company's base currency is not readable here — the label then carries no symbol. */
   currencySymbol: string | null
-  /** Reports the state of scanning support on this device; the field stays typeable either way. */
+  /** Opens the camera scanner, or reports that this device has none; the field stays typeable either way. */
   onScanBarcode: () => void
+  /**
+   * The "you may already have this item" panel, rendered under the fields it is about.
+   *
+   * Passed in rather than looked up here so this card stays a presentation of the draft: the
+   * lookup is debounced, abortable and owned by the page.
+   */
+  duplicates?: ReactNode
 }
 
 export function ItemBasicDetailsCard({
@@ -33,6 +41,7 @@ export function ItemBasicDetailsCard({
   suggestBusy,
   currencySymbol,
   onScanBarcode,
+  duplicates,
 }: ItemBasicDetailsCardProps) {
   return (
     <ItemSectionCard
@@ -173,6 +182,8 @@ export function ItemBasicDetailsCard({
           className="self-end"
         />
       </FormGrid>
+
+      {duplicates}
     </ItemSectionCard>
   )
 }

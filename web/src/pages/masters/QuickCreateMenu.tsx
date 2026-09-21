@@ -10,7 +10,8 @@ import { MASTER_DEFINITIONS, canWriteMaster } from './masterDefinitions'
  *
  * Every entry is an existing create route — `/items/new` and the bill-of-
  * materials form page go straight there, and the masters whose form is a modal
- * are deep-linked with `?new=1`, which MasterPage opens on arrival. No new
+ * are deep-linked with `?new=1`, which the master screen consumes on arrival
+ * (MasterPage for the config-driven ones, BatchesPage for batches). No new
  * creation path is introduced here.
  *
  * A master the profile cannot write is not listed. When it can write none, the

@@ -22,10 +22,35 @@ use App\Services\ValuationReplayService;
 class ItemsController extends BaseController
 {
     private const COLUMNS = ['item_name', 'item_alias', 'print_name', 'item_type', 'item_sku', 'item_upc', 'hsn_sac', 'mrp', 'unit_id', 'purchase_unit_id', 'sales_unit_id', 'stock_cat_id', 'item_grp_id', 'brand_id', 'parent_item_id', 'valuation_method', 'books_sales_acc_id', 'books_purchase_acc_id', 'books_tax_cat_id', 'itc_eligibility', 'track_batch', 'track_serial', 'track_expiry', 'shelf_life_days', 'negative_stock_policy', 'min_stock_qty', 'max_stock_qty', 'reorder_point_qty', 'reorder_qty', 'safety_stock_qty', 'lead_time_days', 'default_warehouse_id', 'standard_cost'];
-    private const LIST_COLUMNS = 'i.item_id, i.item_uuid, i.item_name, i.item_alias, i.print_name, i.item_type, i.item_sku, i.item_upc, i.hsn_sac, i.mrp, i.unit_id, i.stock_cat_id, i.item_grp_id, i.brand_id, i.valuation_method, i.books_sales_acc_id, i.books_purchase_acc_id, i.books_tax_cat_id, i.itc_eligibility, i.track_batch, i.track_serial, i.track_expiry, i.is_active, i.updated_at, i.created_at, u.unit_symbol, u.unit_name, g.grp_name, c.cat_name, b.brand_name';
+    private const LIST_COLUMNS = 'i.item_id, i.item_uuid, i.item_name, i.item_alias, i.print_name, i.item_type, i.item_sku, i.item_upc, i.hsn_sac, i.mrp, i.unit_id, i.stock_cat_id, i.item_grp_id, i.brand_id, i.valuation_method, i.books_sales_acc_id, i.books_purchase_acc_id, i.books_tax_cat_id, i.itc_eligibility, i.track_batch, i.track_serial, i.track_expiry, i.min_stock_qty, i.max_stock_qty, i.reorder_point_qty, i.reorder_qty, i.negative_stock_policy, i.default_warehouse_id, i.is_active, i.updated_at, i.created_at, u.unit_symbol, u.unit_name, g.grp_name, c.cat_name, b.brand_name';
+
+    /**
+     * Stock health, as ONE piece of SQL the list filter and the summary counters both read.
+     *
+     * `sb.on_hand` is the same aggregation attachStock() puts in the row — SUM(on_hand_qty) over
+     * inv_stock_balances for the company, narrowed by the same optional warehouse_id. That is the
+     * point of naming it here: a second, slightly different aggregation would let
+     * `stock_status=negative` return a row whose On hand column reads 4, and the reader would
+     * believe the column.
+     *
+     * The threshold is the reorder point, falling back to the minimum stock level, and NULL when
+     * the item declares neither — an item with no reorder policy is never "low", it is simply in
+     * stock. Zero is not a threshold: every item would be low the moment it ran out, which is what
+     * `out` already says.
+     *
+     * Only `stock` items have stock health at all. A service or non-stock item holds no quantity,
+     * so counting it "out of stock" would be an alert about nothing — the exact fake alarm the
+     * screen must not raise.
+     */
+    private const ON_HAND_EXPR = 'COALESCE(sb.on_hand, 0)';
+    private const THRESHOLD_EXPR = 'COALESCE(NULLIF(i.reorder_point_qty, 0), NULLIF(i.min_stock_qty, 0))';
+    private const TRACKED = "i.item_type = 'stock'";
 
     /** GET /v1/items/search — the typeahead payload. */
-    private const SEARCH_COLUMNS = 'i.item_id, i.item_name, i.item_alias, i.print_name, i.item_sku, i.item_upc, i.hsn_sac, i.mrp, i.unit_id, u.unit_symbol, i.books_tax_cat_id, i.books_sales_acc_id, i.books_purchase_acc_id, i.itc_eligibility, i.track_batch, i.track_serial, i.valuation_method, i.default_warehouse_id';
+    // grp_name / cat_name ride along because baseQuery() already joins both tables: a document
+    // line's item cell names the group under the item, and without them the typeahead that fills
+    // that cell is the one place in the app that cannot say which group it just picked from.
+    private const SEARCH_COLUMNS = 'i.item_id, i.item_name, i.item_alias, i.print_name, i.item_sku, i.item_upc, i.hsn_sac, i.mrp, i.unit_id, u.unit_symbol, i.books_tax_cat_id, i.books_sales_acc_id, i.books_purchase_acc_id, i.itc_eligibility, i.track_batch, i.track_serial, i.valuation_method, i.default_warehouse_id, g.grp_name, c.cat_name';
 
     /**
      * GET /v1/items/{id}, and the row create/update answer with — the whole item.
@@ -98,6 +123,61 @@ class ItemsController extends BaseController
         ]]);
     }
 
+    /**
+     * GET /v1/items/summary — the counters above the item list, in one round trip.
+     *
+     * Honours every filter the list honours EXCEPT `status` and `stock_status`, because those two
+     * are what the cards themselves switch on: a "Low stock 24" card that re-counted itself after
+     * being clicked would read 24, then 24 of 24, and stop meaning anything. Group, category,
+     * brand, unit, type and the search box do narrow it, so the cards describe the catalogue the
+     * reader is actually looking at.
+     *
+     * Every figure is counted by the database over the whole filtered catalogue, never summed from
+     * a page of rows — a "Total items 50" above a list of 1,248 would be a lie told by pagination.
+     */
+    public function summary()
+    {
+        $a = $this->authorize('masters.items.read', true, false);
+        if (isset($a['response'])) {
+            return $a['response'];
+        }
+        $cmpId = (int) $a['ctx']['cmp_id'];
+        $b = $this->baseQuery($cmpId);
+        // Every narrowing the list applies except `status`, which the cards switch on.
+        $this->applyItemFilters($b, false);
+        $this->joinOnHand($b, $cmpId, (int) $this->request->getGet('warehouse_id') ?: null);
+
+        $h = self::stockHealthSql();
+        $on = self::ON_HAND_EXPR;
+        $tracked = self::TRACKED;
+        $count = static fn (string $predicate): string => 'COUNT(*) FILTER (WHERE ' . $predicate . ')';
+
+        $row = $b->select(implode(', ', [
+            'COUNT(*) AS total',
+            $count('i.is_active = 1') . ' AS active',
+            $count('i.is_active = 0') . ' AS inactive',
+            $count($tracked) . ' AS stock_tracked',
+            $count($h['in_stock']) . ' AS in_stock',
+            $count($h['low']) . ' AS low_stock',
+            $count($h['out']) . ' AS out_of_stock',
+            $count($h['negative']) . ' AS negative_stock',
+            $count($h['attention']) . ' AS needs_attention',
+            $count("i.hsn_sac IS NULL OR i.hsn_sac = ''") . ' AS missing_hsn',
+            $count("i.item_upc IS NULL OR i.item_upc = ''") . ' AS missing_barcode',
+            $count("i.item_sku IS NULL OR i.item_sku = ''") . ' AS missing_sku',
+            // An item taken out of circulation that still holds stock: the quantity is real and
+            // nothing on the active lists will ever show it again.
+            $count("i.is_active = 0 AND {$tracked} AND {$on} <> 0") . ' AS inactive_with_stock',
+        ]), false)->get()->getRowArray() ?: [];
+
+        $out = [];
+        foreach (['total', 'active', 'inactive', 'stock_tracked', 'in_stock', 'low_stock', 'out_of_stock', 'negative_stock', 'needs_attention', 'missing_hsn', 'missing_barcode', 'missing_sku', 'inactive_with_stock'] as $k) {
+            $out[$k] = (int) ($row[$k] ?? 0);
+        }
+
+        return $this->respond(['data' => $out]);
+    }
+
     public function index()
     {
         $a = $this->authorize('masters.items.read', true, false);
@@ -107,32 +187,24 @@ class ItemsController extends BaseController
         $cmpId = (int) $a['ctx']['cmp_id'];
         $p = $this->listParams(50, 500, 'item_name');
         $b = $this->baseQuery($cmpId);
-        $status = strtolower((string) ($this->request->getGet('status') ?? ''));
-        if ($status === 'active' || (int) ($this->request->getGet('active_only') ?? 0) === 1) {
-            $b->where('i.is_active', 1);
-        } elseif ($status === 'inactive') {
-            $b->where('i.is_active', 0);
-        }
-        foreach (['item_grp_id', 'stock_cat_id', 'brand_id', 'unit_id'] as $f) {
-            if ($v = (int) $this->request->getGet($f)) {
-                $b->where('i.' . $f, $v);
+        $this->applyItemFilters($b, true);
+        // The on-hand join is added only when something actually reads it, so an ordinary
+        // alphabetical page of the item master does not pay for an aggregate over every balance.
+        $stockStatus = strtolower(trim((string) ($this->request->getGet('stock_status') ?? '')));
+        $health = self::stockHealthSql();
+        $needsOnHand = isset($health[$stockStatus]) || $p['sort'] === 'on_hand';
+        if ($needsOnHand) {
+            $this->joinOnHand($b, $cmpId, (int) $this->request->getGet('warehouse_id') ?: null);
+            if (isset($health[$stockStatus])) {
+                $b->where($health[$stockStatus], null, false);
             }
-        }
-        // The tax category belongs to Books and is held here as an opaque id, so the column is
-        // books_tax_cat_id while Books' own item-master filter sends it as tax_cat_id.
-        if ($taxCat = (int) ($this->request->getGet('books_tax_cat_id') ?? $this->request->getGet('tax_cat_id'))) {
-            $b->where('i.books_tax_cat_id', $taxCat);
-        }
-        if ($t = $this->request->getGet('item_type')) {
-            $b->where('i.item_type', $t);
-        }
-        $q = trim((string) ($this->request->getGet('q') ?? ''));
-        if ($q !== '') {
-            $this->applySearch($b, $q, (string) ($this->request->getGet('q_mode') ?? 'contains'));
         }
         $total = (clone $b)->countAllResults(false);
         $sortMap = ['item_name' => 'i.item_name', 'item_sku' => 'i.item_sku', 'updated_at' => 'i.updated_at', 'created_at' => 'i.created_at', 'grp_name' => 'g.grp_name', 'item_id' => 'i.item_id', 'mrp' => 'i.mrp'];
-        $rows = $b->select(self::LIST_COLUMNS)->orderBy($sortMap[$p['sort']] ?? 'i.item_name', $p['order'])->limit($p['limit'], $p['offset'])->get()->getResultArray();
+        if ($needsOnHand) {
+            $sortMap['on_hand'] = self::ON_HAND_EXPR;
+        }
+        $rows = $b->select(self::LIST_COLUMNS)->orderBy($sortMap[$p['sort']] ?? 'i.item_name', $p['order'], false)->limit($p['limit'], $p['offset'])->get()->getResultArray();
         if ((int) ($this->request->getGet('with_stock') ?? 0) === 1 && $rows !== []) {
             $this->attachStock($cmpId, $rows, (int) $this->request->getGet('warehouse_id') ?: null);
         }
@@ -184,11 +256,14 @@ class ItemsController extends BaseController
         }
         $cmpId = (int) $a['ctx']['cmp_id'];
         $code = trim((string) rawurldecode((string) $code));
-        $row = $this->baseQuery($cmpId)->where('i.is_active', 1)->groupStart()->where('i.item_upc', $code)->orWhere('i.item_sku', $code)->groupEnd()->select(self::LIST_COLUMNS)->get()->getRowArray();
+        $row = $this->baseQuery($cmpId)->where('i.is_active', 1)->groupStart()->where('i.item_upc', $code)->orWhere('i.item_sku', $code)->groupEnd()->select(self::LIST_COLUMNS . ', i.default_warehouse_id')->get()->getRowArray();
         if (!$row) {
             return $this->failStructured(404, 'not_found', 'No item with that barcode / SKU');
         }
         $this->attachStock($cmpId, $rows = [$row], (int) $this->request->getGet('warehouse_id') ?: null);
+        // Same payload shape as the typeahead: a line built from a scan has to
+        // offer the item's alternate units, or scanning a case books a piece.
+        $rows[0]['units'] = $this->unitsForItems($cmpId, [(int) $rows[0]['item_id']])[(int) $rows[0]['item_id']] ?? [];
 
         return $this->respond(['data' => $rows[0]]);
     }
@@ -203,11 +278,37 @@ class ItemsController extends BaseController
         $cmpId = (int) $a['ctx']['cmp_id'];
         $body = $this->request->getJSON(true) ?? [];
         $ids = array_values(array_unique(array_filter(array_map('intval', (array) ($body['item_ids'] ?? [])), static fn ($i) => $i > 0)));
+        $db = \Config\Database::connect();
+        /*
+         * SKUs as well as ids.
+         *
+         * An import resolves the codes a spreadsheet names, and one request per
+         * code is a file of 400 lines turned into 400 round trips. Matched
+         * case-insensitively on the exact code — never as a prefix, because a
+         * bulk resolve that silently picks a different item than the one the
+         * sheet named is the failure mode an importer exists to prevent.
+         */
+        $skus = array_values(array_unique(array_filter(array_map(
+            static fn ($s) => mb_strtolower(trim((string) $s)),
+            (array) ($body['item_skus'] ?? []),
+        ), static fn ($s) => $s !== '')));
+        if ($skus !== []) {
+            foreach (array_chunk($skus, 500) as $chunk) {
+                $list = implode(', ', array_map(static fn ($s) => $db->escape($s), $chunk));
+                $rows = $db->table('inv_items')->select('item_id')
+                    ->where('cmp_id', $cmpId)->where('deleted_at', null)
+                    ->where('LOWER(item_sku) IN (' . $list . ')', null, false)
+                    ->get()->getResultArray();
+                foreach ($rows as $r) {
+                    $ids[] = (int) $r['item_id'];
+                }
+            }
+            $ids = array_values(array_unique($ids));
+        }
         if ($ids === []) {
             return $this->respond(['data' => []]);
         }
         $out = [];
-        $db = \Config\Database::connect();
         foreach (array_chunk($ids, 500) as $chunk) {
             $rows = $db->table('inv_items i')->select(self::LOOKUP_COLUMNS)
                 ->join('inv_uom u', 'u.unit_id = i.unit_id', 'left')->where('i.cmp_id', $cmpId)->whereIn('i.item_id', $chunk)->get()->getResultArray();
@@ -605,6 +706,100 @@ class ItemsController extends BaseController
     }
 
     // ------------------------------------------------------------------ helpers
+
+    /**
+     * Every filter the item list understands, applied in ONE place.
+     *
+     * Both the list and its counters read this, so a filter added to one cannot be missing from
+     * the other — which would put "1,248 items" above a list of twelve and leave the reader to
+     * work out which number was lying.
+     *
+     * `$withStatus` is the single difference: the summary excludes it because the Active card is
+     * what switches it on, and a card that re-counted itself after being clicked would always read
+     * "1,192 of 1,192". `stock_status` is excluded from the summary for the same reason, and is
+     * applied by the caller because it needs the on-hand join.
+     */
+    private function applyItemFilters($b, bool $withStatus): void
+    {
+        if ($withStatus) {
+            $status = strtolower((string) ($this->request->getGet('status') ?? ''));
+            if ($status === 'active' || (int) ($this->request->getGet('active_only') ?? 0) === 1) {
+                $b->where('i.is_active', 1);
+            } elseif ($status === 'inactive') {
+                $b->where('i.is_active', 0);
+            }
+        }
+        foreach (['item_grp_id', 'stock_cat_id', 'brand_id', 'unit_id'] as $f) {
+            if ($v = (int) $this->request->getGet($f)) {
+                $b->where('i.' . $f, $v);
+            }
+        }
+        // The tax category belongs to Books and is held here as an opaque id, so the column is
+        // books_tax_cat_id while Books' own item-master filter sends it as tax_cat_id.
+        if ($taxCat = (int) ($this->request->getGet('books_tax_cat_id') ?? $this->request->getGet('tax_cat_id'))) {
+            $b->where('i.books_tax_cat_id', $taxCat);
+        }
+        if ($t = $this->request->getGet('item_type')) {
+            $b->where('i.item_type', $t);
+        }
+        if ($vm = trim((string) ($this->request->getGet('valuation_method') ?? ''))) {
+            $b->where('i.valuation_method', strtoupper($vm));
+        }
+        // batch | serial | expiry | none — the flags as the screen reads them.
+        $tracking = strtolower(trim((string) ($this->request->getGet('tracking') ?? '')));
+        if (in_array($tracking, ['batch', 'serial', 'expiry'], true)) {
+            $b->where('i.track_' . $tracking, 1);
+        } elseif ($tracking === 'none') {
+            $b->where('i.track_batch', 0)->where('i.track_serial', 0)->where('i.track_expiry', 0);
+        }
+        // Data completeness: "which items are still missing an HSN / a barcode / an SKU".
+        foreach (['has_hsn' => 'i.hsn_sac', 'has_barcode' => 'i.item_upc', 'has_sku' => 'i.item_sku'] as $param => $col) {
+            $v = $this->request->getGet($param);
+            if ($v === null || $v === '') {
+                continue;
+            }
+            if ((int) $v === 1) {
+                $b->where("({$col} IS NOT NULL AND {$col} <> '')", null, false);
+            } else {
+                $b->where("({$col} IS NULL OR {$col} = '')", null, false);
+            }
+        }
+        $q = trim((string) ($this->request->getGet('q') ?? ''));
+        if ($q !== '') {
+            $this->applySearch($b, $q, (string) ($this->request->getGet('q_mode') ?? 'contains'));
+        }
+    }
+
+    /** @return array<string, string> stock_status value => SQL predicate */
+    private static function stockHealthSql(): array
+    {
+        $on = self::ON_HAND_EXPR;
+        $th = self::THRESHOLD_EXPR;
+        $tracked = self::TRACKED;
+
+        $low = "({$on} > 0 AND {$th} IS NOT NULL AND {$on} <= {$th})";
+
+        return [
+            'negative'  => "{$tracked} AND {$on} < 0",
+            'out'       => "{$tracked} AND {$on} = 0",
+            'low'       => "{$tracked} AND {$low}",
+            'in_stock'  => "{$tracked} AND {$on} > 0 AND NOT {$low}",
+            // Everything a user would want to act on, in one chip.
+            'attention' => "{$tracked} AND ({$on} <= 0 OR {$low})",
+        ];
+    }
+
+    /**
+     * Join the per-item on-hand total so the list can filter and sort on it.
+     *
+     * A grouped subquery, so it adds no rows and countAllResults() stays the count of items.
+     * Both interpolated values are cast to int on the way in.
+     */
+    private function joinOnHand($b, int $cmpId, ?int $warehouseId): void
+    {
+        $where = 'cmp_id = ' . $cmpId . ($warehouseId !== null && $warehouseId > 0 ? ' AND warehouse_id = ' . $warehouseId : '');
+        $b->join('(SELECT item_id, SUM(on_hand_qty) AS on_hand FROM inv_stock_balances WHERE ' . $where . ' GROUP BY item_id) sb', 'sb.item_id = i.item_id', 'left', false);
+    }
 
     private function baseQuery(int $cmpId)
     {

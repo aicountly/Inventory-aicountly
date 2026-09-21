@@ -5,7 +5,7 @@
 
 import { api } from './api'
 import type { ItemResponse, ListQuery, ListResponse } from './api'
-import type { CreateDocumentPayload, DocumentListRow, DocumentListSummary, DocumentTypeRow, InventoryDocument, PrintSnapshot } from '../documents/types'
+import type { CreateDocumentPayload, DocumentLine, DocumentListRow, DocumentListSummary, DocumentTypeRow, InventoryDocument, PrintSnapshot } from '../documents/types'
 
 const BASE = 'v1/inventory-documents'
 
@@ -72,6 +72,24 @@ export const documentsApi = {
   async get(id: number, signal?: AbortSignal): Promise<InventoryDocument> {
     const res = await api.get<ItemResponse<InventoryDocument>>(`${BASE}/${id}`, { signal })
     return res.data
+  },
+
+  /**
+   * Lines for several documents in one call, keyed by document id (DocumentsController::lines).
+   *
+   * The list endpoint carries a line COUNT and nothing about the lines themselves, so a screen
+   * that wants to say what a document actually did — which finished item an assembly built, out
+   * of how many components — would otherwise fetch each document separately. The server answers
+   * for every id it was asked about (an id that is not this company's comes back as an empty
+   * list, never as a gap), so the caller can index straight into the map.
+   */
+  async lines(documentIds: number[], signal?: AbortSignal): Promise<Record<number, DocumentLine[]>> {
+    const ids = [...new Set(documentIds.filter((id) => Number.isFinite(id) && id > 0))]
+    if (ids.length === 0) return {}
+    const res = await api.get<ItemResponse<Record<string, DocumentLine[]>>>(`${BASE}/lines`, { query: { document_ids: ids.join(',') }, signal })
+    const out: Record<number, DocumentLine[]> = {}
+    for (const [id, rows] of Object.entries(res.data ?? {})) out[Number(id)] = Array.isArray(rows) ? rows : []
+    return out
   },
 
   async create(payload: CreateDocumentPayload): Promise<InventoryDocument> {

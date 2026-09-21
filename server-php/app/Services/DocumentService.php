@@ -38,10 +38,16 @@ class DocumentService
      * offering it would be a control that silently falls back to something else. 'direct' is the
      * charge that belongs to exactly one line by nature — a non-creditable tax is the case that
      * needs it, because the tax that cannot be claimed is the tax on that one line.
+     *
+     * 'equal' splits a charge evenly over the lines rather than by any property of them. It is the
+     * honest basis for a per-consignment fee that the lines did not earn in proportion to anything
+     * Inventory holds — a documentation or inspection charge is the same rupees whether the crate
+     * holds one line or ten — and without it that charge had to be entered by hand on every line,
+     * which is the same arithmetic done less reliably.
      */
     public const LANDED_COST_TYPES = ['freight', 'duty', 'insurance', 'handling', 'other', 'non_creditable_tax'];
 
-    public const LANDED_COST_BASES = ['value', 'qty', 'manual', 'direct'];
+    public const LANDED_COST_BASES = ['value', 'qty', 'equal', 'manual', 'direct'];
 
     public function __construct(
         protected ?UnitConversionService $units = null,
@@ -625,15 +631,56 @@ class DocumentService
         }
     }
 
-    /** The receipt a LANDED_COST document loads (metadata.target_document_id). */
-    public static function landedCostTarget(array $metadata): int
+    /**
+     * The receipts a LANDED_COST document loads.
+     *
+     * `metadata.target_document_ids` is a list; `metadata.target_document_id` is the single-receipt
+     * shape every document written before this method existed carries, and it is still accepted —
+     * a stored draft, an integration payload or a Books-side caller must not stop working because
+     * the screen learned to select two. Both are read, the union is returned in the order given,
+     * and a receipt named twice is one receipt: a duplicate would otherwise double the weight of
+     * every one of its lines in a pro-rata split and hand it twice the charge.
+     *
+     * One freight bill covering a consignment that arrived over two GRNs is the case this exists
+     * for. Splitting it into two documents by hand means inventing a division of the bill before
+     * the allocator gets to make one, which is the arithmetic this screen is for.
+     *
+     * @param array<string, mixed> $metadata
+     * @return list<int>
+     */
+    public static function landedCostTargets(array $metadata): array
     {
-        $target = (int) ($metadata['target_document_id'] ?? 0);
-        if ($target <= 0) {
-            throw InventoryException::validation('A landed cost allocation must name the receipt it loads (metadata.target_document_id)');
+        $ids = [];
+        $raw = $metadata['target_document_ids'] ?? null;
+        if (is_array($raw)) {
+            foreach ($raw as $entry) {
+                $id = (int) (is_array($entry) ? ($entry['document_id'] ?? 0) : $entry);
+                if ($id > 0 && !in_array($id, $ids, true)) {
+                    $ids[] = $id;
+                }
+            }
+        }
+        $single = (int) ($metadata['target_document_id'] ?? 0);
+        if ($single > 0 && !in_array($single, $ids, true)) {
+            $ids[] = $single;
+        }
+        if ($ids === []) {
+            throw InventoryException::validation('A landed cost allocation must name the receipt it loads (metadata.target_document_ids[])');
         }
 
-        return $target;
+        return $ids;
+    }
+
+    /**
+     * The FIRST receipt a LANDED_COST document loads.
+     *
+     * Kept for callers that only need one id and predate multi-receipt allocation. Anything that
+     * allocates must use landedCostTargets(): reading only the first would silently drop every
+     * charge belonging to the rest of the consignment.
+     */
+    public static function landedCostTarget(array $metadata): int
+    {
+        return self::landedCostTargets($metadata)[0];
     }
 
     /**
@@ -759,7 +806,7 @@ class DocumentService
             // post, saved as though it could. Posting checks both again from the stored metadata,
             // because the target's status can change between the draft being saved and posted.
             $meta = isset($p['metadata']) && is_array($p['metadata']) ? $p['metadata'] : [];
-            self::landedCostTarget($meta);
+            self::landedCostTargets($meta);
             $charges = self::landedCostCharges($meta);
             // The capitalisation policy, asked of a charge that arrives on its own document. Asked
             // again at posting from the stored metadata (DocumentPostingService::applyLandedCost),
