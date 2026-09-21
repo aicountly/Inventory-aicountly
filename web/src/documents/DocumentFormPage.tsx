@@ -11,6 +11,7 @@ import { PageShell } from '../ui/shell/PageShell'
 import { DocumentForm } from './DocumentForm'
 import { BatchAdjustmentPage } from './batch/BatchAdjustmentPage'
 import { ConsumptionForm } from './consumption/ConsumptionForm'
+import { StockTransferWorkspace } from './transfer/StockTransferWorkspace'
 import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS, statusTone } from './actions'
 import type { StatusTone } from './actions'
 import { documentTypeGlyph } from './documentTypeIcon'
@@ -19,14 +20,15 @@ import { specForCode, specForSlug, UNAVAILABLE_TYPES } from './registry'
 import type { DocumentStatus } from './types'
 import './documents.css'
 
-/**
- * Batch Adjustment has its own workspace (`documents/batch`) rather than the generic line editor:
- * the type reallocates quantity between batches without valuing anything, and the screen is built
- * around that — where the stock leaves, where it lands, and whether the two balance. Consumption
- * has its own for its own reasons (`documents/consumption`). Every other type still renders
- * `DocumentForm`, and both workspaces save and post through the same draft model and API calls.
+/*
+ * Three native types have a screen of their own; every other one keeps the
+ * shared `DocumentForm`. A type earns one when the generic editor cannot say
+ * what it needs to say while the document is being typed — a transfer has two
+ * warehouses on the header and a route per line, a consumption has to settle
+ * batches and serials before it can be saved at all, a batch adjustment has to
+ * show both ends of every reallocation and whether they balance — and the
+ * alternative is finding out when the API refuses it.
  */
-const BATCH_ADJUSTMENT = 'BATCH_ADJUSTMENT'
 
 const STATUS_BADGE_TONE: Record<StatusTone, BadgeTone> = { neutral: 'neutral', info: 'info', success: 'success', warning: 'warning', danger: 'danger' }
 
@@ -96,7 +98,7 @@ export function DocumentFormPage() {
     if (!isEditable(doc.status)) {
       // The batch workspace reads as well as it writes, so a posted adjustment opens in it
       // read-only instead of on a dead end with a link.
-      if (spec.code === BATCH_ADJUSTMENT) {
+      if (spec.code === 'BATCH_ADJUSTMENT') {
         return (
           <BatchAdjustmentPage
             key={doc.document_id}
@@ -135,7 +137,19 @@ export function DocumentFormPage() {
       )
     }
     const initial = draftFromDocument(doc, spec)
-    if (spec.code === BATCH_ADJUSTMENT) {
+    if (spec.code === 'STOCK_TRANSFER') {
+      return (
+        <StockTransferWorkspace
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          existing={doc}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
+    if (spec.code === 'BATCH_ADJUSTMENT') {
       return (
         <BatchAdjustmentPage
           key={doc.document_id}
@@ -179,7 +193,10 @@ export function DocumentFormPage() {
   }
 
   const s = spec as NonNullable<typeof spec>
-  if (s.code === BATCH_ADJUSTMENT) {
+  if (s.code === 'STOCK_TRANSFER') {
+    return <StockTransferWorkspace key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
+  if (s.code === 'BATCH_ADJUSTMENT') {
     return <BatchAdjustmentPage key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
   }
   if (s.code === 'CONSUMPTION') {
