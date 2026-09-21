@@ -1,209 +1,610 @@
-import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Plus, RefreshCcw, RotateCcw } from 'lucide-react'
 import { useCan } from '../../access/AccessContext'
 import { useCompany } from '../../company/CompanyContext'
-import { DataTable } from '../../components/DataTable'
-import type { Column } from '../../components/DataTable'
-import { FormField } from '../../components/FormField'
-import { ItemFilter } from '../../components/ItemFilter'
-import { JsonBlock } from '../../components/JsonBlock'
+import { ConfirmDialog } from '../../components/ConfirmDialog'
 import { ListSheetActions } from '../../components/ListSheetActions'
-import { Modal } from '../../components/Modal'
-import { PageHeader } from '../../components/PageHeader'
 import { Pagination } from '../../components/Pagination'
 import { RequirePermission } from '../../components/RequirePermission'
-import { StatusBadge, statusBadgeLabel } from '../../components/StatusBadge'
+import { useInterval } from '../../hooks/useInterval'
 import { useListParams } from '../../hooks/useListParams'
 import { useQuery } from '../../hooks/useQuery'
-import type { ExportableColumn } from '../../registers/registerCells'
+import { useKeyboardScope } from '../../keyboard/useKeyboardScope'
 import { P } from '../../services/access'
 import { ApiError } from '../../services/api'
 import { fetchAllRows } from '../../services/listAll'
-import { RECALC_STATUS_FILTERS, valuationApi } from '../../services/valuationApi'
-import type { RecalcJob } from '../../services/valuationApi'
+import { settingsApi } from '../../services/settingsApi'
+import { valuationApi } from '../../services/valuationApi'
+import type { EnqueueRecalcPayload, RecalcFilters, RecalcJob } from '../../services/valuationApi'
+import { Button } from '../../ui/Button'
+import { EmptyState } from '../../ui/EmptyState'
+import { BreadcrumbHeader } from '../../ui/shell/BreadcrumbHeader'
 import { useToast } from '../../ui/ToastContext'
-import { formatDate, formatDateTime, formatInt, formatMoney, humanize, todayIso } from '../../utils/format'
+import { formatInt, humanize } from '../../utils/format'
+import { NewRecalculationDrawer } from './recalculations/NewRecalculationDrawer'
+import { RECALC_EXPORT_COLUMNS } from './recalculations/recalculationExport'
+import { RecalculationDetailsDrawer } from './recalculations/RecalculationDetailsDrawer'
+import { RecalculationFilters } from './recalculations/RecalculationFilters'
+import type { RecalcFilterValues } from './recalculations/RecalculationFilters'
+import { RecalculationHelpPanels } from './recalculations/RecalculationHelpPanels'
+import { RecalculationSummary } from './recalculations/RecalculationSummary'
+import { RecalculationTable } from './recalculations/RecalculationTable'
+import { isLive, recalcReference, triggerLabel } from './recalculations/recalculationModel'
 import '../views.css'
 
-const FILTER_KEYS = ['status', 'item_id', 'trigger_kind', 'from', 'to', 'all_fy'] as const
-const STATUS_TONE: Record<string, 'neutral' | 'good' | 'warning' | 'critical' | 'info'> = { QUEUED: 'info', RUNNING: 'warning', COMPLETED: 'good', FAILED: 'critical', CANCELLED: 'neutral' }
-
 /**
- * The sheet's columns. `cogs_delta` is the valuation movement a job published
- * to Books — the cost side, not anything a customer was charged.
+ * Valuation → Recalculations.
+ *
+ * The register of jobs that re-cost inventory forward from a date, and the one
+ * place a person starts one. Everything on it is bounded by two rules:
+ *
+ *  1. No figure is invented. The KPI cards come from a server summary counted
+ *     over the whole filtered set; a running job shows elapsed time and an
+ *     indeterminate bar because the engine reports no progress; the create form
+ *     shows no estimated impact because there is no preview endpoint.
+ *  2. No action is offered that the server will refuse. Run, retry and cancel
+ *     mirror what ValuationController actually accepts for each status.
  */
-const EXPORT_COLUMNS: ExportableColumn<RecalcJob>[] = [
-  { key: 'job_id', csvHeader: 'Job', align: 'right', format: 'int' },
-  { key: 'created_at', csvHeader: 'Queued', format: 'datetime' },
-  // The badge's own words, so the file reads the way the screen does.
-  { key: 'status', csvHeader: 'Status', csv: (r) => statusBadgeLabel(r.status) },
-  { key: 'dry_run', csvHeader: 'Mode', csv: (r) => (r.dry_run ? 'Dry run' : 'Live') },
-  { key: 'from_date', csvHeader: 'Recalculated from', format: 'date' },
-  { key: 'item_name', csvHeader: 'Scope', csv: (r) => (r.item_id ? r.item_name ?? `Item #${r.item_id}` : 'All items') },
-  { key: 'trigger_kind', csvHeader: 'Trigger', csv: (r) => `${humanize(r.trigger_kind)}${r.trigger_document_id ? ` · ${r.trigger_document_no ?? `#${r.trigger_document_id}`}` : ''}` },
-  { key: 'affected_line_count', csvHeader: 'Lines affected', align: 'right', format: 'int' },
-  { key: 'revised_line_count', csvHeader: 'Lines revised', align: 'right', format: 'int' },
-  { key: 'cogs_delta', csvHeader: 'COGS delta (valuation)', align: 'right', format: 'amount' },
-  { key: 'finished_at', csvHeader: 'Finished', format: 'datetime' },
-  { key: 'failure_reason', csvHeader: 'Failure', csv: (r) => r.failure_reason ?? '' },
-]
+
+/** Filter keys kept in the URL. `status`, `item_id`, `trigger_kind`, `from`,
+ *  `to` and `all_fy` keep their original names so the dashboard's drill-down
+ *  (`?status=QUEUED,RUNNING`) and every existing bookmark still resolve. */
+const FILTER_KEYS = [
+  'status',
+  'item_id',
+  'warehouse_id',
+  'trigger_kind',
+  'dry_run',
+  'has_cogs_impact',
+  'date_field',
+  'from',
+  'to',
+  'all_fy',
+] as const
+
+/** How often the register re-reads itself while a job is queued or running. */
+const POLL_MS = 5000
+
+type PendingAction =
+  | { kind: 'run'; job: RecalcJob }
+  | { kind: 'retry'; job: RecalcJob }
+  | { kind: 'cancel'; job: RecalcJob }
 
 export function RecalculationsPage() {
   const { scope } = useCompany()
   const toast = useToast()
-  const canRun = useCan(P.valuationRecalculate)
+  const canRecalculate = useCan(P.valuationRecalculate)
+
   const params = useListParams({ sort: 'created_at', order: 'desc', limit: 50, filterKeys: FILTER_KEYS })
   const { state, query } = params
-  const list = useQuery((signal) => valuationApi.recalcJobs(query, signal), [JSON.stringify(query), scope?.cmp_id, scope?.fy_id, scope?.bo_id], { enabled: scope !== null })
-  const [open, setOpen] = useState(false)
-  const [busy, setBusy] = useState<number | 'new' | null>(null)
-  const [detail, setDetail] = useState<RecalcJob | null>(null)
-  const [form, setForm] = useState({ from_date: todayIso(), item_id: '', dry_run: true, run_now: true })
+  const f = state.filters
 
-  const runJob = async (job: RecalcJob) => {
-    setBusy(job.job_id)
+  const values = useMemo<RecalcFilterValues>(
+    () => ({
+      status: f.status ?? '',
+      q: state.q,
+      from: f.from ?? '',
+      to: f.to ?? '',
+      all_fy: f.all_fy ?? '',
+      item_id: f.item_id ?? '',
+      warehouse_id: f.warehouse_id ?? '',
+      trigger_kind: f.trigger_kind ?? '',
+      dry_run: f.dry_run ?? '',
+      has_cogs_impact: f.has_cogs_impact ?? '',
+      date_field: f.date_field ?? '',
+    }),
+    [f, state.q],
+  )
+
+  const scopeKey = `${scope?.cmp_id ?? ''}:${scope?.fy_id ?? ''}:${scope?.bo_id ?? ''}`
+
+  const jobs = useQuery(
+    (signal) => valuationApi.recalcJobs(query as RecalcFilters, signal),
+    [JSON.stringify(query), scopeKey],
+    { enabled: scope !== null, resetKey: scopeKey },
+  )
+
+  /*
+   * The cards are counted with every filter EXCEPT status, so the breakdown
+   * stays a breakdown while the register is filtered to one status — see
+   * ValuationController::recalcSummary. Paging and sorting are irrelevant to a
+   * total, so they are left out too, which also stops a page change refetching
+   * figures that cannot have moved.
+   */
+  const summaryQuery = useMemo<RecalcFilters>(
+    () => ({
+      q: state.q || undefined,
+      item_id: f.item_id || undefined,
+      warehouse_id: f.warehouse_id || undefined,
+      trigger_kind: f.trigger_kind || undefined,
+      dry_run: f.dry_run || undefined,
+      has_cogs_impact: f.has_cogs_impact || undefined,
+      date_field: f.date_field || undefined,
+      from: f.from || undefined,
+      to: f.to || undefined,
+      all_fy: f.all_fy || undefined,
+    }),
+    [f, state.q],
+  )
+  const summary = useQuery(
+    (signal) => valuationApi.recalcSummary(summaryQuery, signal),
+    [JSON.stringify(summaryQuery), scopeKey],
+    { enabled: scope !== null, resetKey: scopeKey },
+  )
+
+  // Base currency, valuation method and COGS revision mode — company settings,
+  // never assumed. Fetched once per company, not per filter change.
+  const settings = useQuery((signal) => settingsApi.get(signal), [scope?.cmp_id], {
+    enabled: scope !== null,
+    resetKey: scope?.cmp_id ?? null,
+  })
+  const currencyCode = settings.data?.base_currency_code || 'INR'
+
+  const rows = useMemo(() => jobs.data?.data ?? [], [jobs.data])
+
+  /* ------------------------------------------------------- live polling */
+
+  const anyLive = useMemo(() => rows.some(isLive), [rows])
+  const [tabVisible, setTabVisible] = useState(() => typeof document === 'undefined' || !document.hidden)
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined
+    const onVisibility = () => setTabVisible(!document.hidden)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => document.removeEventListener('visibilitychange', onVisibility)
+  }, [])
+
+  /*
+   * Polling is the narrowest it can be: only while this page holds a job that
+   * can still change, only while the tab is in front of the user, and stopped
+   * the moment the last one settles. A register left open on a second monitor
+   * over a weekend must not spend the night asking the server the same question.
+   */
+  const pollMs = anyLive && tabVisible ? POLL_MS : null
+  useInterval(() => {
+    jobs.reload()
+    summary.reload()
+  }, pollMs)
+  // The elapsed clock on a running row, ticked separately: it needs a second,
+  // the data does not.
+  useInterval(() => setNow(Date.now()), anyLive && tabVisible ? 1000 : null)
+
+  /* ---------------------------------------------------------- selection */
+
+  const [selected, setSelected] = useState<Set<number>>(() => new Set())
+  const clearSelection = useCallback(() => setSelected(new Set()), [])
+
+  const toggleRow = useCallback((jobId: number) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(jobId)) next.delete(jobId)
+      else next.add(jobId)
+      return next
+    })
+  }, [])
+
+  const togglePage = useCallback(
+    (checked: boolean) => {
+      setSelected((prev) => {
+        const next = new Set(prev)
+        for (const row of rows) {
+          if (checked) next.add(row.job_id)
+          else next.delete(row.job_id)
+        }
+        return next
+      })
+    },
+    [rows],
+  )
+
+  /* ------------------------------------------------ company / FY changes */
+
+  const [newOpen, setNewOpen] = useState(false)
+  const [preferDryRun, setPreferDryRun] = useState(true)
+  const [detailId, setDetailId] = useState<number | null>(null)
+  const [detailSeed, setDetailSeed] = useState<RecalcJob | null>(null)
+  const [pending, setPending] = useState<PendingAction | null>(null)
+  const [busy, setBusy] = useState<Set<number>>(() => new Set())
+  const [submitting, setSubmitting] = useState(false)
+  const searchRef = useRef<HTMLInputElement | null>(null)
+
+  /*
+   * A company, FY or branch switch invalidates more than the rows. A selection
+   * of job ids means nothing under another tenant, an open drawer is showing a
+   * record that is no longer in scope, and an item or warehouse filter names an
+   * id that may not exist there. The status, dates and search are tenant-neutral
+   * and are deliberately kept, so a reader looking at failures in one company
+   * is still looking at failures after they switch.
+   */
+  const lastScope = useRef(scopeKey)
+  useEffect(() => {
+    if (lastScope.current === scopeKey) return
+    lastScope.current = scopeKey
+    clearSelection()
+    setDetailId(null)
+    setDetailSeed(null)
+    setNewOpen(false)
+    if (f.item_id || f.warehouse_id || state.page > 1) {
+      params.setFilters({ item_id: '', warehouse_id: '' })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- params/filters read at the moment of the switch
+  }, [scopeKey])
+
+  // A page or filter change re-draws the rows under the tick boxes, so a
+  // selection carried across it would be invisible and still act on records the
+  // reader can no longer see.
+  const pageKey = `${state.page}:${state.limit}:${JSON.stringify(state.filters)}:${state.q}`
+  const lastPageKey = useRef(pageKey)
+  useEffect(() => {
+    if (lastPageKey.current === pageKey) return
+    lastPageKey.current = pageKey
+    clearSelection()
+  }, [pageKey, clearSelection])
+
+  /* -------------------------------------------------------------- detail */
+
+  const detail = useQuery(
+    (signal) => valuationApi.recalcJob(detailId as number, signal),
+    [detailId],
+    { enabled: detailId !== null },
+  )
+  // The row is shown the instant it is clicked; the detail response (which adds
+  // the revision aggregate) replaces it when it lands.
+  const detailJob = detailId !== null ? (detail.data ?? detailSeed) : null
+
+  const openDetail = useCallback((job: RecalcJob) => {
+    setDetailSeed(job)
+    setDetailId(job.job_id)
+  }, [])
+
+  const closeDetail = useCallback(() => {
+    setDetailId(null)
+    setDetailSeed(null)
+  }, [])
+
+  /* ------------------------------------------------------------- actions */
+
+  const markBusy = (jobId: number, on: boolean) =>
+    setBusy((prev) => {
+      const next = new Set(prev)
+      if (on) next.add(jobId)
+      else next.delete(jobId)
+      return next
+    })
+
+  const refreshAll = useCallback(() => {
+    jobs.reload()
+    summary.reload()
+    if (detailId !== null) detail.reload()
+  }, [jobs, summary, detail, detailId])
+
+  const runOrRetry = async (job: RecalcJob, retrying: boolean) => {
+    markBusy(job.job_id, true)
     try {
       const done = await valuationApi.runRecalc(job.job_id)
-      toast.success(`Recalculation #${job.job_id} ${done.status.toLowerCase()}: ${formatInt(done.revised_line_count ?? 0)} lines revised, COGS delta ${formatMoney(done.cogs_delta)}.`)
-      list.reload()
+      const ref = recalcReference(done.job_id)
+      if (String(done.status).toUpperCase() === 'COMPLETED') {
+        toast.success(
+          `${ref} completed — ${formatInt(done.revised_line_count ?? 0)} of ${formatInt(done.affected_line_count ?? 0)} lines revised.`,
+        )
+      } else {
+        toast.info(`${ref} is ${String(done.status).toLowerCase()}.`)
+      }
+      refreshAll()
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : 'Could not run the recalculation.')
+      toast.error(
+        e instanceof ApiError
+          ? e.message
+          : retrying
+            ? 'Could not retry the recalculation.'
+            : 'Could not run the recalculation.',
+      )
+      refreshAll()
     } finally {
-      setBusy(null)
+      markBusy(job.job_id, false)
+      setPending(null)
     }
   }
-  const enqueue = async () => {
-    setBusy('new')
+
+  const cancelJob = async (job: RecalcJob) => {
+    markBusy(job.job_id, true)
     try {
-      const job = await valuationApi.enqueueRecalc({ from_date: form.from_date, item_id: form.item_id ? Number(form.item_id) : null, dry_run: form.dry_run, run_now: form.run_now })
-      toast.success(`Recalculation #${job.job_id} ${job.status.toLowerCase()}${job.dry_run ? ' (dry run)' : ''}.`)
-      setOpen(false)
-      list.reload()
+      await valuationApi.cancelRecalc(job.job_id)
+      toast.success(`${recalcReference(job.job_id)} cancelled. Nothing was re-costed.`)
+      refreshAll()
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : 'Could not cancel the recalculation.')
+      refreshAll()
+    } finally {
+      markBusy(job.job_id, false)
+      setPending(null)
+    }
+  }
+
+  const createJob = async (payload: EnqueueRecalcPayload, idempotencyKey: string) => {
+    setSubmitting(true)
+    try {
+      const job = await valuationApi.enqueueRecalc(payload, idempotencyKey)
+      const ref = recalcReference(job.job_id)
+      const status = String(job.status).toUpperCase()
+      toast.success(
+        status === 'COMPLETED'
+          ? `${ref} completed — ${formatInt(job.revised_line_count ?? 0)} lines revised.`
+          : `${ref} has been ${status.toLowerCase()}${job.dry_run ? ' as a dry run' : ''}.`,
+      )
+      setNewOpen(false)
+      refreshAll()
+      // Straight into the job that was just started: it is the only thing the
+      // person who pressed the button wants to look at next.
+      openDetail(job)
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : 'Could not queue the recalculation.')
     } finally {
-      setBusy(null)
+      setSubmitting(false)
     }
   }
 
-  const columns = useMemo<Column<RecalcJob>[]>(
-    () => [
-      { key: 'job_id', header: '#', sortKey: 'job_id', render: (r) => <button type="button" className="link" onClick={() => setDetail(r)}>{r.job_id}</button> },
-      { key: 'created_at', header: 'Queued', sortKey: 'created_at', render: (r) => formatDateTime(r.created_at) },
-      { key: 'status', header: 'Status', sortKey: 'status', render: (r) => <StatusBadge value={r.status} tone={STATUS_TONE[r.status] ?? 'neutral'} /> },
-      { key: 'dry_run', header: 'Mode', render: (r) => (r.dry_run ? <span className="muted">dry run</span> : 'live') },
-      { key: 'from_date', header: 'From', sortKey: 'from_date', render: (r) => formatDate(r.from_date) },
-      { key: 'item_name', header: 'Scope', render: (r) => (r.item_id ? <Link to={`/valuation/cost-layers?item_id=${r.item_id}`}>{r.item_name ?? `Item #${r.item_id}`}</Link> : <span className="muted">all items</span>) },
-      { key: 'trigger_kind', header: 'Trigger', render: (r) => <span>{r.trigger_kind.replace(/_/g, ' ')}{r.trigger_document_id ? <> · <Link to={`/documents/${r.trigger_document_id}`}>{r.trigger_document_no ?? `#${r.trigger_document_id}`}</Link></> : null}</span> },
-      { key: 'affected_line_count', header: 'Affected', align: 'right', render: (r) => formatInt(r.affected_line_count ?? 0) },
-      { key: 'revised_line_count', header: 'Revised', align: 'right', render: (r) => formatInt(r.revised_line_count ?? 0) },
-      { key: 'cogs_delta', header: 'COGS delta', align: 'right', sortKey: 'cogs_delta', render: (r) => <strong>{formatMoney(r.cogs_delta)}</strong> },
-      { key: 'finished_at', header: 'Finished', render: (r) => formatDateTime(r.finished_at) },
-      { key: 'failure_reason', header: 'Failure', render: (r) => r.failure_reason ?? <span className="muted">—</span> },
-    ],
-    [],
+  const openNew = useCallback(
+    (dryRun: boolean) => {
+      if (!canRecalculate) return
+      setPreferDryRun(dryRun)
+      setNewOpen(true)
+    },
+    [canRecalculate],
+  )
+
+  /* ------------------------------------------------------------ keyboard */
+
+  /*
+   * `/`, Ctrl+F, Ctrl+R and Ctrl+P are registered by ListSheetActions. These are
+   * the two this screen adds. Bare letters, so useKeyboardScope's typing guard
+   * keeps them from firing while the reader is in the search box or the drawer.
+   */
+  const shortcuts = useMemo(
+    () => ({
+      n: (e: KeyboardEvent) => {
+        if (!canRecalculate) return
+        e.preventDefault()
+        openNew(true)
+      },
+      r: (e: KeyboardEvent) => {
+        e.preventDefault()
+        refreshAll()
+      },
+    }),
+    [canRecalculate, openNew, refreshAll],
+  )
+  useKeyboardScope('page', shortcuts, { enabled: !newOpen && detailId === null })
+
+  /* -------------------------------------------------------------- render */
+
+  const filterCount =
+    Object.values(values).filter((v) => v !== '' && v !== 'queued').length
+  const filtered = filterCount > 0
+  const total = jobs.data?.meta.total ?? 0
+
+  /*
+   * The letterhead already carries company · FY · branch through
+   * `useExportIdentity`, so these are only what NARROWED the register. The
+   * period passed beside them is the one the query actually covers: with "All
+   * years" on, the rows are drawn from every financial year and letting the
+   * selected FY speak for them would make the sheet claim a scope it does not have.
+   */
+  const scopePeriod = values.all_fy === '1' ? 'All financial years' : undefined
+  const metaLines = useMemo(
+    () =>
+      [
+        values.status ? `Status: ${humanize(values.status.replace(/,/g, ' + '))}` : '',
+        values.q ? `Search: ${values.q}` : '',
+        values.trigger_kind ? `Trigger: ${triggerLabel(values.trigger_kind)}` : '',
+        values.dry_run ? `Mode: ${values.dry_run === '1' ? 'dry runs only' : 'live runs only'}` : '',
+        values.item_id ? `Item id: ${values.item_id}` : '',
+        values.warehouse_id ? `Warehouse id: ${values.warehouse_id}` : '',
+        values.has_cogs_impact === '1' ? 'Only jobs that moved COGS' : '',
+        values.from || values.to ? `Dated between: ${values.from || '…'} and ${values.to || '…'}` : '',
+        values.all_fy === '1' ? 'Years: all financial years' : '',
+      ].filter(Boolean),
+    [values],
+  )
+
+  const empty = filtered ? (
+    <EmptyState
+      icon={RefreshCcw}
+      title="No recalculations match your filters."
+      description="Nothing in this company's recalculation history fits the narrowing you have applied."
+      action={
+        <Button variant="secondary" onClick={params.reset}>
+          Clear filters
+        </Button>
+      }
+    />
+  ) : (
+    <EmptyState
+      icon={RotateCcw}
+      title="No recalculation jobs yet"
+      description="Recalculations appear here when a back-dated receipt, a corrected cost or a valuation setting means inventory costing has to be replayed from a date forward."
+      action={
+        canRecalculate ? (
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <Button icon={Plus} onClick={() => openNew(true)}>
+              New recalculation
+            </Button>
+          </div>
+        ) : undefined
+      }
+    />
   )
 
   return (
     <>
-      <PageHeader
+      <BreadcrumbHeader
+        breadcrumbs={[{ label: 'Valuation', to: '/valuation' }, { label: 'Recalculations' }]}
+        icon={RotateCcw}
         title="Valuation recalculations"
-        subtitle="Back-dated receipts and edits re-run the costing from a date forward. Each job records the lines whose valuation changed and publishes the COGS revisions Books applies."
+        description="Back-dated receipts and edits re-run the costing from a date forward. Each job records the lines whose valuation changed and publishes the COGS revisions Books applies."
+        escBack={false}
         actions={
           <>
             <ListSheetActions<RecalcJob>
-              columns={EXPORT_COLUMNS}
-              rows={list.data?.data ?? []}
-              fetchAll={() => fetchAllRows<RecalcJob>((page, limit) => valuationApi.recalcJobs({ ...query, page, limit }))}
+              columns={RECALC_EXPORT_COLUMNS}
+              rows={rows}
+              fetchAll={() =>
+                fetchAllRows<RecalcJob>((page, limit) =>
+                  valuationApi.recalcJobs({ ...(query as RecalcFilters), page, limit }),
+                )
+              }
               filenameBase="valuation-recalculations"
               title="Valuation recalculations"
               description="Back-dated re-costing jobs and the COGS revisions they published"
-              metaLines={[
-                state.filters.status ? `Status: ${humanize(state.filters.status)}` : '',
-                state.filters.item_id ? `Item id: ${state.filters.item_id}` : '',
-                state.filters.trigger_kind ? `Trigger: ${humanize(state.filters.trigger_kind)}` : '',
-                state.filters.from || state.filters.to ? `Queued between: ${state.filters.from || '…'} and ${state.filters.to || '…'}` : '',
-                state.filters.all_fy === '1' ? 'Years: all financial years' : '',
-              ].filter(Boolean)}
-              onRefresh={list.reload}
-              refreshing={list.loading}
-              disabled={!list.data || list.data.meta.total === 0}
+              metaLines={metaLines}
+              scopePeriod={scopePeriod}
+              onRefresh={refreshAll}
+              refreshing={jobs.loading}
+              disabled={total === 0}
+              searchInputRef={searchRef}
             />
-            {canRun ? <button type="button" className="btn btn-primary" onClick={() => setOpen(true)}>New recalculation</button> : null}
+            {canRecalculate ? (
+              <Button icon={Plus} onClick={() => openNew(true)} kbd="N">
+                New recalculation
+              </Button>
+            ) : null}
           </>
         }
       />
+
       <RequirePermission permission={P.report('valuation')} what="recalculations">
-        <div className="toolbar">
-          <select className="select" value={state.filters.status ?? ''} onChange={(e) => params.setFilter('status', e.target.value)} aria-label="Status">
-            {RECALC_STATUS_FILTERS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-          <ItemFilter value={state.filters.item_id ?? ''} onChange={(id) => params.setFilter('item_id', id)} />
-          <input className="input date" type="date" value={state.filters.from ?? ''} onChange={(e) => params.setFilter('from', e.target.value)} aria-label="Queued from" />
-          <input className="input date" type="date" value={state.filters.to ?? ''} onChange={(e) => params.setFilter('to', e.target.value)} aria-label="Queued to" />
-          <label className="checkbox">
-            <input type="checkbox" checked={state.filters.all_fy === '1'} onChange={(e) => params.setFilter('all_fy', e.target.checked ? '1' : '')} /> All years
-          </label>
-          <button type="button" className="btn btn-sm" onClick={list.reload} disabled={list.loading}>
-            Refresh
-          </button>
+        <div className="mt-3 space-y-2.5">
+          <RecalculationSummary
+            summary={summary.data}
+            currencyCode={currencyCode}
+            loading={summary.loading}
+            error={summary.error}
+          />
+
+          <RecalculationFilters
+            values={values}
+            onChange={(key, value) => (key === 'q' ? params.setQ(value) : params.setFilter(key, value))}
+            onChangeMany={(patch) => params.setFilters(patch as Record<string, string>)}
+            onSearch={params.setQ}
+            onClearAll={params.reset}
+            searchInputRef={searchRef}
+          />
+
+          {selected.size > 0 ? (
+            <div
+              className="flex flex-wrap items-center gap-3 rounded-xl border border-primary/30 bg-primary-light/40 px-3.5 py-2 text-xs text-gray-700 print:hidden"
+              role="status"
+            >
+              <strong className="font-semibold text-gray-900">
+                {formatInt(selected.size)} selected
+              </strong>
+              {/*
+                Selection carries no bulk action yet, and none is invented here:
+                nothing in the API cancels or re-runs a set of jobs in one call,
+                and faking it with a loop of requests would produce a partial
+                result nobody could reconcile. It marks rows for reading and
+                comparison, and says so.
+              */}
+              <span className="text-gray-500">
+                Marked for comparison. Bulk run and cancel are not available — each job is run or
+                cancelled on its own row.
+              </span>
+              <Button variant="ghost" size="xs" className="ml-auto" onClick={clearSelection}>
+                Clear selection
+              </Button>
+            </div>
+          ) : null}
+
+          <RecalculationTable
+            rows={rows}
+            loading={jobs.loading}
+            error={jobs.error}
+            onRetry={refreshAll}
+            empty={empty}
+            sort={{ key: state.sort, order: state.order }}
+            onSort={params.toggleSort}
+            currencyCode={currencyCode}
+            selected={selected}
+            onToggleRow={toggleRow}
+            onTogglePage={togglePage}
+            onOpen={openDetail}
+            onRun={(job) => setPending({ kind: 'run', job })}
+            onRetryJob={(job) => setPending({ kind: 'retry', job })}
+            onCancel={(job) => setPending({ kind: 'cancel', job })}
+            canRecalculate={canRecalculate}
+            busy={busy}
+            now={now}
+          />
+
+          <Pagination
+            meta={jobs.data?.meta ?? null}
+            onPage={params.setPage}
+            onLimit={params.setLimit}
+            limit={state.limit}
+          />
+
+          <RecalculationHelpPanels onNewRecalculation={() => openNew(true)} canRecalculate={canRecalculate} />
         </div>
-        <DataTable
-          columns={columns}
-          rows={list.data?.data ?? []}
-          rowKey={(r) => r.job_id}
-          loading={list.loading}
-          error={list.error}
-          emptyMessage="No recalculation jobs."
-          sort={{ key: state.sort, order: state.order }}
-          onSort={params.toggleSort}
-          rowActions={(r) => (canRun && r.status === 'QUEUED' ? <button type="button" className="btn btn-sm" disabled={busy === r.job_id} onClick={() => runJob(r)}>{busy === r.job_id ? 'Running…' : 'Run now'}</button> : null)}
-        />
-        <Pagination meta={list.data?.meta ?? null} onPage={params.setPage} onLimit={params.setLimit} limit={state.limit} />
       </RequirePermission>
 
-      <Modal open={open} title="New recalculation" onClose={() => setOpen(false)} busy={busy === 'new'} footer={<><button type="button" className="btn" onClick={() => setOpen(false)}>Cancel</button><button type="button" className="btn btn-primary" disabled={busy === 'new' || !form.from_date} onClick={enqueue}>{form.dry_run ? 'Preview' : 'Recalculate'}</button></>}>
-        <div className="form-grid">
-          <FormField label="Recalculate from" htmlFor="recalc-from" required help="Every movement on or after this date is re-costed in order.">
-            <input id="recalc-from" className="input" type="date" value={form.from_date} onChange={(e) => setForm({ ...form, from_date: e.target.value })} />
-          </FormField>
-          <FormField label="Item" htmlFor="recalc-item" help="Leave empty to recalculate every item.">
-            <ItemFilter id="recalc-item" value={form.item_id} onChange={(id) => setForm({ ...form, item_id: id })} placeholder="All items" />
-          </FormField>
-          <label className="checkbox span-2">
-            <input type="checkbox" checked={form.dry_run} onChange={(e) => setForm({ ...form, dry_run: e.target.checked })} /> Dry run — report what would change without writing revisions
-          </label>
-          <label className="checkbox span-2">
-            <input type="checkbox" checked={form.run_now} onChange={(e) => setForm({ ...form, run_now: e.target.checked })} /> Run immediately (otherwise the worker picks it up)
-          </label>
-        </div>
-      </Modal>
+      <NewRecalculationDrawer
+        open={newOpen}
+        onClose={() => setNewOpen(false)}
+        onSubmit={createJob}
+        settings={settings.data}
+        preferDryRun={preferDryRun}
+        submitting={submitting}
+      />
 
-      <Modal open={detail !== null} title={detail ? `Recalculation #${detail.job_id}` : ''} onClose={() => setDetail(null)} size="lg">
-        {detail ? (
-          <div className="stack">
+      <RecalculationDetailsDrawer
+        open={detailId !== null}
+        onClose={closeDetail}
+        job={detailJob}
+        loading={detail.loading}
+        error={detail.error}
+        onReload={detail.reload}
+        currencyCode={currencyCode}
+        canRecalculate={canRecalculate}
+        busy={detailJob ? busy.has(detailJob.job_id) : false}
+        onRun={(job) => setPending({ kind: 'run', job })}
+        onRetry={(job) => setPending({ kind: 'retry', job })}
+        onCancel={(job) => setPending({ kind: 'cancel', job })}
+      />
+
+      <ConfirmDialog
+        open={pending !== null}
+        title={
+          pending?.kind === 'cancel'
+            ? `Cancel ${recalcReference(pending.job.job_id)}?`
+            : pending
+              ? `${pending.kind === 'retry' ? 'Retry' : 'Run'} ${recalcReference(pending.job.job_id)}?`
+              : ''
+        }
+        confirmLabel={pending?.kind === 'cancel' ? 'Cancel job' : pending?.kind === 'retry' ? 'Retry' : 'Run now'}
+        danger={pending?.kind === 'cancel'}
+        busy={pending ? busy.has(pending.job.job_id) : false}
+        onCancel={() => setPending(null)}
+        onConfirm={() => {
+          if (!pending) return
+          if (pending.kind === 'cancel') void cancelJob(pending.job)
+          else void runOrRetry(pending.job, pending.kind === 'retry')
+        }}
+        message={
+          pending?.kind === 'cancel' ? (
             <p>
-              <StatusBadge value={detail.status} tone={STATUS_TONE[detail.status] ?? 'neutral'} /> {detail.dry_run ? 'Dry run' : 'Live run'} from {formatDate(detail.from_date)}{detail.to_date ? ` to ${formatDate(detail.to_date)}` : ''}; requested by {detail.requested_by ?? 'system'} at {formatDateTime(detail.created_at)}.
+              The job is dropped from the queue before it starts. Nothing is re-costed and no
+              revision is published.
             </p>
+          ) : pending ? (
             <p>
-              {formatInt(detail.affected_line_count ?? 0)} lines examined, {formatInt(detail.revised_line_count ?? 0)} revised, COGS delta <strong>{formatMoney(detail.cogs_delta)}</strong>.
-              {detail.revision_summary ? ` ${formatInt(detail.revision_summary.revisions)} revisions published, ${formatInt(detail.revision_summary.unacknowledged)} awaiting Books.` : ''}
+              {pending.job.dry_run
+                ? 'This is a dry run: the costing is replayed and reported, and nothing is written.'
+                : 'This writes the revised valuation from the effective date onwards and publishes the applicable COGS revisions to Books.'}
             </p>
-            {detail.failure_reason ? <p className="text-critical">{detail.failure_reason}</p> : null}
-            {detail.affected_document_ids?.length ? (
-              <p>
-                Documents: {detail.affected_document_ids.slice(0, 40).map((id, i) => (<span key={id}>{i > 0 ? ', ' : ''}<Link to={`/documents/${id}`}>#{id}</Link></span>))}{detail.affected_document_ids.length > 40 ? ` … and ${detail.affected_document_ids.length - 40} more` : ''}
-              </p>
-            ) : null}
-            <Link to={`/valuation/revisions?job_id=${detail.job_id}`}>Open the revisions of this job</Link>
-            <JsonBlock value={detail} label="Raw job" />
-          </div>
-        ) : null}
-      </Modal>
+          ) : null
+        }
+      />
     </>
   )
 }
