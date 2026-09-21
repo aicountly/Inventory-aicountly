@@ -95,7 +95,12 @@ $routes->group('', ['namespace' => 'App\Controllers\Api', 'filter' => 'cors'], s
         // either of these, so the literal segments resolve to their own actions.
         $routes->get('batches/summary', 'BatchesController::summary');
         $routes->post('batches/bulk-update', 'BatchesController::bulkUpdate');
+        // The same holds for these: `(:num)` matches digits only, so
+        // `serials/summary` cannot be read as a serial id.
+        $routes->get('serials/summary', 'SerialsController::summary');
+        $routes->get('serials/(:num)/history', 'SerialsController::history/$1');
         $routes->post('serials/bulk', 'SerialsController::bulkCreate');
+        $routes->post('serials/bulk-update', 'SerialsController::bulkUpdate');
         $routes->post('bill-of-materials/(:num)/explode', 'BomController::explode/$1');
         $routes->get('items/form-options', 'ItemsController::formOptions');
         $routes->get('items/summary', 'ItemsController::summary');
