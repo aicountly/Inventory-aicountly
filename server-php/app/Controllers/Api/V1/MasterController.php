@@ -26,6 +26,22 @@ abstract class MasterController extends BaseController
     protected array $deleteGuards = [];
     /** @var list<string> */
     protected array $searchColumns = [];
+    /**
+     * Sort keys the subclass accepts beyond its own columns — a flag the table
+     * orders by, or a derived figure resolved through sortExpression().
+     *
+     * @var list<string>
+     */
+    protected array $extraSortColumns = [];
+    /**
+     * The company the list being built belongs to.
+     *
+     * Set immediately before applyIndexFilters() runs, so an override that has
+     * to reach outside its own table (a subquery over the item tables) scopes
+     * that subquery to the same tenant the list is scoped to, without re-parsing
+     * the request to find out which one that is.
+     */
+    protected int $indexCmpId = 0;
     protected ?string $parentColumn = null;
     protected bool $hasSoftDelete = true;
     protected string $entityType = 'master';
@@ -58,10 +74,24 @@ abstract class MasterController extends BaseController
             }
             $b->groupEnd();
         }
+        $this->indexCmpId = $cmpId;
         $this->applyIndexFilters($b);
         $total = (clone $b)->countAllResults(false);
-        $sort = in_array($p['sort'], array_merge([$this->nameColumn, $this->pk, 'created_at', 'updated_at'], $this->columns), true) ? $p['sort'] : $this->nameColumn;
-        $rows = $b->orderBy($sort, $p['order'])->limit($p['limit'], $p['offset'])->get()->getResultArray();
+        $sortable = array_merge([$this->nameColumn, $this->pk, 'created_at', 'updated_at'], $this->columns, $this->extraSortColumns);
+        $sort = in_array($p['sort'], $sortable, true) ? $p['sort'] : $this->nameColumn;
+        $expr = $this->sortExpression($sort, $cmpId);
+        if ($expr !== null) {
+            $b->orderBy($expr . ' ' . $p['order'], '', false);
+        } else {
+            $b->orderBy($sort, $p['order']);
+        }
+        // A deterministic tie-break, so paging a column full of equal values
+        // (every unit carrying the same updated_at, say) cannot show one row on
+        // two pages and another on none.
+        if ($sort !== $this->nameColumn) {
+            $b->orderBy($this->nameColumn, 'ASC');
+        }
+        $rows = $b->limit($p['limit'], $p['offset'])->get()->getResultArray();
 
         return $this->respondList($this->decorateRows($cmpId, array_map([$this, 'present'], $rows)), $total, $p['limit'], $p['offset']);
     }
@@ -215,6 +245,19 @@ abstract class MasterController extends BaseController
 
     protected function applyIndexFilters($builder): void
     {
+    }
+
+    /**
+     * Raw ORDER BY for a sort key that is not a column of this table.
+     *
+     * Returning null (the default) orders by the column of that name, which is
+     * every master's case bar the derived figures a subclass decorates its rows
+     * with. The string is emitted unescaped, so an override must build it from
+     * literals and cast integers — never from request input.
+     */
+    protected function sortExpression(string $sort, int $cmpId): ?string
+    {
+        return null;
     }
 
     /** @return array<string, mixed>|null */

@@ -1,5 +1,6 @@
 import { MasterPage } from '../../masters/MasterPage'
-import { batchesConfig, brandsConfig, itemGroupsConfig, locationsConfig, stockCategoriesConfig, uomConfig, warehouseGroupsConfig, warehousesConfig } from '../../masters/configs'
+import { batchesConfig, brandsConfig, itemGroupsConfig, locationsConfig, stockCategoriesConfig, warehouseGroupsConfig, warehousesConfig } from '../../masters/configs'
+import { UnitsOfMeasurePage } from './uom/UnitsOfMeasurePage'
 
 /** Master screens that are entirely described by a config. */
 
@@ -17,8 +18,16 @@ export function BrandsPage() {
   return <MasterPage config={brandsConfig} breadcrumbs={crumbs} />
 }
 
+/**
+ * Units of measure is the one master that is no longer config-driven.
+ *
+ * It grew a usage count with a drill-down, a GST-aware type split, tabs, bulk
+ * actions and a contextual panel — none of which the other masters asked for,
+ * and all of which would have had to be optioned into `MasterConfig` to live
+ * there. The route is unchanged, so every link to /masters/uom still resolves.
+ */
 export function UomPage() {
-  return <MasterPage config={uomConfig} breadcrumbs={crumbs} />
+  return <UnitsOfMeasurePage />
 }
 
 export function WarehouseGroupsPage() {

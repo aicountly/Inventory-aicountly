@@ -52,6 +52,19 @@ export interface Uom extends AuditFields {
   uqc_gst: string | null
   decimal_places: number
   is_active: number
+  /**
+   * Distinct items naming this unit — base, purchase, sales or an alternate
+   * unit line. Counted live by the API on every read, never stored on the row,
+   * and exactly what the delete guard refuses on.
+   */
+  usage_count?: number
+  /**
+   * `standard` when `uqc_gst` is a code the GST return schema knows, so the
+   * unit is reportable as it stands; `custom` when it is not and has to be
+   * mapped before filing. It is NOT a claim about who created the unit — the
+   * table holds no provenance.
+   */
+  uom_type?: 'standard' | 'custom'
 }
 
 export interface WarehouseGroup extends AuditFields {

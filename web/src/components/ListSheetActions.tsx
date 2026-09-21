@@ -58,6 +58,15 @@ export interface ListSheetActionsProps<T> {
   disabled?: boolean
   /** `/` focuses this box, the way it does on every register. */
   searchInputRef?: RefObject<HTMLInputElement | null>
+  /**
+   * Ctrl+N creates a record, where the screen has a create action.
+   *
+   * It is registered HERE rather than by the page, because this component
+   * already owns the page keyboard scope; a second `usePageKeyboard` on the
+   * same screen would replace these bindings and silently take `/`, Ctrl+R and
+   * Ctrl+P away with it.
+   */
+  onNew?: () => void
   /** Scope period for the letterhead (`as at`, `for the year`…). */
   scopePeriod?: string
 }
@@ -80,12 +89,13 @@ export function ListSheetActions<T>({
   refreshing,
   disabled,
   searchInputRef,
+  onNew,
   scopePeriod,
 }: ListSheetActionsProps<T>) {
   const { companyName } = useCompany()
   const identity = useExportIdentity(scopePeriod)
   const printRef = useRef<(() => void) | null>(null)
-  usePageKeyboard({ searchInputRef, onRefresh, onPrint: () => printRef.current?.() })
+  usePageKeyboard({ searchInputRef, onRefresh, onPrint: () => printRef.current?.(), onNew })
 
   return (
     <ExportActions<T>
