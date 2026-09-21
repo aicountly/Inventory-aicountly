@@ -6,6 +6,7 @@ import { useQuery } from '../hooks/useQuery'
 import { errorMessage } from '../services/api'
 import { documentsApi } from '../services/documentsApi'
 import { DocumentForm } from './DocumentForm'
+import { ConsumptionForm } from './consumption/ConsumptionForm'
 import { MaterialReceiptForm } from './receipt/MaterialReceiptForm'
 import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS } from './actions'
 import { draftFromDocument } from './formModel'
@@ -26,14 +27,14 @@ export function DocumentFormPage() {
   const spec = editing ? specForCode(existing.data?.document_type) : specForSlug(slug)
   const crumbs = [{ label: 'Documents', to: '/documents' }]
   /**
-   * A material receipt has its own workspace rather than the shared editor.
-   *
-   * It is the one native type a storekeeper lives in all day — supplier
-   * paperwork, gate details, batches and serials, forty lines at a time — and
-   * it earns a screen built around that. Everything underneath is still shared:
-   * the same draft model, the same payload, the same create / update / post
-   * calls and the same permission gates, which is why the branch is here at the
-   * end of the gates rather than a second route.
+   * Two types have a workspace of their own rather than the shared editor: the
+   * ones an operator lives in all day, which earn a screen built around the way
+   * that day goes — a consumption issue, and a material receipt with its
+   * supplier paperwork, gate details, batches and serials, forty lines at a
+   * time. Everything underneath stays shared: the same draft model, the same
+   * payload, the same create / update / post calls and the same permission
+   * gates, which is why both branch here at the end of the gate chain rather
+   * than owning a route of their own.
    */
   const isReceipt = spec?.code === 'MATERIAL_RECEIPT'
 
@@ -105,6 +106,19 @@ export function DocumentFormPage() {
       )
     }
     const initial = draftFromDocument(doc, spec)
+    if (spec.code === 'CONSUMPTION') {
+      return (
+        <ConsumptionForm
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          existingStatus={doc.status}
+          existingVersion={doc.version}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
     if (isReceipt) {
       return (
         <MaterialReceiptForm
@@ -126,6 +140,9 @@ export function DocumentFormPage() {
   }
 
   const s = spec as NonNullable<typeof spec>
+  if (s.code === 'CONSUMPTION') {
+    return <ConsumptionForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
   if (isReceipt) return <MaterialReceiptForm key={s.code} spec={s} />
   return (
     <div className="page">

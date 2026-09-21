@@ -96,33 +96,41 @@ export const lookupApi = {
     return res.data
   },
 
+  async itemsByIds(ids: number[], signal?: AbortSignal): Promise<ItemSearchRow[]> {
+    if (ids.length === 0) return []
+    const res = await api.post<ItemResponse<ItemSearchRow[]>>('v1/items/bulk-lookup', { item_ids: ids }, { signal })
+    return res.data
+  },
+
+  /** Exact UPC / SKU match for a keyboard-wedge scan: `GET /v1/items/by-barcode/{code}`. 404 when nothing matches. */
+  async byBarcode(code: string, options: { warehouseId?: number | null; signal?: AbortSignal } = {}): Promise<ItemSearchRow> {
+    const res = await api.get<ItemResponse<ItemSearchRow>>(`v1/items/by-barcode/${encodeURIComponent(code)}`, {
+      query: { warehouse_id: options.warehouseId ?? undefined },
+      signal: options.signal,
+    })
+    return res.data
+  },
+
   /**
-   * `GET /v1/items/by-barcode/{code}` — one item by its barcode (item_upc) or SKU.
+   * The same lookup, with "nothing carries that code" as a VALUE rather than a
+   * throw.
    *
-   * What a hardware scanner needs: the code arrives complete, in one burst, and
-   * the answer is one item or none. Resolves to null on 404 rather than
-   * throwing, because "no item carries that barcode" is an ordinary outcome at
-   * a goods-inward desk, not an error.
+   * At a goods-inward desk an unknown barcode is an ordinary outcome — the
+   * carton is from a supplier whose item is not on the master yet — and the
+   * receipt screen logs it and carries on scanning. A consumption scan bar
+   * wants the error so it can say so; both read the same endpoint.
    */
   async itemByBarcode(code: string, options: { warehouseId?: number | null; signal?: AbortSignal } = {}): Promise<ItemSearchRow | null> {
     const trimmed = code.trim()
     if (trimmed === '') return null
     try {
-      const res = await api.get<ItemResponse<ItemSearchRow>>(`v1/items/by-barcode/${encodeURIComponent(trimmed)}`, {
-        query: { warehouse_id: options.warehouseId ?? undefined },
-        signal: options.signal,
-      })
-      return res.data ?? null
+      // Named, not `this`: a destructured `const { itemByBarcode } = lookupApi`
+      // would otherwise lose its receiver.
+      return (await lookupApi.byBarcode(trimmed, options)) ?? null
     } catch (err) {
       if (isApiError(err) && err.status === 404) return null
       throw err
     }
-  },
-
-  async itemsByIds(ids: number[], signal?: AbortSignal): Promise<ItemSearchRow[]> {
-    if (ids.length === 0) return []
-    const res = await api.post<ItemResponse<ItemSearchRow[]>>('v1/items/bulk-lookup', { item_ids: ids }, { signal })
-    return res.data
   },
 
   async warehouses(signal?: AbortSignal): Promise<WarehouseRow[]> {

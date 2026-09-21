@@ -5,7 +5,7 @@
 
 import { api } from './api'
 import type { ItemResponse, ListQuery, ListResponse } from './api'
-import type { CreateDocumentPayload, DocumentListRow, DocumentListSummary, DocumentTypeRow, InventoryDocument, PrintSnapshot } from '../documents/types'
+import type { CreateDocumentPayload, DocumentLine, DocumentListRow, DocumentListSummary, DocumentTypeRow, InventoryDocument, PrintSnapshot } from '../documents/types'
 
 const BASE = 'v1/inventory-documents'
 
@@ -72,6 +72,15 @@ export const documentsApi = {
   async get(id: number, signal?: AbortSignal): Promise<InventoryDocument> {
     const res = await api.get<ItemResponse<InventoryDocument>>(`${BASE}/${id}`, { signal })
     return res.data
+  },
+
+  /** Lines for several documents in one call, keyed by document id (DocumentsController::lines). */
+  async lines(documentIds: number[], signal?: AbortSignal): Promise<Record<number, DocumentLine[]>> {
+    if (documentIds.length === 0) return {}
+    const res = await api.get<ItemResponse<Record<string, DocumentLine[]>>>(`${BASE}/lines`, { query: { document_ids: documentIds.join(',') }, signal })
+    const out: Record<number, DocumentLine[]> = {}
+    for (const [id, rows] of Object.entries(res.data)) out[Number(id)] = rows
+    return out
   },
 
   async create(payload: CreateDocumentPayload): Promise<InventoryDocument> {
