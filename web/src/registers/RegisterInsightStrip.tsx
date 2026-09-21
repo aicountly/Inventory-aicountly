@@ -1,5 +1,7 @@
+import { Link } from 'react-router-dom'
 import type { LucideIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
+import { Badge } from '../ui/Badge'
 import { AIC, cx } from '../ui/cx'
 import type { IconTone } from '../ui/IconTile'
 
@@ -11,12 +13,39 @@ export interface RegisterInsight {
   hint?: ReactNode
   icon?: LucideIcon
   tone?: IconTone
+  /**
+   * Where this insight leads — the register itself, re-filtered to the rows the
+   * sentence is about.
+   *
+   * An insight that states a figure and cannot show you the rows behind it is a
+   * decoration. It must be a link, not a handler: a reader who wants "the twelve
+   * overdue lines" in another tab should be able to middle-click for them, and
+   * the filtered register has to be a URL for that to work at all.
+   */
+  to?: string
 }
 
 export interface RegisterInsightSet {
   items: readonly RegisterInsight[]
   /** Right-hand closing remark. Omitted when it would not be true. */
   note?: ReactNode
+  /**
+   * A lead block at the left of the strip, naming what these are.
+   *
+   * Only worth the horizontal room on a register whose insights are a standing
+   * feature rather than an aside. A strip without one is the plain band every
+   * other register shows.
+   */
+  heading?: {
+    title: string
+    description?: string
+    icon?: LucideIcon
+    /**
+     * Marks the block as new. Reserved for genuinely provisional features — a
+     * badge that never comes off is a badge nobody reads.
+     */
+    beta?: boolean
+  }
 }
 
 /** Tints for the small square beside each insight. */
@@ -32,6 +61,9 @@ const TONE_STYLES: Partial<Record<IconTone, string>> = {
   teal: 'bg-teal-500/10 text-teal-600',
 }
 
+const CELL_CLASS =
+  'flex min-w-[10rem] flex-1 items-center gap-2.5 border-b border-primary/10 px-3.5 py-2.5 last:border-b-0 sm:border-b-0 sm:border-r sm:last:border-r-0'
+
 /**
  * The operational read on what is currently on screen.
  *
@@ -45,11 +77,12 @@ const TONE_STYLES: Partial<Record<IconTone, string>> = {
  * It is a summary of figures stated elsewhere, so it is `print:hidden`: the
  * sheet carries the KPI cards and the totals row, which are the record.
  */
-export function RegisterInsightStrip({ items, note }: RegisterInsightSet) {
+export function RegisterInsightStrip({ items, note, heading }: RegisterInsightSet) {
   if (!items.length) return null
+  const HeadingIcon = heading?.icon
   return (
     <section
-      aria-label="At a glance"
+      aria-label={heading?.title ?? 'At a glance'}
       className={cx(
         AIC,
         'shrink-0 overflow-hidden rounded-2xl border border-primary/15 print:hidden',
@@ -57,13 +90,38 @@ export function RegisterInsightStrip({ items, note }: RegisterInsightSet) {
       )}
     >
       <div className="flex flex-wrap items-stretch">
+        {heading ? (
+          <div className={cx(CELL_CLASS, 'sm:max-w-[17rem]')}>
+            {HeadingIcon ? (
+              <span
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary/10 text-primary"
+                aria-hidden
+              >
+                <HeadingIcon className="h-4 w-4" strokeWidth={1.75} />
+              </span>
+            ) : null}
+            <span className="min-w-0 leading-tight">
+              <span className="flex items-center gap-1.5">
+                <span className="truncate text-xs font-semibold text-gray-900">{heading.title}</span>
+                {heading.beta ? (
+                  <Badge tone="beta" size="xs">
+                    Beta
+                  </Badge>
+                ) : null}
+              </span>
+              {heading.description ? (
+                <span className="mt-0.5 block text-[11px] leading-snug text-gray-500">
+                  {heading.description}
+                </span>
+              ) : null}
+            </span>
+          </div>
+        ) : null}
+
         {items.map((insight) => {
           const Icon = insight.icon
-          return (
-            <div
-              key={insight.key}
-              className="flex min-w-[10rem] flex-1 items-center gap-2.5 border-b border-primary/10 px-3.5 py-2.5 last:border-b-0 sm:border-b-0 sm:border-r sm:last:border-r-0"
-            >
+          const body = (
+            <>
               {Icon ? (
                 <span
                   className={cx(
@@ -91,9 +149,27 @@ export function RegisterInsightStrip({ items, note }: RegisterInsightSet) {
                   </span>
                 ) : null}
               </span>
+            </>
+          )
+
+          return insight.to ? (
+            <Link
+              key={insight.key}
+              to={insight.to}
+              className={cx(
+                CELL_CLASS,
+                'group text-left transition-colors hover:bg-white/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40',
+              )}
+            >
+              {body}
+            </Link>
+          ) : (
+            <div key={insight.key} className={CELL_CLASS}>
+              {body}
             </div>
           )
         })}
+
         {note ? (
           <div className="flex shrink-0 items-center px-3.5 py-2.5 text-right text-[11px] font-semibold leading-tight text-primary/80">
             <span className="w-full">{note}</span>

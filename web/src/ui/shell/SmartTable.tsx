@@ -107,6 +107,15 @@ export interface SmartTableProps<T> {
   title?: ReactNode
   /** One line under the heading, saying what the rows are. */
   description?: ReactNode
+  /**
+   * Replaces the heading block outright — a register's view switcher.
+   *
+   * Separate from `title` rather than overloading it because `title` renders as
+   * an `<h2>` and truncates: a row of buttons inside a heading is the wrong
+   * element for a control and the wrong overflow behaviour for a control group.
+   * `description` still renders under it.
+   */
+  headerLead?: ReactNode
   /** Right of the heading — "Customize columns" on a register. */
   headerAction?: ReactNode
   /** Raw `<tr>` rows for the table foot. Ignored when `totals` is given. */
@@ -207,6 +216,7 @@ export function SmartTable<T>({
   caption,
   title,
   description,
+  headerLead,
   headerAction,
   tfoot,
   totals,
@@ -514,14 +524,14 @@ export function SmartTable<T>({
         className,
       )}
     >
-      {title || headerAction ? (
+      {title || headerLead || headerAction ? (
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-gray-200 px-4 py-3 print:hidden">
           <div className="min-w-0">
-            {title ? (
+            {headerLead ?? (title ? (
               <h2 className="truncate text-[0.95rem] font-semibold tracking-tight text-gray-900">
                 {title}
               </h2>
-            ) : null}
+            ) : null)}
             {description ? (
               <p className="mt-0.5 truncate text-[11px] text-gray-400">{description}</p>
             ) : null}

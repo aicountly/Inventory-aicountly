@@ -234,8 +234,34 @@ export const RECALC_IN_PROGRESS = 'QUEUED,RUNNING'
 export const RECALC_STATUS_FILTERS: { value: string; label: string }[] = [
   { value: '', label: 'All statuses' },
   { value: RECALC_IN_PROGRESS, label: 'In progress (queued + running)' },
-  ...RECALC_STATUSES.map((status) => ({ value: status, label: status })),
+  // Sentence case, not the raw token: the register's own chips read "Completed",
+  // and a filter offering "COMPLETED" for the same rows is two vocabularies for
+  // one thing. The VALUES are untouched — the dashboard links by value.
+  ...RECALC_STATUSES.map((status) => ({ value: status, label: status.charAt(0) + status.slice(1).toLowerCase() })),
 ]
+
+/**
+ * The trigger vocabulary of `inv_valuation_recalc_jobs.trigger_kind` (migration
+ * 003). A closed set written down once, so the filter cannot offer a value the
+ * column never holds and the register cannot label one it does.
+ */
+export const RECALC_TRIGGER_KINDS = [
+  'manual',
+  'backdated_document',
+  'reversal',
+  'revaluation',
+  'method_change',
+  'migration_rebuild',
+] as const
+
+export type RecalcTriggerKind = (typeof RECALC_TRIGGER_KINDS)[number]
+
+/** Which job timestamp a date range narrows. Mirrors the controller's `date_field`. */
+export const RECALC_DATE_FIELDS = [
+  { value: 'queued', label: 'Queued' },
+  { value: 'finished', label: 'Finished' },
+  { value: 'effective', label: 'Effective from' },
+] as const
 
 export interface RecalcJob {
   job_id: number
@@ -254,12 +280,16 @@ export interface RecalcJob {
   revised_line_count: number | null
   cogs_delta: number
   failure_reason: string | null
+  /** The reason a person typed when they queued it (migration 010). */
+  remarks: string | null
   requested_by: string | null
+  cancelled_by: string | null
   created_at: string
   started_at: string | null
   finished_at: string | null
   item_name: string | null
   item_sku: string | null
+  warehouse_name: string | null
   trigger_document_no: string | null
   trigger_document_type: string | null
   affected_document_ids: number[]
@@ -267,11 +297,38 @@ export interface RecalcJob {
   revision_summary?: { revisions: number; delta_total: number; unacknowledged: number; published: number }
 }
 
+/**
+ * The server's figures for the register's KPI cards.
+ *
+ * Counted over the whole filtered set with the STATUS filter deliberately left
+ * out, because the cards are the status breakdown — see
+ * ValuationController::recalcSummary. `ignores_status_filter` is the server
+ * saying so, so the screen can print it rather than assume it.
+ */
+export interface RecalcSummary {
+  total: number
+  by_status: Partial<Record<RecalcStatus, number>> & Record<string, number>
+  in_progress: number
+  cogs_delta: number
+  queued_this_month: number
+  queued_prev_month: number
+  cogs_delta_this_month: number
+  cogs_delta_prev_month: number
+  month_start: string
+  ignores_status_filter: boolean
+}
+
 export interface RecalcFilters extends ListQuery {
   status?: string
   item_id?: number | string
+  warehouse_id?: number | string
   trigger_kind?: string
   trigger_document_id?: number | string
+  /** '1' = dry runs only, '0' = live runs only, absent = both. */
+  dry_run?: number | string
+  has_cogs_impact?: number | string
+  /** `queued` (default) | `finished` | `effective`. */
+  date_field?: string
   from?: string
   to?: string
   all_fy?: boolean | number | string
@@ -283,6 +340,8 @@ export interface EnqueueRecalcPayload {
   dry_run?: boolean
   run_now?: boolean
   trigger_document_id?: number | null
+  /** Why this restatement was asked for. Stored on the job for the audit trail. */
+  remarks?: string | null
 }
 
 // ---- revisions -----------------------------------------------------------------------------------
@@ -478,18 +537,36 @@ export const valuationApi = {
     return api.list<RecalcJob>('v1/valuation/recalculations', filters, { signal })
   },
 
+  /** KPI figures for the same filters the list is showing. */
+  async recalcSummary(filters: RecalcFilters = {}, signal?: AbortSignal): Promise<RecalcSummary> {
+    const res = await api.get<ItemResponse<RecalcSummary>>('v1/valuation/recalculations/summary', { query: filters, signal })
+    return res.data
+  },
+
   async recalcJob(id: number, signal?: AbortSignal): Promise<RecalcJob> {
     const res = await api.get<ItemResponse<RecalcJob>>(`v1/valuation/recalculations/${id}`, { signal })
     return res.data
   },
 
-  async enqueueRecalc(payload: EnqueueRecalcPayload): Promise<RecalcJob> {
-    const res = await api.post<ItemResponse<RecalcJob>>('v1/valuation/recalculations', payload)
+  /**
+   * `idempotencyKey` is not optional in spirit: this call restates historical
+   * valuation and publishes COGS revisions to Books, so a retried or
+   * double-submitted request must come back with the FIRST job rather than
+   * queue a second one. The screen mints one key per form submission.
+   */
+  async enqueueRecalc(payload: EnqueueRecalcPayload, idempotencyKey?: string): Promise<RecalcJob> {
+    const res = await api.post<ItemResponse<RecalcJob>>('v1/valuation/recalculations', payload, idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : undefined)
     return res.data
   },
 
   async runRecalc(id: number): Promise<RecalcJob> {
     const res = await api.post<ItemResponse<RecalcJob>>(`v1/valuation/recalculations/${id}/run`, {})
+    return res.data
+  },
+
+  /** Queued jobs only — the server refuses anything that has already started. */
+  async cancelRecalc(id: number): Promise<RecalcJob> {
+    const res = await api.post<ItemResponse<RecalcJob>>(`v1/valuation/recalculations/${id}/cancel`, {})
     return res.data
   },
 
