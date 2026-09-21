@@ -12,6 +12,12 @@ interface ImportMetaEnv {
   readonly VITE_GA4_SAAS_INVENTORY_MEASUREMENT_ID?: string
   /** Generic GA4 measurement ID fallback, checked when the product-specific one is unset. */
   readonly VITE_GA4_MEASUREMENT_ID?: string
+  /**
+   * API path that answers Aicountly AI suggestions, e.g. `v1/ai/suggest`.
+   * Unset (the default) and the AI panel offers itself as not yet connected
+   * rather than inventing an answer — see masters/warehouseGroups/warehouseGroupsAi.ts.
+   */
+  readonly VITE_INVENTORY_AI_PATH?: string
 }
 
 interface ImportMeta {

@@ -28,7 +28,7 @@ class BrandsController extends MasterController
     /** Not a column of inv_brands — see applySort(). */
     protected array $extraSortColumns = ['item_count'];
 
-    /** How long the two free-text handles may be, matching the column widths in migration 011. */
+    /** How long the two free-text handles may be, matching the column widths in migration 012. */
     private const MAX_LENGTHS = ['brand_alias' => 64, 'brand_code' => 64];
 
     /**

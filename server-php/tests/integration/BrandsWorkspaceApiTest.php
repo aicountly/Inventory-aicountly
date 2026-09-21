@@ -288,7 +288,7 @@ final class BrandsWorkspaceApiTest extends IntegrationTestCase
             "SELECT indexdef FROM pg_indexes WHERE tablename = 'inv_brands' AND indexname = 'uq_inv_brands_cmp_code'",
         )->getRowArray();
 
-        self::assertNotNull($index, 'migration 011 must create uq_inv_brands_cmp_code');
+        self::assertNotNull($index, 'migration 012 must create uq_inv_brands_cmp_code');
         self::assertStringContainsString('UNIQUE', $index['indexdef']);
         self::assertStringContainsString('lower((brand_code)', $index['indexdef'], 'APL and apl are one handle');
         self::assertStringContainsString('deleted_at IS NULL', $index['indexdef'], 'a removed brand releases its code');

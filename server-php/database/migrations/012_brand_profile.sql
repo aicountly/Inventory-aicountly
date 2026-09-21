@@ -1,4 +1,4 @@
--- Migration 011: the brand's own descriptive fields — a short code and a description.
+-- Migration 012: the brand's own descriptive fields — a short code and a description.
 --
 -- InventorySqlMigrationRunner records every file it applies by FILENAME in inv_sql_migrations and
 -- skips anything already recorded, so an earlier file cannot be edited to change the schema of a
