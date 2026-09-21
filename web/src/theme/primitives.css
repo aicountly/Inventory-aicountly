@@ -90,6 +90,22 @@
   }
 }
 
+/* --- Indeterminate progress ----------------------------------------------
+   For work whose END is genuinely unknown: a valuation recalculation replays
+   costing inside one transaction and reports nothing until it lands, so there
+   is no percentage to fill. A travelling sliver says "this is still running"
+   without claiming to know how far along it is — which a bar at 62% would.
+   Callers reach it through Tailwind's arbitrary-animation syntax, e.g.
+   `animate-[aic-indeterminate_1.4s_ease-in-out_infinite]`. */
+@keyframes aic-indeterminate {
+  0% {
+    transform: translateX(-110%);
+  }
+  100% {
+    transform: translateX(310%);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .skeleton::after,
   .animate-slide-in-right,
