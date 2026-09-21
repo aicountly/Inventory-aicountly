@@ -11,6 +11,7 @@ import { cx } from '../ui/cx'
 import { BatchFilter } from './BatchFilter'
 import { DateRangeFilter } from './DateRangeFilter'
 import { useDocumentTypeOptions } from './useDocumentTypeOptions'
+import { usePartyOptions } from './usePartyOptions'
 import type { DateRangeContext } from './dateRangePresets'
 import type { ReportFilter } from '../reports/types'
 
@@ -88,6 +89,50 @@ function DocumentTypeControl({ filter, value, onChange, layout }: FilterControlP
   )
 }
 
+/**
+ * The party picker.
+ *
+ * Falls back to a numeric ledger-id box when the list is unavailable — empty
+ * because the request failed, or because the company has more parties than the
+ * endpoint caps at. A picker that cannot offer the party a reader is looking for
+ * must not also take away the only other way of naming it.
+ */
+function PartyControl({ filter, value, onChange, layout }: FilterControlProps & { layout: FilterControlLayout }) {
+  const parties = usePartyOptions()
+  if (!parties.loading && parties.options.length === 0) {
+    return (
+      <FilterField label={filter.label} {...fieldProps(layout)}>
+        <Input
+          inputMode="numeric"
+          value={value}
+          onChange={(e) => onChange(filter.key, e.target.value.replace(/[^\d]/g, ''))}
+          aria-label={filter.label}
+          placeholder="Ledger id"
+          className={layout === 'stacked' ? 'w-full' : 'w-[7rem]'}
+        />
+      </FilterField>
+    )
+  }
+  return (
+    <FilterField label={filter.label} {...fieldProps(layout)}>
+      <Select
+        value={value}
+        onChange={(e) => onChange(filter.key, e.target.value)}
+        aria-label={filter.label}
+        disabled={parties.loading && parties.options.length === 0}
+        className={selectWidth(layout, 'min-w-[10rem]')}
+      >
+        <option value="">{filter.placeholder ?? 'All parties'}</option>
+        {parties.options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </Select>
+    </FilterField>
+  )
+}
+
 function WarehouseControl({ filter, value, onChange, layout }: FilterControlProps & { layout: FilterControlLayout }) {
   const { warehouses } = useReferenceData()
   return (
@@ -138,6 +183,27 @@ function StockCategoryControl({ filter, value, onChange, layout }: FilterControl
         {(options?.stock_categories ?? []).map((c) => (
           <option key={c.stock_cat_id} value={c.stock_cat_id}>
             {c.cat_name}
+          </option>
+        ))}
+      </Select>
+    </FilterField>
+  )
+}
+
+function BrandControl({ filter, value, onChange, layout }: FilterControlProps & { layout: FilterControlLayout }) {
+  const { options } = useFormOptions()
+  return (
+    <FilterField label={filter.label} {...fieldProps(layout)}>
+      <Select
+        value={value}
+        onChange={(e) => onChange(filter.key, e.target.value)}
+        aria-label={filter.label}
+        className={selectWidth(layout, 'min-w-[9rem]')}
+      >
+        <option value="">{filter.placeholder ?? 'All brands'}</option>
+        {(options?.brands ?? []).map((b) => (
+          <option key={b.brand_id} value={b.brand_id}>
+            {b.brand_name}
           </option>
         ))}
       </Select>
@@ -237,8 +303,14 @@ export function FilterControl(props: FilterControlProps) {
     case 'stock_category':
       return <StockCategoryControl {...props} layout={layout} />
 
+    case 'brand':
+      return <BrandControl {...props} layout={layout} />
+
     case 'document_type':
       return <DocumentTypeControl {...props} layout={layout} />
+
+    case 'party':
+      return <PartyControl {...props} layout={layout} />
 
     case 'date':
       return (

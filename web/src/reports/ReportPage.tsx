@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { FileSearch, ListFilter } from 'lucide-react'
 import { useAccess } from '../access/AccessContext'
 import { useCompany } from '../company/CompanyContext'
@@ -47,6 +47,8 @@ import {
   TABLE_ROW_SELECTED,
 } from '../styles/designTokens'
 import { Button } from '../ui/Button'
+import { Card } from '../ui/Card'
+import { SegmentedControl } from '../ui/SegmentedControl'
 import { LiveDataBadge } from '../ui/shell/LiveDataBadge'
 import { isApiError } from '../services/api'
 import type { IconTone } from '../ui/IconTile'
@@ -113,14 +115,61 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
   const permission = useMemo(() => registerPermission(config), [config])
   const allowed = can(permission)
 
+  // ---- views ---------------------------------------------------------------
+  // One question read several ways. The choice lives in the URL so a link to the
+  // follow-up list IS the follow-up list, and so the browser's back button steps
+  // between views the way it steps between filters. A register that declares
+  // none behaves exactly as it always has.
+  const views = config.views
+  const [searchParams, setSearchParams] = useSearchParams()
+  const viewKey = searchParams.get('view') ?? ''
+  const activeView = useMemo(
+    () => (views?.length ? (views.find((v) => v.key === viewKey) ?? views[0]) : null),
+    [views, viewKey],
+  )
+  const setView = useCallback(
+    (key: string) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev)
+          // The first view is the default, and a default does not belong in a URL.
+          if (!views?.length || key === views[0].key) next.delete('view')
+          else next.set('view', key)
+          // A view shows a different set; page 3 of the old one means nothing here.
+          next.delete('page')
+          return next
+        },
+        { replace: true },
+      )
+    },
+    [setSearchParams, views],
+  )
+
   const filterKeys = useMemo(() => filterUrlKeys(config.filters), [config.filters])
   const params = useListParams({
-    sort: config.defaultSort,
-    order: config.defaultOrder,
+    // A view may open on its own ordering — the follow-up list is useless in
+    // document-date order. An explicit `sort` in the URL is the reader's own
+    // choice and still wins, because useListParams reads the URL first.
+    sort: activeView?.defaultSort ?? config.defaultSort,
+    order: activeView?.defaultOrder ?? config.defaultOrder,
     limit: config.defaultLimit ?? 100,
     filterKeys,
   })
   const { state } = params
+
+  /**
+   * "Clear all" clears the FILTERS, not the view.
+   *
+   * `params.reset` empties the whole query string, which is right for filters,
+   * sort and page and wrong for the tab the reader is standing on: clearing a
+   * filter should not also walk them back to the Table view.
+   */
+  const resetFilters = useCallback(() => {
+    const keep = views?.length && activeView && activeView.key !== views[0].key ? activeView.key : null
+    setSearchParams(keep ? new URLSearchParams({ view: keep }) : new URLSearchParams(), {
+      replace: true,
+    })
+  }, [setSearchParams, views, activeView])
 
   const ctx = useMemo<FilterContext>(
     () => ({ fyFrom: fyRange.from, fyTo: fyRange.to, today: todayIso() }),
@@ -143,10 +192,13 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
     [config.requireFilters, values],
   )
 
-  const apiFilters = useMemo<ListQuery>(
-    () => (config.toQuery ? config.toQuery(values) : { ...values }),
-    [config, values],
-  )
+  // A view narrows by adding to the QUERY, never by filtering rows after they
+  // arrive: the pager, the totals and the KPI cards all have to describe the set
+  // the reader is actually looking at, and only the server can make that true.
+  const apiFilters = useMemo<ListQuery>(() => {
+    const base = config.toQuery ? config.toQuery(values) : { ...values }
+    return activeView?.query ? { ...base, ...activeView.query } : base
+  }, [config, values, activeView])
 
   const fetchPage = useCallback(
     (
@@ -209,25 +261,54 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
   const {
     visibility,
     setVisibility,
-    visibleColumns,
+    visibleColumns: configuredColumns,
     columnsKey,
     ready: columnsReady,
   } = useColumnConfig(prefsKey, config.columns)
 
+  /**
+   * The columns actually shown, once the active view has had its say.
+   *
+   * A view that names its own columns names them because they ARE the view — a
+   * follow-up list is priority, party, ageing and the open figure, and a reader
+   * who hid "Party" on the main table did not ask for a follow-up list with no
+   * party on it. So the view's list wins there, and the column configurator is
+   * disabled for the duration rather than appearing to do nothing.
+   *
+   * Everything downstream reads this: the table, the CSV, the sheet and the
+   * printed totals, so the three cannot describe different columns.
+   */
+  const visibleColumns = useMemo(() => {
+    const wanted = activeView?.columns
+    if (!wanted) return configuredColumns
+    const byKey = new Map(config.columns.map((c) => [c.key, c]))
+    return wanted.map((key) => byKey.get(key)).filter((c): c is ReportColumn<T> => c !== undefined)
+  }, [activeView, configuredColumns, config.columns])
+  const columnsLockedByView = Boolean(activeView?.columns)
+
   // ---- KPI cards -----------------------------------------------------------
   const kpiCards = useMemo(() => {
     if (!result.data || summary === undefined) return []
-    if (config.kpis) return config.kpis(summary, result.data)
+    if (config.kpis) return config.kpis(summary, result.data, values)
     return summaryItemsToCards(config.summary(summary, result.data))
-  }, [config, result.data, summary])
+  }, [config, result.data, summary, values])
 
   // ---- the at-a-glance strip ----------------------------------------------
   // Derived from the response already in hand — never a second request, and
   // never a figure stated more widely than the register's own summary supports.
   const insights = useMemo(() => {
     if (!config.insights || !result.data || summary === undefined) return null
-    return config.insights(summary, result.data)
-  }, [config, result.data, summary])
+    // The third argument carries the filters the register was actually asked, so
+    // an insight can link back into itself narrowed by one more thing rather than
+    // resetting whatever the reader already set.
+    return config.insights(summary, result.data, {
+      summary,
+      rows: result.data.data,
+      values,
+      query: apiFilters,
+      loading: result.loading,
+    })
+  }, [config, result.data, result.loading, summary, values, apiFilters])
 
   // ---- the analytics band --------------------------------------------------
   // Handed the server's summary and this page's rows under the same filters the
@@ -438,14 +519,14 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
       const rescoped = summaryForRows(summary, all)
       const response: ReportResponse<T, S> = { ...result.data, data: [...all], summary: rescoped }
       const cards = config.kpis
-        ? config.kpis(rescoped, response)
+        ? config.kpis(rescoped, response, values)
         : summaryItemsToCards(config.summary(rescoped, response))
       return {
         summaryCards: toSheetCards(cards),
         totalsText: config.totals ? totalsRowToText(visibleColumns, config.totals(rescoped, all)) : null,
       }
     },
-    [summaryForRows, summary, config, result.data, visibleColumns],
+    [summaryForRows, summary, config, result.data, visibleColumns, values],
   )
 
   const printSummaryCards = useMemo(() => toSheetCards(kpiCards), [kpiCards])
@@ -507,6 +588,19 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
   }, [config.filters, state.filters])
 
   /**
+   * The "nothing here, and it is not your filters" screen, when the register
+   * has one and it applies. See `RegisterConfig.emptyUnfiltered`.
+   */
+  const emptyUnfiltered = useMemo(() => {
+    const declared = config.emptyUnfiltered
+    if (!declared) return null
+    if (typeof declared === 'function') {
+      return summary === undefined ? null : declared(summary, activeFilterCount)
+    }
+    return activeFilterCount === 0 ? declared : null
+  }, [config.emptyUnfiltered, summary, activeFilterCount])
+
+  /**
    * What the reader is told when the fetch fails.
    *
    * An ApiError carries a message the server wrote for a person, so it is shown.
@@ -549,7 +643,9 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
         // The choice is stored against the member uuid, so one taken before
         // /v1/access/me answers has nowhere to be written and would be dropped
         // the moment the uuid arrives and the per-user key changes under it.
-        disabled={!columnsReady}
+        // A view with a fixed column set overrides it, so the control says so by
+        // being unavailable rather than by silently having no effect.
+        disabled={!columnsReady || columnsLockedByView}
         open={columnsOpen}
         onOpenChange={setColumnsOpen}
       />
@@ -592,6 +688,71 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
       </Select>
     </FilterField>
   ) : undefined
+
+  // The switcher sits at the head of the card whose contents it changes, where a
+  // heading would otherwise be. `role="tablist"` comes from SegmentedControl.
+  const viewSwitcher =
+    views && views.length > 1 ? (
+      <SegmentedControl
+        value={activeView?.key ?? views[0].key}
+        onChange={setView}
+        options={views.map((v) => {
+          const Icon = v.icon
+          return {
+            value: v.key,
+            label: (
+              <span className="inline-flex items-center gap-1.5">
+                {Icon ? <Icon className="h-3.5 w-3.5" aria-hidden strokeWidth={1.75} /> : null}
+                {v.label}
+              </span>
+            ),
+          }
+        })}
+      />
+    ) : null
+
+  /**
+   * A view that renders its own body instead of the table — the aggregated one.
+   *
+   * Handed the register's own summary and the rows it already fetched, under the
+   * filters the table was fetched with, so a breakdown can never answer a
+   * differently filtered question from the register it sits in.
+   */
+  const viewBody = useMemo(() => {
+    if (!activeView?.render || summary === undefined || !result.data) return null
+    return activeView.render({ summary, rows, values, query: apiFilters, loading: result.loading })
+  }, [activeView, summary, rows, values, apiFilters, result.loading, result.data])
+
+  // Handed the same summary and rows the table has, so a chip beside the table
+  // cannot state a figure the table below it disagrees with.
+  const tableActions =
+    typeof config.tableActions === 'function'
+      ? summary !== undefined
+        ? config.tableActions({ summary, rows, values, query: apiFilters, loading: result.loading })
+        : null
+      : config.tableActions
+
+  const tableCardActions = (
+    <div className="flex flex-wrap items-center gap-2">
+      {tableActions}
+      {/* The same dialog the toolbar's Columns button opens — one flag, two
+          doors, so the choice cannot be made twice over itself. */}
+      <Button
+        variant="secondary"
+        size="xs"
+        icon={Columns3}
+        onClick={() => setColumnsOpen(true)}
+        disabled={!columnsReady || columnsLockedByView}
+        title={
+          columnsLockedByView
+            ? `The ${activeView?.label} view shows a fixed set of columns`
+            : undefined
+        }
+      >
+        Customize columns
+      </Button>
+    </div>
+  )
 
   // The header takes the lead line; `description` in full is what the export and
   // the printed sheet carry. Sentence-ended text is left as it is rather than
@@ -640,7 +801,7 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
             onChange={params.setFilter}
             // Both ends of a period in one navigation — see useListParams.setFilters.
             onChangeMany={params.setFilters}
-            onReset={params.reset}
+            onReset={resetFilters}
             activeCount={activeFilterCount}
             onApply={result.reload}
             applying={result.loading}
@@ -655,7 +816,7 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
             onChange={params.setFilter}
             // Both ends of a period in one navigation — see useListParams.setFilters.
             onChangeMany={params.setFilters}
-            onReset={params.reset}
+            onReset={resetFilters}
             showReset={Object.keys(state.filters).length > 0}
             ctx={ctx}
             searchInputRef={searchInputRef}
@@ -721,6 +882,21 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
             title={config.requireFiltersMessage ?? 'Choose a filter to run this register'}
             description={`Waiting for: ${missingRequired.join(', ')}.`}
           />
+        ) : viewBody ? (
+          // The aggregated view, in the same card the table uses so the switcher
+          // does not appear to move when the reader presses it.
+          <Card padding="none" className="flex min-h-0 flex-col">
+            <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-gray-200 px-4 py-3 print:hidden">
+              <div className="min-w-0">
+                {viewSwitcher}
+                {activeView?.hint ? (
+                  <p className="mt-0.5 truncate text-[11px] text-gray-400">{activeView.hint}</p>
+                ) : null}
+              </div>
+              <div className="shrink-0">{tableCardActions}</div>
+            </div>
+            <div className="scrollbar-thin min-h-0 flex-1 overflow-auto p-4">{viewBody}</div>
+          </Card>
         ) : (
           <SmartTable
             {...REPORT_TABLE_PROPS}
@@ -734,24 +910,9 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
             loading={result.loading}
             error={tableError}
             title={config.tableTitle ?? config.title}
-            description={config.tableHint}
-            headerAction={
-              <div className="flex flex-wrap items-center gap-2">
-                {config.tableActions}
-                {/* The same dialog the toolbar's Columns button opens — one
-                    flag, two doors, so the choice cannot be made twice over
-                    itself. */}
-                <Button
-                  variant="secondary"
-                  size="xs"
-                  icon={Columns3}
-                  onClick={() => setColumnsOpen(true)}
-                  disabled={!columnsReady}
-                >
-                  Customize columns
-                </Button>
-              </div>
-            }
+            headerLead={viewSwitcher}
+            description={activeView?.hint ?? config.tableHint}
+            headerAction={tableCardActions}
             // The shell locks the page to the viewport at `taller:` in the panel
             // layout and at `tall:` otherwise; the table has to fill against the
             // same breakpoint or it fills a parent that never got a height.
@@ -766,19 +927,19 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
             totals={totals}
             minWidth={config.minWidth ?? 1100}
             empty={
-              activeFilterCount === 0 && config.emptyUnfiltered ? (
-                config.emptyUnfiltered
-              ) : (
+              emptyUnfiltered ?? (
                 <EmptyState
                   title="No rows match these filters"
                   description={
-                    config.emptyMessage ?? 'Widen the period or clear a filter and try again.'
+                    activeView?.emptyMessage ??
+                    config.emptyMessage ??
+                    'Widen the period or clear a filter and try again.'
                   }
                   // The way out of an over-filtered register, where the reader
                   // is already looking. Offered only when there is something to
                   // clear — a button that does nothing is worse than no button.
                   action={activeFilterCount > 0 ? 'Clear filters' : undefined}
-                  onAction={params.reset}
+                  onAction={resetFilters}
                 />
               )
             }

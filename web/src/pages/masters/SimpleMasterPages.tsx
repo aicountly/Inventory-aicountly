@@ -1,5 +1,5 @@
 import { MasterPage } from '../../masters/MasterPage'
-import { batchesConfig, brandsConfig, itemGroupsConfig, locationsConfig, stockCategoriesConfig, uomConfig, warehouseGroupsConfig, warehousesConfig } from '../../masters/configs'
+import { batchesConfig, itemGroupsConfig, locationsConfig, stockCategoriesConfig, uomConfig, warehousesConfig } from '../../masters/configs'
 
 /** Master screens that are entirely described by a config. */
 
@@ -13,17 +13,22 @@ export function StockCategoriesPage() {
   return <MasterPage config={stockCategoriesConfig} breadcrumbs={crumbs} />
 }
 
-export function BrandsPage() {
-  return <MasterPage config={brandsConfig} breadcrumbs={crumbs} />
-}
+/*
+ * Brands is NOT here.
+ *
+ * It outgrew the generic master screen: an item count worth clicking through, a
+ * revenue column that belongs to another product, a linkage problem worth
+ * surfacing and a create form with four fields rather than three. It has its
+ * own screen at `pages/masters/brands/BrandsPage.tsx`, routed directly.
+ */
 
 export function UomPage() {
   return <MasterPage config={uomConfig} breadcrumbs={crumbs} />
 }
 
-export function WarehouseGroupsPage() {
-  return <MasterPage config={warehouseGroupsConfig} breadcrumbs={crumbs} />
-}
+/* Warehouse groups is NOT here: it has its own screen
+   (masters/warehouseGroups/WarehouseGroupsPage) with list / tree / card views,
+   live figures and a contextual panel, which a MasterConfig cannot describe. */
 
 export function WarehousesPage() {
   return <MasterPage config={warehousesConfig} breadcrumbs={crumbs} />
