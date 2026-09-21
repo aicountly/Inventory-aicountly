@@ -19,6 +19,14 @@ interface ImportMetaEnv {
    * masters/warehouseGroups/warehouseGroupsAi.ts and services/uomAiApi.ts.
    */
   readonly VITE_INVENTORY_AI_PATH?: string
+
+  /* Feature flags — see src/config/features.ts. Unset means on; `0`/`false`/`off` takes it out. */
+  readonly VITE_FEATURE_JOB_WORK_ASSISTANT?: string
+  readonly VITE_FEATURE_JOB_WORK_SMART_WARNINGS?: string
+  readonly VITE_FEATURE_JOB_WORK_TIMELINE?: string
+  readonly VITE_FEATURE_JOB_WORK_IMPORT?: string
+  readonly VITE_FEATURE_JOB_WORK_BARCODE_SCAN?: string
+
   /**
    * Material receipt integrations, each off until the endpoint behind it exists.
    * See documents/receipt/integrations.ts — every one of these is a LIVE API

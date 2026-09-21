@@ -256,11 +256,14 @@ class ItemsController extends BaseController
         }
         $cmpId = (int) $a['ctx']['cmp_id'];
         $code = trim((string) rawurldecode((string) $code));
-        $row = $this->baseQuery($cmpId)->where('i.is_active', 1)->groupStart()->where('i.item_upc', $code)->orWhere('i.item_sku', $code)->groupEnd()->select(self::LIST_COLUMNS)->get()->getRowArray();
+        $row = $this->baseQuery($cmpId)->where('i.is_active', 1)->groupStart()->where('i.item_upc', $code)->orWhere('i.item_sku', $code)->groupEnd()->select(self::LIST_COLUMNS . ', i.default_warehouse_id')->get()->getRowArray();
         if (!$row) {
             return $this->failStructured(404, 'not_found', 'No item with that barcode / SKU');
         }
         $this->attachStock($cmpId, $rows = [$row], (int) $this->request->getGet('warehouse_id') ?: null);
+        // Same payload shape as the typeahead: a line built from a scan has to
+        // offer the item's alternate units, or scanning a case books a piece.
+        $rows[0]['units'] = $this->unitsForItems($cmpId, [(int) $rows[0]['item_id']])[(int) $rows[0]['item_id']] ?? [];
 
         return $this->respond(['data' => $rows[0]]);
     }

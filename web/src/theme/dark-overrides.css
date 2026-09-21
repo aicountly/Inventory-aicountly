@@ -195,6 +195,9 @@
 .dark .focus\:bg-red-50:focus {
   background-color: rgb(127 29 29 / 0.22);
 }
+.dark .hover\:bg-violet-50:hover {
+  background-color: rgb(76 29 149 / 0.3);
+}
 .dark .bg-sky-50 {
   background-color: rgb(12 74 110 / 0.22);
 }
@@ -279,7 +282,8 @@
 }
 
 .dark .border-emerald-100,
-.dark .border-emerald-200 {
+.dark .border-emerald-200,
+.dark .border-emerald-300 {
   border-color: rgb(6 95 70 / 0.5);
 }
 .dark .border-amber-100,

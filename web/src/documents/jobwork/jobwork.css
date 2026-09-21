@@ -1,0 +1,125 @@
+/*
+ * Job Work Inward / Outward.
+ *
+ * Almost everything on these screens is a Tailwind utility on the shared
+ * primitives in src/ui, which is where the look belongs. What is left here is
+ * the handful of rules utilities cannot express, plus one bridge:
+ *
+ * The item, batch, serial and warehouse pickers are the SAME components every
+ * other document editor uses, and they are styled with the hand-written
+ * `.input` / `.select` / `.btn` classes from components/ui.css. Rather than
+ * fork four pickers to restyle them — two copies of a batch picker is how the
+ * next batch rule gets fixed in only one of them — the controls are brought
+ * into step INSIDE this screen only, against the same design tokens the rest of
+ * the app already uses. Nothing here leaks: every rule is scoped to .jw-page.
+ *
+ * Dark mode needs no block of its own. Everything below resolves through the
+ * shared tokens (--border-strong, --surface, --fg) or Tailwind colours the
+ * theme layer already remaps, so the screen follows the app's theme rather than
+ * carrying a second one.
+ */
+
+.jw-page .input,
+.jw-page .select,
+.jw-page .textarea {
+  min-height: 2rem;
+  padding: 0.25rem 0.625rem;
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.jw-page .textarea {
+  min-height: 4rem;
+  padding: 0.5rem 0.75rem;
+}
+
+/* The line grid's controls sit inside 2rem-high cells; the pickers' buttons
+   have to match or every row is a different height. */
+.jw-page .jw-lines .btn {
+  min-height: 2rem;
+  padding: 0.25rem 0.625rem;
+  border-radius: 0.5rem;
+  font-size: 0.8125rem;
+}
+
+.jw-page .jw-lines .btn-sm {
+  padding: 0.125rem 0.5rem;
+}
+
+/* The item typeahead is absolutely positioned against its cell; inside a table
+   with `overflow-x: auto` it needs to sit above the rows below it. */
+.jw-page .typeahead {
+  position: relative;
+  min-width: 13rem;
+}
+
+.jw-page .typeahead-list {
+  z-index: 30;
+}
+
+.jw-page .typeahead-selected {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.375rem;
+  min-width: 13rem;
+}
+
+/*
+ * Long item names.
+ *
+ * A grid column cannot both fit "Stainless steel gear housing, 42 mm, hardened"
+ * and stay narrow enough for the twelve columns beside it. The name truncates
+ * and carries its full text in a title attribute, which is what the cell's
+ * markup already sets.
+ */
+.jw-page .typeahead-selected > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * The grid scrolls sideways on a narrow screen. Pinning the row number and the
+ * item keeps the reader's place: a quantity twelve columns to the right means
+ * nothing once the item name has scrolled off.
+ */
+@media (min-width: 768px) {
+  /*
+   * Only the item column pins, and it pins at 0 rather than at the width of
+   * the row-number column beside it. A hardcoded offset is a measurement of
+   * another cell, and it is wrong the moment that cell renders a pixel
+   * narrower — the pinned column shifts right and paints over the header next
+   * to it even before anything has been scrolled. At 0 the cell's static
+   * position is already to the right of the threshold, so it does not move
+   * until the grid is actually scrolled, and then it covers the row number,
+   * which is the column a reader needs least.
+   */
+  .jw-page .jw-lines thead th:nth-child(2),
+  .jw-page .jw-lines tbody td:nth-child(2) {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    background: var(--surface);
+    box-shadow: 1px 0 0 0 var(--border);
+  }
+
+  .jw-page .jw-lines thead th:nth-child(2) {
+    z-index: 3;
+    background: var(--surface-2);
+  }
+}
+
+/* A sticky cell paints its own background, so the row states have to reach it
+   too or a highlighted row is striped. */
+.jw-page .jw-lines tbody tr:hover td:nth-child(2) {
+  background: var(--surface-2);
+}
+
+@media print {
+  .jw-page .jw-lines thead th,
+  .jw-page .jw-lines tbody td {
+    position: static;
+  }
+}
