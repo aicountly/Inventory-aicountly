@@ -63,12 +63,17 @@ final class StockCategoryUsageTest extends IntegrationTestCase
         return $method->invoke(new StockCategoriesController(), $this->cmpId, $rows);
     }
 
-    private function sortExpression(string $sort): ?string
+    /** The list builder with the controller's own sort applied, as `index()` builds it. */
+    private function sortedIds(string $sort, string $order): array
     {
-        $method = new \ReflectionMethod(StockCategoriesController::class, 'sortExpression');
-        $method->setAccessible(true);
+        $builder = $this->db->table('inv_stock_categories')
+            ->where('cmp_id', $this->cmpId)->where('deleted_at', null);
 
-        return $method->invoke(new StockCategoriesController(), $this->cmpId, $sort);
+        $method = new \ReflectionMethod(StockCategoriesController::class, 'applySort');
+        $method->setAccessible(true);
+        $method->invoke(new StockCategoriesController(), $builder, $sort, $order);
+
+        return array_map(static fn ($r) => (int) $r['stock_cat_id'], $builder->get()->getResultArray());
     }
 
     // ---- item_count -------------------------------------------------------
@@ -132,26 +137,26 @@ final class StockCategoryUsageTest extends IntegrationTestCase
         $this->makeCategorisedItem('Two', $b);
         $this->makeCategorisedItem('Three', $c);
 
-        $expression = $this->sortExpression('item_count');
-        $this->assertNotNull($expression);
-
-        $rows = $this->db->table('inv_stock_categories')
-            ->select('stock_cat_id')
-            ->where('cmp_id', $this->cmpId)->where('deleted_at', null)
-            ->orderBy($expression . ' DESC', '', false)
-            ->orderBy('cat_name', 'ASC')
-            ->get()->getResultArray();
-
-        $this->assertSame([$b, $c, $a], array_map(static fn ($r) => (int) $r['stock_cat_id'], $rows));
+        $this->assertSame([$b, $c, $a], $this->sortedIds('item_count', 'DESC'));
+        $this->assertSame([$a, $c, $b], $this->sortedIds('item_count', 'ASC'));
     }
 
-    public function testOnlyItemCountGetsARawSortExpression(): void
+    public function testItemCountIsTheOnlySortThisControllerAddsToTheAllowList(): void
     {
-        // Every other key must fall through to the base column allow-list, or a
-        // `?sort=` value could reach the ORDER BY unescaped.
-        $this->assertNull($this->sortExpression('cat_name'));
-        $this->assertNull($this->sortExpression('updated_at'));
-        $this->assertNull($this->sortExpression('1); DROP TABLE inv_items; --'));
+        // `index()` only ever passes a key it has already whitelisted, and the
+        // list a subclass may widen is exactly this one. Anything else must fall
+        // through to the base behaviour rather than reaching the ORDER BY.
+        $property = new \ReflectionProperty(StockCategoriesController::class, 'extraSortColumns');
+        $property->setAccessible(true);
+        $this->assertSame(['item_count'], $property->getValue(new StockCategoriesController()));
+    }
+
+    public function testAnOrdinaryColumnStillSortsByItself(): void
+    {
+        $b = $this->makeCategory('Beta');
+        $a = $this->makeCategory('Alpha');
+
+        $this->assertSame([$a, $b], $this->sortedIds('cat_name', 'ASC'));
     }
 
     // ---- summary ----------------------------------------------------------

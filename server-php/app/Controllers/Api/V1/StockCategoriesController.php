@@ -16,6 +16,8 @@ class StockCategoriesController extends MasterController
     protected array $required = ['cat_name'];
     protected array $searchColumns = ['cat_alias'];
     protected array $deleteGuards = [['table' => 'inv_items', 'column' => 'stock_cat_id', 'label' => 'item(s)']];
+    /** Not a column of inv_stock_categories — see applySort(). */
+    protected array $extraSortColumns = ['item_count'];
 
     /**
      * How many items each category on this page carries, in ONE grouped query.
@@ -44,21 +46,31 @@ class StockCategoriesController extends MasterController
     }
 
     /**
-     * `?sort=item_count` — "most items" / "least items" on the list toolbar.
+     * `?sort=item_count` — "Most items" / "Least items" on the list toolbar.
      *
      * It orders by the same count `decorateRows()` prints, so the ranking is
      * over every category in the company rather than over the page that
-     * happened to be fetched. `$cmpId` is an int cast by the caller, so the
-     * unescaped expression carries no caller input.
+     * happened to be fetched — "most items" that only ranks the fifty rows
+     * already fetched is a lie the footer contradicts. Same shape as
+     * BrandsController: the subquery is selected under the name the sort uses,
+     * and the tenant comes from the row rather than from interpolated input.
      */
-    protected function sortExpression(int $cmpId, string $sort): ?string
+    protected function applySort($builder, string $sort, string $order): void
     {
-        if ($sort !== 'item_count') {
-            return null;
-        }
+        if ($sort === 'item_count') {
+            $builder
+                ->select('inv_stock_categories.*')
+                ->select(
+                    '(SELECT COUNT(*) FROM inv_items i WHERE i.stock_cat_id = inv_stock_categories.stock_cat_id'
+                    . ' AND i.cmp_id = inv_stock_categories.cmp_id AND i.deleted_at IS NULL) AS item_count',
+                    false,
+                )
+                ->orderBy('item_count', $order)
+                ->orderBy('cat_name', 'ASC');
 
-        return '(SELECT COUNT(*) FROM inv_items i WHERE i.stock_cat_id = inv_stock_categories.stock_cat_id'
-            . ' AND i.cmp_id = ' . $cmpId . ' AND i.deleted_at IS NULL)';
+            return;
+        }
+        parent::applySort($builder, $sort, $order);
     }
 
     /**
@@ -85,7 +97,7 @@ class StockCategoriesController extends MasterController
      * the SQL IS the behaviour here — a join that counts soft-deleted items, a
      * SUM over an empty table returning NULL, a `most_used` that ties — and the
      * only way to hold that is to run it against a real PostgreSQL
-     * (StockCategorySummaryTest), not through an authorised HTTP round trip.
+     * (StockCategoryUsageTest), not through an authorised HTTP round trip.
      *
      * @return array<string, mixed>
      */

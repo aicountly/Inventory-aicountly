@@ -13,11 +13,13 @@
  * says so in words.
  *
  * Wiring it up later is one environment variable plus a real endpoint: set
- * `VITE_AI_CATEGORY_ANALYSIS_PATH` to an Inventory API path (for example
- * `v1/ai/stock-categories/analyse`) and the CTA starts calling it. The
- * response is read defensively — anything that is not a well-formed finding is
- * dropped, because a half-parsed model response is the same problem as a
- * fabricated one.
+ * `VITE_INVENTORY_AI_PATH` — the SAME variable the other masters' AI panels
+ * read (`masters/warehouseGroups/warehouseGroupsAi.ts`, `services/uomAiApi.ts`)
+ * — and the CTA starts calling it. One seam for one service: two names for one
+ * endpoint is how half the screens end up connected and the other half quietly
+ * are not. The response is read defensively — anything that is not a
+ * well-formed finding is dropped, because a half-parsed model response is the
+ * same problem as a fabricated one.
  *
  * The deterministic checks the panel can always run (duplicate names, unused
  * categories, alias collisions) are NOT here: they live in
@@ -28,7 +30,7 @@
 import { api } from './api'
 import type { ItemResponse } from './api'
 
-const CONFIGURED_PATH = (import.meta.env.VITE_AI_CATEGORY_ANALYSIS_PATH ?? '').trim()
+const CONFIGURED_PATH = (import.meta.env.VITE_INVENTORY_AI_PATH ?? '').trim().replace(/^\/+/, '')
 
 export type AiFindingSeverity = 'warning' | 'info'
 

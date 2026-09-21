@@ -3,7 +3,7 @@ import type { LucideIcon } from 'lucide-react'
 import { BreadcrumbHeader } from './BreadcrumbHeader'
 import type { Crumb } from './BreadcrumbBar'
 import { PageShell } from './PageShell'
-import { KeyboardShortcutHint } from '../Kbd'
+import { KeyboardShortcutHint, KeyboardShortcutLegend } from '../Kbd'
 import { usePageKeyboard } from '../../keyboard/usePageKeyboard'
 import { cx } from '../cx'
 
@@ -35,6 +35,14 @@ export interface ReportCompactShellProps {
   fill?: boolean
   /** `page` only: decoration beside the title, shown only at ≥1536px. */
   headerAside?: ReactNode
+  /**
+   * A small pill immediately beside the title — "● Live data".
+   *
+   * Beside the heading rather than in `headerAside`, which is decoration and
+   * disappears below 1536px: a statement about whether the figures under it are
+   * current has to survive a laptop screen.
+   */
+  headerBadge?: ReactNode
   toolbar?: ReactNode
   shortcutKeys?: readonly string[]
   shortcutLabel?: string
@@ -72,6 +80,7 @@ export function ReportCompactShell({
   headerVariant = 'compact',
   fill = true,
   headerAside,
+  headerBadge,
   toolbar,
   shortcutKeys,
   shortcutLabel,
@@ -90,15 +99,30 @@ export function ReportCompactShell({
   const hintKeys = shortcutKeys ?? ['/', 'Ctrl+R', ...(onPrint ? ['Ctrl+P'] : []), 'Esc']
   const hintLabel = shortcutLabel ?? `Search · Refresh${onPrint ? ' · Print' : ''} · Back`
 
-  const showHint = Boolean(onRefresh || onPrint || searchInputRef)
-  const hint = showHint ? (
-    <KeyboardShortcutHint keys={hintKeys} label={hintLabel} className="hidden xl:inline-flex" />
-  ) : null
-
   // In `page` mode the hint drops under the title instead of competing with the
   // buttons. It is a reminder, not a control, and the action row is where the
   // reader's eye goes for something to press.
   const page = headerVariant === 'page'
+
+  const showHint = Boolean(onRefresh || onPrint || searchInputRef)
+  // Under a title there is a whole line to spend, so each chip is printed
+  // beside what it does. The compact header keeps the one-run form: it sits
+  // inline with the buttons, where four labelled pairs would push them off.
+  // An explicit `shortcutKeys` override is honoured in the original form —
+  // a caller that supplied its own keys and label meant that pairing.
+  const hint = !showHint ? null : page && !shortcutKeys ? (
+    <KeyboardShortcutLegend
+      items={[
+        { keys: '/', label: 'Search' },
+        { keys: 'Ctrl+R', label: 'Refresh' },
+        ...(onPrint ? [{ keys: 'Ctrl+P', label: 'Print' }] : []),
+        { keys: 'Esc', label: 'Back' },
+      ]}
+      className="hidden lg:inline-flex"
+    />
+  ) : (
+    <KeyboardShortcutHint keys={hintKeys} label={hintLabel} className="hidden xl:inline-flex" />
+  )
 
   return (
     <PageShell
@@ -118,6 +142,7 @@ export function ReportCompactShell({
         title={title}
         description={description}
         icon={icon}
+        badge={page ? headerBadge : undefined}
         meta={page ? hint : undefined}
         aside={page ? headerAside : undefined}
         actions={
