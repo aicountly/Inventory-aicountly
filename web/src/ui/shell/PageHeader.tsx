@@ -59,12 +59,17 @@ export function PageHeader({
       */}
       <div className="min-w-0 flex-1 md:basis-72 flex items-start gap-3">
         {backTo ? (
+          // `shrink-0` and `whitespace-nowrap` are load-bearing, not polish.
+          // Without them this link is the only shrinkable thing in a row that
+          // also holds a fixed-width icon tile: the flex algorithm takes the
+          // width out of here first, and the register header rendered "← Bac"
+          // with the icon tile sitting on top of the clipped label.
           <Link
             to={backTo}
-            className="mt-1 inline-flex items-center gap-1 text-xs text-gray-500 hover:text-primary"
+            className="mt-0.5 inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-gray-200 bg-white px-2.5 text-xs font-medium text-gray-600 transition-colors hover:border-gray-300 hover:bg-gray-50 hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
             aria-label={backLabel}
           >
-            <ArrowLeft className="w-4 h-4" />
+            <ArrowLeft className="h-4 w-4" aria-hidden />
             <span className="hidden sm:inline">{backLabel}</span>
           </Link>
         ) : null}
