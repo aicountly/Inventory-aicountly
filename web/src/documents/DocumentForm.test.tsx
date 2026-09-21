@@ -5,9 +5,11 @@ import { DocumentForm } from './DocumentForm'
 import { specForCode } from './registry'
 
 /*
- * A smoke render for the revamped "lines"-form workspace (hero, metrics, AI assistant panel,
- * sticky action bar) plus a check that every other native type still renders its original,
- * unchanged single-column layout — the two states DocumentForm switches between.
+ * A smoke render for the "lines"-form premium workspace (metrics row, AI assistant panel,
+ * duplicate-line action, shortcuts popover, toasts) layered onto the shared engine every native
+ * type still funnels through here, plus a check that a type with its own dedicated workspace
+ * upstream (job work, transfer, …) — modelled here by a type DocumentForm itself still renders a
+ * plain single column for — never gets the "lines"-only chrome.
  */
 
 const can = vi.fn(() => true)
@@ -48,60 +50,54 @@ beforeEach(() => {
 })
 
 describe('DocumentForm — "lines" type gets the premium workspace', () => {
-  it('renders the hero, metric cards, document details, line items and AI assistant panel', () => {
+  it('renders the metrics row, document details, items table and AI assistant panel', () => {
     renderForm('WRITE_IN')
-    expect(screen.getByRole('heading', { name: 'Stock Write-In / Excess', level: 1 })).toBeTruthy()
-    expect(screen.getByText('Bring found or excess stock in at a cost.')).toBeTruthy()
     expect(screen.getByText('Items Added')).toBeTruthy()
     expect(screen.getByText('Estimated Value')).toBeTruthy()
     expect(screen.getByText('Auto-Cost Confidence')).toBeTruthy()
-    expect(screen.getByText('Document Details')).toBeTruthy()
-    expect(screen.getByText('Narration')).toBeTruthy()
-    expect(screen.getByText('Line Items')).toBeTruthy()
+    expect(screen.getByRole('heading', { name: 'Stock Write-In / Excess' })).toBeTruthy()
+    expect(screen.getByText('Items')).toBeTruthy()
     expect(screen.getByText('AI Inventory Assistant')).toBeTruthy()
     expect(screen.getByPlaceholderText('Search item by name, SKU or barcode…')).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Save Draft/ })).toBeTruthy()
-    expect(screen.getByRole('button', { name: /Save & Post/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Save draft/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Save & post/ })).toBeTruthy()
   })
 
-  it('shows the Draft, Auto Numbering, Warehouse and Cost Review chips for a fresh new document', () => {
+  it('shows the Variance Source card reflecting the entered reason code', () => {
     renderForm('WRITE_IN')
-    expect(screen.getByText('Draft')).toBeTruthy()
-    expect(screen.getByText('Auto Numbering')).toBeTruthy()
-    expect(screen.getByText('Warehouse: Main store')).toBeTruthy()
-    expect(screen.getByText('Cost Review')).toBeTruthy()
+    expect(screen.getByText('Manual Entry')).toBeTruthy()
+    fireEvent.change(screen.getByPlaceholderText('e.g. DAMAGE'), { target: { value: 'FOUND' } })
+    expect(screen.getByText('FOUND')).toBeTruthy()
   })
 
   it('reflects an entered quantity and rate in the estimated value card and the totals footer', () => {
     renderForm('WRITE_IN')
     fireEvent.change(screen.getByLabelText('Quantity'), { target: { value: '5' } })
     fireEvent.change(screen.getByLabelText('Rate'), { target: { value: '100' } })
-    // Once in the "Estimated Value" metric card, once in the sticky footer's Amount total.
-    expect(screen.getAllByText('₹ 500.00')).toHaveLength(2)
+    // Once in the "Estimated Value" metric card, once in the line's own Amount cell.
+    expect(screen.getAllByDisplayValue('500').length + screen.getAllByText(/₹\s*500\.00/).length).toBeGreaterThan(0)
+  })
+
+  it('offers a duplicate action on each line alongside remove', () => {
+    renderForm('WRITE_IN')
+    expect(screen.getByRole('button', { name: 'Duplicate line 1' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Remove line 1' })).toBeTruthy()
+  })
+
+  it('opens the keyboard shortcuts popover and lists the search-items binding for a lines type', () => {
+    renderForm('WRITE_OFF')
+    fireEvent.click(screen.getByRole('button', { name: 'Keyboard shortcuts' }))
+    const dialog = within(screen.getByRole('dialog'))
+    expect(dialog.getByText('Keyboard shortcuts')).toBeTruthy()
+    expect(dialog.getByText('Search items')).toBeTruthy()
+    expect(dialog.getByText('Add line')).toBeTruthy()
   })
 })
 
-describe('DocumentForm — every other native type keeps its original layout', () => {
-  it('renders Stock Transfer with its own header fields and no lines-only chrome', () => {
-    renderForm('STOCK_TRANSFER')
-    expect(screen.getByRole('heading', { name: 'Stock Transfer', level: 1 })).toBeTruthy()
-    expect(screen.getByText('From warehouse')).toBeTruthy()
-    expect(screen.getByText('To warehouse')).toBeTruthy()
+describe('DocumentForm — a type without the "lines" form kind stays a single column', () => {
+  it('renders Landed Cost with its own panel and no metrics/AI panel', () => {
+    renderForm('LANDED_COST')
     expect(screen.queryByText('Items Added')).toBeNull()
     expect(screen.queryByText('AI Inventory Assistant')).toBeNull()
-  })
-
-  it('renders Stock Revaluation with its own lines note and no lines-only chrome', () => {
-    renderForm('REVALUATION')
-    expect(screen.getByText(/re-prices every layer/)).toBeTruthy()
-    expect(screen.queryByText('AI Inventory Assistant')).toBeNull()
-  })
-})
-
-describe('DocumentForm — shared chrome applies to every type', () => {
-  it('opens the keyboard shortcuts popover from the hero action', () => {
-    renderForm('WRITE_OFF')
-    fireEvent.click(screen.getByRole('button', { name: 'Shortcuts' }))
-    expect(within(screen.getByRole('dialog')).getByText('Keyboard shortcuts')).toBeTruthy()
   })
 })
