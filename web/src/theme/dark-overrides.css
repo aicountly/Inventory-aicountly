@@ -258,6 +258,10 @@
 .dark .bg-red-50\/30 {
   background-color: rgb(127 29 29 / 0.07);
 }
+/* The skipped-rows box in the material issue import dialog. */
+.dark .bg-amber-50\/40 {
+  background-color: rgb(120 53 15 / 0.09);
+}
 
 /* The -100 step is the hover of a -50 wash, so it lands one notch stronger than
    the resting tint rather than on the light pastel. */
