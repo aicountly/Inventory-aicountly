@@ -42,7 +42,7 @@ export interface Brand extends AuditFields {
   brand_uuid?: string
   brand_name: string
   brand_alias: string | null
-  /** Short handle, unique per company where one was given (migration 010). */
+  /** Short handle, unique per company where one was given (migration 011). */
   brand_code?: string | null
   description?: string | null
   is_active: number

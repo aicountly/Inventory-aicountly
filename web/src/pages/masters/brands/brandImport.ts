@@ -19,7 +19,7 @@
  * summary reports what the API said row by row.
  */
 
-/** Limits enforced by the API and the columns behind it (migration 010). */
+/** Limits enforced by the API and the columns behind it (migration 011). */
 export const BRAND_IMPORT_LIMITS = { brand_name: 255, brand_alias: 64, brand_code: 64 } as const
 
 /** Above this the dialog refuses the file rather than firing a request a second for a minute. */
