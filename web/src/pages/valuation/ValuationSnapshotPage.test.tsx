@@ -106,11 +106,29 @@ function renderPage(url = '/valuation?limit=25&method=FIFO&as_of=2026-09-15') {
   )
 }
 
+/**
+ * Click an export control once it is actually usable.
+ *
+ * The toolbar renders Print and Export before the snapshot lands and leaves
+ * them DISABLED until it does — `ExportActions` returns early from the print
+ * handler while `disabled` is true, and the menu never opens. Waiting only for
+ * the button to EXIST therefore clicks a dead control on any machine slow
+ * enough to paint before the fetch resolves; the assertion that follows then
+ * reports a mock that was never called, and the test passes locally and fails
+ * on a loaded CI runner. `.disabled` rather than a jest-dom matcher: this
+ * project's test setup does not install them.
+ */
+async function clickWhenEnabled(name: RegExp): Promise<HTMLElement> {
+  const button = await screen.findByRole('button', { name })
+  await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(button)
+  return button
+}
+
 describe('ValuationSnapshotPage exports', () => {
   it('puts the totals under the columns they belong to, and nowhere else', async () => {
     renderPage()
-    await waitFor(() => expect(screen.getByRole('button', { name: /print/i })).toBeTruthy())
-    fireEvent.click(screen.getByRole('button', { name: /print/i }))
+    await clickWhenEnabled(/print/i)
     await waitFor(() => expect(printTabular).toHaveBeenCalledOnce())
 
     const sheet = printTabular.mock.calls[0][0]
@@ -128,8 +146,7 @@ describe('ValuationSnapshotPage exports', () => {
 
   it('carries the server summary and the query onto the sheet', async () => {
     renderPage()
-    await waitFor(() => expect(screen.getByRole('button', { name: /print/i })).toBeTruthy())
-    fireEvent.click(screen.getByRole('button', { name: /print/i }))
+    await clickWhenEnabled(/print/i)
     await waitFor(() => expect(printTabular).toHaveBeenCalledOnce())
 
     const sheet = printTabular.mock.calls[0][0]
@@ -147,8 +164,7 @@ describe('ValuationSnapshotPage exports', () => {
     // An as-at date that is NOT today, so the two dates in the name are
     // distinguishable and the assertion cannot pass by coincidence.
     renderPage('/valuation?limit=25&method=FIFO&as_of=2026-03-31')
-    await waitFor(() => expect(screen.getByRole('button', { name: /export/i })).toBeTruthy())
-    fireEvent.click(screen.getByRole('button', { name: /export/i }))
+    await clickWhenEnabled(/export/i)
     fireEvent.click(screen.getByRole('menuitem', { name: /CSV/ }))
     await waitFor(() => expect(downloadCsv).toHaveBeenCalledOnce())
 
@@ -161,8 +177,7 @@ describe('ValuationSnapshotPage exports', () => {
 
   it('names the cost columns as valuation, not as a price', async () => {
     renderPage()
-    await waitFor(() => expect(screen.getByRole('button', { name: /export/i })).toBeTruthy())
-    fireEvent.click(screen.getByRole('button', { name: /export/i }))
+    await clickWhenEnabled(/export/i)
     fireEvent.click(screen.getByRole('menuitem', { name: /CSV/ }))
     await waitFor(() => expect(downloadCsv).toHaveBeenCalledOnce())
 

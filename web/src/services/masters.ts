@@ -35,13 +35,62 @@ export interface StockCategory extends AuditFields {
   cat_name: string
   cat_alias: string | null
   is_active: number
+  /** Items pointing at this category — sent by the API, never counted client-side. */
+  item_count?: number
 }
 
 export interface Brand extends AuditFields {
   brand_id: number
+  brand_uuid?: string
   brand_name: string
   brand_alias: string | null
+  /** Short handle, unique per company where one was given (migration 012). */
+  brand_code?: string | null
+  description?: string | null
   is_active: number
+  /**
+   * Items filed under this brand.
+   *
+   * Counted by the API over the whole company in one grouped query, never by
+   * the browser from the page on screen — a figure derived from 50 of 431 rows
+   * would contradict the footer beside it.
+   */
+  item_count?: number
+}
+
+/**
+ * `GET /v1/brands/metrics` — the figures above the Brands list.
+ *
+ * Company-wide and filter-independent on purpose: the cards describe the brand
+ * master, and clicking one filters the list rather than redefining the figure.
+ *
+ * Every field here is counted out of Inventory's own tables. There is no sales
+ * figure in this shape and there will not be one: a brand's turnover belongs to
+ * Books and is read live from `brandAnalyticsApi`, never stored here.
+ */
+export interface BrandMetrics {
+  total: number
+  active: number
+  inactive: number
+  new_this_month: number
+  new_prev_month: number
+  /** Brands nothing is filed under — the one operational fact this screen can act on. */
+  without_items: number
+  with_items: number
+  /** Inventory's own leader board: most items, NOT most revenue. */
+  top_by_items: { brand_id: number; brand_name: string; item_count: number } | null
+  as_of: string
+}
+
+/** Filters the brands list endpoint understands beyond the shared ListQuery. */
+export interface BrandListQuery extends ListQuery {
+  /** `active` | `inactive` | omitted for both. */
+  status?: string
+  /** `YYYY-MM-DD`, inclusive at both ends. */
+  created_from?: string
+  created_to?: string
+  /** `'1'` only brands with items, `'0'` only brands with none. */
+  has_items?: string
 }
 
 export interface Uom extends AuditFields {
@@ -52,13 +101,36 @@ export interface Uom extends AuditFields {
   uqc_gst: string | null
   decimal_places: number
   is_active: number
+  /**
+   * Distinct items naming this unit — base, purchase, sales or an alternate
+   * unit line. Counted live by the API on every read, never stored on the row,
+   * and exactly what the delete guard refuses on.
+   */
+  usage_count?: number
+  /**
+   * `standard` when `uqc_gst` is a code the GST return schema knows, so the
+   * unit is reportable as it stands; `custom` when it is not and has to be
+   * mapped before filing. It is NOT a claim about who created the unit — the
+   * table holds no provenance.
+   */
+  uom_type?: 'standard' | 'custom'
 }
 
 export interface WarehouseGroup extends AuditFields {
   warehouse_group_id: number
   grp_name: string
+  /** Short handle, unique per company, upper-cased by the API. */
+  grp_code: string | null
+  description: string | null
   parent_grp_id: number | null
   is_active: number
+  /** Warehouses naming this group. Decorated by the API, never counted here. */
+  warehouse_count?: number
+  /** Groups naming this one as their parent. */
+  child_count?: number
+  /** Member display name for `created_by`; null when the actor is not a member. */
+  created_by_name?: string | null
+  updated_by_name?: string | null
 }
 
 export type WarehouseType = 'standard' | 'transit' | 'damaged' | 'quarantine' | 'consignment' | 'job_worker' | 'virtual'
@@ -134,6 +206,14 @@ export interface StockSummary {
   reserved: number
 }
 
+/** Where a batch is sitting, from the list's grouped balance query. */
+export interface BatchWarehouseStock {
+  warehouse_id: number | null
+  warehouse_name: string | null
+  warehouse_code: string | null
+  on_hand: number
+}
+
 export interface Batch extends AuditFields {
   batch_id: number
   batch_uuid?: string
@@ -147,9 +227,20 @@ export interface Batch extends AuditFields {
   attributes: Record<string, unknown> | null
   item_name: string | null
   item_sku: string | null
+  item_grp_id?: number | null
+  stock_cat_id?: number | null
+  brand_id?: number | null
+  /** The item's group and stock category, joined by the API for the list. */
+  item_group_name?: string | null
+  stock_category_name?: string | null
   unit_id?: number | null
   unit_symbol: string | null
+  /** The unit's precision — what a quantity may be rounded to, never guessed. */
+  decimal_places?: number | null
   stock?: StockSummary
+  /** `with_stock=1` only: the warehouses holding it, biggest first. */
+  warehouses?: BatchWarehouseStock[]
+  warehouse_count?: number
 }
 
 export type SerialStatus = 'expected' | 'in_stock' | 'reserved' | 'issued' | 'in_transit' | 'damaged' | 'returned' | 'scrapped'
@@ -214,7 +305,28 @@ export function crud<T>(slug: string): CrudApi<T> {
 
 export const itemGroupsApi = crud<ItemGroup>('item-groups')
 export const stockCategoriesApi = crud<StockCategory>('stock-categories')
-export const brandsApi = crud<Brand>('brands')
+/**
+ * Brands carry two verbs the generic CRUD factory does not: the metrics strip
+ * above the list, and a status flip that does not make the caller resend the
+ * whole record. Same shape as `serialsApi` below — spread the factory, add what
+ * is genuinely this master's own.
+ */
+const brandsCrud = crud<Brand>('brands')
+export const brandsApi = {
+  ...brandsCrud,
+  async metrics(signal?: AbortSignal): Promise<BrandMetrics> {
+    return (await api.get<ItemResponse<BrandMetrics>>('v1/brands/metrics', { signal })).data
+  },
+  /**
+   * Activate / deactivate without restating the record.
+   *
+   * The API merges the body over the stored row, so sending only the flag
+   * cannot blank a description that another tab edited a second ago.
+   */
+  setActive(id: number, active: boolean): Promise<Brand> {
+    return brandsCrud.update(id, { is_active: active ? 1 : 0 })
+  },
+}
 export const uomApi = crud<Uom>('uom')
 export const warehouseGroupsApi = crud<WarehouseGroup>('warehouse-groups')
 export const warehousesApi = crud<Warehouse>('warehouses')

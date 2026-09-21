@@ -98,6 +98,9 @@ const AGE_TONE: Record<AgeBucketKey, Tone> = {
   '180_plus': 'critical',
 }
 
+/** Which figure the ageing panel is split by. Value is the default. */
+export type AgeingBasis = 'value' | 'quantity'
+
 export interface AgeingView {
   /** Buckets with a non-negative value — the ones a share can be taken of. */
   buckets: SeriesItem[]
@@ -109,6 +112,12 @@ export interface AgeingView {
   reportedTotal: number
   /** True when a share breakdown would be misleading and is not drawn. */
   compositionInvalid: boolean
+  /** The basis this view was built on. */
+  basis: AgeingBasis
+  /** The centre figure for the donut, already formatted for `basis`. */
+  totalDisplay: string
+  /** What the centre figure is, in two words. */
+  totalLabel: string
 }
 
 /**
@@ -119,9 +128,21 @@ export interface AgeingView {
  * remaining slices add to more than the whole, so the shares here are taken
  * over the non-negative buckets only and the screen says so.
  */
-export function ageingView(summary: StockAgeingSummary | null, asOf: string): AgeingView {
+export function ageingView(summary: StockAgeingSummary | null, asOf: string, basis: AgeingBasis = 'value'): AgeingView {
+  const byValue = basis === 'value'
+  const format = (n: number) => (byValue ? formatCurrencyCompact(n) : `${formatQtyCompact(n)} units`)
+
   if (!summary) {
-    return { buckets: [], negatives: [], positiveTotal: 0, reportedTotal: 0, compositionInvalid: false }
+    return {
+      buckets: [],
+      negatives: [],
+      positiveTotal: 0,
+      reportedTotal: 0,
+      compositionInvalid: false,
+      basis,
+      totalDisplay: format(0),
+      totalLabel: byValue ? 'Total value' : 'Total quantity',
+    }
   }
 
   const rows = AGE_ORDER.map((key) => ({
@@ -130,29 +151,46 @@ export function ageingView(summary: StockAgeingSummary | null, asOf: string): Ag
     bucket: summary.buckets[key] ?? { qty: 0, value: 0 },
   }))
 
-  const positives = rows.filter((r) => r.bucket.value >= 0)
-  const negatives = rows.filter((r) => r.bucket.value < 0)
-  const positiveTotal = positives.reduce((acc, r) => acc + r.bucket.value, 0)
-  const max = Math.max(...positives.map((r) => r.bucket.value), 0)
+  // The basis picks the measured figure; the "cannot be a slice" rule then
+  // applies to THAT figure. A bucket can be positive in value and negative in
+  // quantity, so which buckets are exceptions genuinely depends on the toggle.
+  const measure = (b: { qty: number; value: number }) => (byValue ? b.value : b.qty)
 
-  const toItem = (r: (typeof rows)[number], useShare: boolean): SeriesItem => ({
-    key: r.key,
-    label: r.label,
-    value: r.bucket.value,
-    display: formatCurrencyCompact(r.bucket.value),
-    share: useShare ? percentOf(r.bucket.value, positiveTotal) : 0,
-    scale: max > 0 ? Math.min(100, (Math.abs(r.bucket.value) / max) * 100) : 0,
-    tone: AGE_TONE[r.key],
-    sub: `${formatQtyCompact(r.bucket.qty)} units`,
-    to: drill.stockAgeing({ asOf }),
-  })
+  const positives = rows.filter((r) => measure(r.bucket) >= 0)
+  const negatives = rows.filter((r) => measure(r.bucket) < 0)
+  const positiveTotal = positives.reduce((acc, r) => acc + measure(r.bucket), 0)
+  const max = Math.max(...positives.map((r) => measure(r.bucket)), 0)
+
+  const toItem = (r: (typeof rows)[number], useShare: boolean): SeriesItem => {
+    const n = measure(r.bucket)
+    return {
+      key: r.key,
+      label: r.label,
+      value: n,
+      display: format(n),
+      share: useShare ? percentOf(n, positiveTotal) : 0,
+      scale: max > 0 ? Math.min(100, (Math.abs(n) / max) * 100) : 0,
+      tone: AGE_TONE[r.key],
+      // The secondary line always shows the OTHER measure, so switching the
+      // toggle never hides a figure — it swaps which one is the headline.
+      sub: byValue ? `${formatQtyCompact(r.bucket.qty)} units` : formatCurrencyCompact(r.bucket.value),
+      to: drill.stockAgeing({ asOf }),
+    }
+  }
 
   return {
     buckets: positives.map((r) => toItem(r, true)),
     negatives: negatives.map((r) => toItem(r, false)),
     positiveTotal,
-    reportedTotal: summary.total_value,
+    reportedTotal: byValue ? summary.total_value : summary.total_qty,
     compositionInvalid: negatives.length > 0 || positiveTotal <= 0,
+    basis,
+    // The centre of the donut reports the base the slices were taken over, not
+    // the report's own total: with a negative bucket excluded those differ, and
+    // a centre figure the slices do not add to is the thing this file exists
+    // to prevent.
+    totalDisplay: format(positiveTotal),
+    totalLabel: byValue ? 'Total value' : 'Total quantity',
   }
 }
 

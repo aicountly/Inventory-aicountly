@@ -225,13 +225,24 @@ describe('buildKpiCards', () => {
 describe('warehouseSeries', () => {
   const summary: WarehouseStockSummary = {
     rows: 3,
+    items: 3,
+    warehouses: 3,
+    active_warehouses: 2,
     closing_qty: 300,
     closing_value: 1000,
+    reserved_qty: 0,
+    available_qty: 300,
     by_warehouse: [
-      { warehouse_id: 2, warehouse_name: 'Pune', closing_qty: 100, closing_value: 250 },
-      { warehouse_id: 1, warehouse_name: 'Mumbai', closing_qty: 150, closing_value: 600 },
-      { warehouse_id: null, warehouse_name: null, closing_qty: 50, closing_value: 150 },
+      { warehouse_id: 2, warehouse_name: 'Pune', closing_qty: 100, closing_value: 250, items: 1 },
+      { warehouse_id: 1, warehouse_name: 'Mumbai', closing_qty: 150, closing_value: 600, items: 1 },
+      { warehouse_id: null, warehouse_name: null, closing_qty: 50, closing_value: 150, items: 1 },
     ],
+    health: { negative: 0, out: 0, reorder: 0, low: 0, overstocked: 0, healthy: 3 },
+    health_items: { negative: 0, out: 0, reorder: 0, low: 0, overstocked: 0, healthy: 3 },
+    health_filter: null,
+    method: 'AS_PER_MASTER',
+    live_buckets: true,
+    currency: 'INR',
     to: ASOF,
   }
 
@@ -262,11 +273,11 @@ describe('ageingSeries', () => {
     total_qty: 100,
     total_value: 1000,
     buckets: {
-      '0_30': { qty: 40, value: 500 },
-      '31_60': { qty: 20, value: 250 },
-      '61_90': { qty: 10, value: 150 },
-      '91_180': { qty: 20, value: 100 },
-      '180_plus': { qty: 10, value: 0 },
+      '0_30': { qty: 40, value: 500, items: 4 },
+      '31_60': { qty: 20, value: 250, items: 2 },
+      '61_90': { qty: 10, value: 150, items: 2 },
+      '91_180': { qty: 20, value: 100, items: 1 },
+      '180_plus': { qty: 10, value: 0, items: 1 },
     },
     bucket_labels: {
       '0_30': '0-30 days',
@@ -276,6 +287,19 @@ describe('ageingSeries', () => {
       '180_plus': '180+ days',
     },
     as_of: ASOF,
+    weighted_age_days: 45,
+    oldest_days: 200,
+    value_over_90: 100,
+    value_over_180: 0,
+    qty_over_90: 30,
+    qty_over_180: 10,
+    by_health: { fresh: 4, healthy: 2, watch: 2, slow: 1, obsolete: 1 },
+    health_score: 88,
+    health_band: 'healthy',
+    age_bucket: null,
+    health_status: null,
+    warehouses: [],
+    item_groups: [],
   }
 
   it('keeps the buckets in age order, including empty ones', () => {

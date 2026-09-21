@@ -1,17 +1,54 @@
+import { useCallback, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useAccess } from '../access/AccessContext'
 import { Notice } from '../components/Notice'
-import { PageHeader } from '../components/PageHeader'
 import { useQuery } from '../hooks/useQuery'
 import { errorMessage } from '../services/api'
 import { documentsApi } from '../services/documentsApi'
+import type { BadgeTone } from '../ui/Badge'
+import { Badge } from '../ui/Badge'
+import { BreadcrumbHeader } from '../ui/shell/BreadcrumbHeader'
+import { PageShell } from '../ui/shell/PageShell'
 import { DocumentForm } from './DocumentForm'
+import { BatchAdjustmentPage } from './batch/BatchAdjustmentPage'
+import { DeliveryChallanForm } from './challan/DeliveryChallanForm'
+import { ConsumptionForm } from './consumption/ConsumptionForm'
+import { DisassemblyPage } from './disassembly/DisassemblyPage'
+import { InwardChallanForm } from './grn/InwardChallanForm'
+import { JobWorkPage } from './jobwork/JobWorkPage'
 import { LandedCostAllocationPage } from './landedCost/LandedCostAllocationPage'
-import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS } from './actions'
+import { MaterialIssuePage } from './materialIssue/MaterialIssuePage'
+import { ProductionWorkspace } from './production/ProductionWorkspace'
+import { MaterialReceiptForm } from './receipt/MaterialReceiptForm'
+import { PhysicalStockCountPage } from './physicalCount/PhysicalStockCountPage'
+import { StockTransferWorkspace } from './transfer/StockTransferWorkspace'
+import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS, statusTone } from './actions'
+import type { StatusTone } from './actions'
+import { documentTypeGlyph } from './documentTypeIcon'
 import { draftFromDocument } from './formModel'
 import { specForCode, specForSlug, UNAVAILABLE_TYPES } from './registry'
+import { revaluationDraftFromDocument } from './revaluation/revaluationModel'
+import { StockRevaluationPage } from './revaluation/StockRevaluationPage'
+import type { FormKind } from './registry'
 import type { DocumentStatus } from './types'
 import './documents.css'
+
+const STATUS_BADGE_TONE: Record<StatusTone, BadgeTone> = { neutral: 'neutral', info: 'info', success: 'success', warning: 'warning', danger: 'danger' }
+
+/**
+ * Job work has its own screen.
+ *
+ * The generic editor renders every native type from one spec, which is right
+ * for the types whose entry is "a header and some lines". A job-work document
+ * is not one of those: it is half of a two-document workflow, and what an
+ * operator needs in front of them — what is still with the worker, how late it
+ * is, what this receipt settles — has no place in a form every other type
+ * shares. Consumption below is here for the same reason.
+ * See documents/jobwork/JobWorkPage.
+ */
+function isJobWork(formKind: FormKind): boolean {
+  return formKind === 'job_work_in' || formKind === 'job_work_out'
+}
 
 /** `/documents/new/:slug` and `/documents/:id/edit`. */
 export function DocumentFormPage() {
@@ -20,103 +57,361 @@ export function DocumentFormPage() {
   const { can } = useAccess()
   const documentId = id ? Number(id) : null
   const editing = documentId !== null && Number.isFinite(documentId)
+  /*
+   * "Save, post & new" starts a second run without leaving the screen. Bumping this remounts the
+   * editor with a fresh draft, which is what a storekeeper entering a shift's worth of runs wants;
+   * navigating to the same route would not remount anything.
+   */
+  const [freshKey, setFreshKey] = useState(0)
+  const startAnother = useCallback(() => setFreshKey((n) => n + 1), [])
 
   const existing = useQuery((signal) => documentsApi.get(documentId as number, signal), [documentId], { enabled: editing, keepData: false })
 
   const spec = editing ? specForCode(existing.data?.document_type) : specForSlug(slug)
   const crumbs = [{ label: 'Documents', to: '/documents' }]
+  const icon = documentTypeGlyph(editing ? existing.data?.document_type : spec?.code).icon
+  /**
+   * Some types have a workspace of their own rather than the shared editor —
+   * the ones an operator lives in all day, which earn a screen built around the
+   * way that day goes: a stock transfer, a consumption issue, a material
+   * receipt with its supplier paperwork, gate details, batches and serials,
+   * forty lines at a time. Everything underneath stays shared: the same draft
+   * model, the same payload, the same create / update / post calls and the same
+   * permission gates, which is why each branches here at the end of the gate
+   * chain rather than owning a route of its own. The list grows; deliberately
+   * uncounted so this comment does not go stale the next time it does.
+   */
+  const isReceipt = spec?.code === 'MATERIAL_RECEIPT'
 
   if (!editing && !spec) {
     return (
-      <div className="page">
-        <PageHeader title="Unknown document type" breadcrumbs={crumbs} />
+      <PageShell>
+        <BreadcrumbHeader breadcrumbs={crumbs} title="Unknown document type" escBack={false} />
         <Notice kind="error">There is no native document type for &ldquo;{slug}&rdquo;.</Notice>
-      </div>
+      </PageShell>
     )
   }
   if (!editing && spec && UNAVAILABLE_TYPES.has(spec.code)) {
     return (
-      <div className="page">
-        <PageHeader title={spec.label} breadcrumbs={crumbs} />
+      <PageShell>
+        <BreadcrumbHeader breadcrumbs={crumbs} title={spec.label} icon={icon} escBack={false} />
         <Notice kind="warning">A {spec.label.toLowerCase()} cannot be created: the type is declared but nothing happens when it posts, so the document would record work it never did.</Notice>
-      </div>
+      </PageShell>
     )
   }
   if (!editing && spec && !canCreate(spec.code, can)) {
     return (
-      <div className="page">
-        <PageHeader title={spec.label} breadcrumbs={crumbs} />
+      <PageShell>
+        <BreadcrumbHeader breadcrumbs={crumbs} title={spec.label} icon={icon} escBack={false} />
         <Notice kind="warning">You do not have permission to create a {spec.label.toLowerCase()}.</Notice>
-      </div>
+      </PageShell>
     )
   }
   if (editing) {
     if (existing.loading && !existing.data) {
       return (
-        <div className="page">
-          <PageHeader title="Loading…" breadcrumbs={crumbs} />
-        </div>
+        <PageShell>
+          <BreadcrumbHeader breadcrumbs={crumbs} title="Loading…" escBack={false} />
+        </PageShell>
       )
     }
     if (existing.error || !existing.data) {
       return (
-        <div className="page">
-          <PageHeader title="Document" breadcrumbs={crumbs} />
+        <PageShell>
+          <BreadcrumbHeader breadcrumbs={crumbs} title="Document" escBack={false} />
           <Notice kind="error">{existing.error ? errorMessage(existing.error) : 'Document not found.'}</Notice>
-        </div>
+        </PageShell>
       )
     }
     const doc = existing.data
     if (!spec) {
       return (
-        <div className="page">
-          <PageHeader title={doc.document_type_label ?? doc.document_type} breadcrumbs={[...crumbs, { label: doc.document_no ?? `#${doc.document_id}`, to: `/documents/${doc.document_id}` }]} />
+        <PageShell>
+          <BreadcrumbHeader breadcrumbs={[...crumbs, { label: doc.document_no ?? `#${doc.document_id}`, to: `/documents/${doc.document_id}` }]} title={doc.document_type_label ?? doc.document_type} icon={icon} escBack={false} />
           <Notice kind="info">This document was created by {doc.source_app} and is edited there, not in Inventory.</Notice>
-        </div>
+        </PageShell>
       )
     }
     if (!isEditable(doc.status)) {
+      // The batch workspace reads as well as it writes, so a posted adjustment opens in it
+      // read-only instead of on a dead end with a link.
+      if (spec.code === 'BATCH_ADJUSTMENT') {
+        return (
+          <BatchAdjustmentPage
+            key={doc.document_id}
+            spec={spec}
+            documentId={doc.document_id}
+            documentNo={doc.document_no}
+            initial={draftFromDocument(doc, spec)}
+            readOnly
+            statusLabel={STATUS_LABELS[doc.status as DocumentStatus] ?? doc.status}
+          />
+        )
+      }
       return (
-        <div className="page">
-          <PageHeader title={`${spec.label} ${doc.document_no ?? `#${doc.document_id}`}`} breadcrumbs={crumbs} />
-          <Notice kind="warning" actions={<Link className="btn btn-sm" to={`/documents/${doc.document_id}`}>Open</Link>}>
-            A {STATUS_LABELS[doc.status as DocumentStatus]?.toLowerCase() ?? doc.status} document cannot be edited.
-          </Notice>
-        </div>
+        <PageShell>
+          <BreadcrumbHeader
+            breadcrumbs={crumbs}
+            title={`${spec.label} ${doc.document_no ?? `#${doc.document_id}`}`}
+            icon={icon}
+            escBack={false}
+            actions={
+              <Link className="btn btn-sm" to={`/documents/${doc.document_id}`}>
+                Open
+              </Link>
+            }
+          />
+          <Notice kind="warning">A {STATUS_LABELS[doc.status as DocumentStatus]?.toLowerCase() ?? doc.status} document cannot be edited.</Notice>
+        </PageShell>
       )
     }
     if (!can(permissionKeysFor('edit', doc.document_type))) {
       return (
-        <div className="page">
-          <PageHeader title={`${spec.label} ${doc.document_no ?? `#${doc.document_id}`}`} breadcrumbs={crumbs} />
+        <PageShell>
+          <BreadcrumbHeader breadcrumbs={crumbs} title={`${spec.label} ${doc.document_no ?? `#${doc.document_id}`}`} icon={icon} escBack={false} />
           <Notice kind="warning">You do not have permission to edit documents.</Notice>
-        </div>
+        </PageShell>
       )
     }
+    // A revaluation has its own screen; the gates above (type, status, permission) have already run.
+    if (spec.formKind === 'revaluation') {
+      return <StockRevaluationPage key={doc.document_id} spec={spec} documentId={doc.document_id} initial={revaluationDraftFromDocument(doc)} existing={doc} />
+    }
     const initial = draftFromDocument(doc, spec)
-    // A landed cost allocation has a screen of its own: five steps, several receipts, a per-line
-    // valuation preview and a readiness gate. It renders its own header and action bar, so it
-    // replaces this page rather than sitting inside it — every guard above has already run.
+    const reapproval = doc.status === 'APPROVED' || doc.status === 'PENDING_APPROVAL'
+      ? <Notice kind="info">Saving changes returns the document to draft; it will need approval again.</Notice>
+      : null
+    // Packing renders its own full-width breadcrumb/title/actions (PackingFormView) —
+    // the legacy PageHeader below would just duplicate it.
+    if (spec.formKind === 'packing') {
+      return (
+        <>
+          {reapproval ? <div className="aic mx-auto max-w-screen-2xl">{reapproval}</div> : null}
+          <DocumentForm key={doc.document_id} spec={spec} documentId={doc.document_id} initial={initial} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+        </>
+      )
+    }
+    // Some types have a screen of their own — transfer, consumption, receiving, issue, production.
+    // Each brings its own page shell, breadcrumbs and header, so it is returned whole rather than
+    // wrapped by the one below. Every other native type still uses the shared DocumentForm.
+    if (spec.formKind === 'production') {
+      return (
+        <ProductionWorkspace
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          document={doc}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+          onNew={() => navigate('/documents/new/production')}
+        />
+      )
+    }
+    if (spec.code === 'STOCK_TRANSFER') {
+      return (
+        <StockTransferWorkspace
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          existing={doc}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
+    if (spec.code === 'BATCH_ADJUSTMENT') {
+      return (
+        <BatchAdjustmentPage
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          documentNo={doc.document_no}
+          initial={initial}
+          statusLabel={STATUS_LABELS[doc.status as DocumentStatus] ?? doc.status}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
+    if (spec.code === 'CONSUMPTION') {
+      return (
+        <ConsumptionForm
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          existingStatus={doc.status}
+          existingVersion={doc.version}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
+    // Disassembly brings its own page shell — breadcrumbs, context panel, sticky footer — so it
+    // replaces the wrapper rather than sitting inside it, like every screen in this list.
+    if (spec.formKind === 'disassembly') {
+      return <DisassemblyPage key={doc.document_id} spec={spec} documentId={doc.document_id} initial={initial} document={doc} />
+    }
+    // A landed cost allocation is another: five steps, several receipts, a per-line valuation
+    // preview and a readiness gate, with its own header and action bar.
     if (spec.formKind === 'landed_cost') {
       return <LandedCostAllocationPage key={doc.document_id} spec={spec} documentId={doc.document_id} initial={initial} />
     }
+    if (spec.code === 'MATERIAL_ISSUE') {
+      return (
+        <MaterialIssuePage
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          documentNo={doc.document_no}
+          status={doc.status as DocumentStatus}
+          notice={reapproval}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
+    if (spec.formKind === 'delivery_challan') {
+      return (
+        <DeliveryChallanForm
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          status={doc.status}
+          documentNo={doc.document_no}
+          version={doc.version}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
+    if (spec.formKind === 'inward_challan') {
+      return (
+        <InwardChallanForm
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          status={doc.status}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
+    if (isJobWork(spec.formKind)) {
+      return (
+        <JobWorkPage
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          existing={doc}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
+    if (isReceipt) {
+      return (
+        <MaterialReceiptForm
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          currencyCode={doc.currency_code}
+        />
+      )
+    }
+    // The count has its own workspace; everything under it — the draft shape,
+    // the validation, the payload and the endpoints — is still shared.
+    if (spec.formKind === 'physical_count') {
+      return (
+        <PhysicalStockCountPage
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          status={doc.status}
+          documentNo={doc.document_no}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
     return (
-      <div className="page">
-        <PageHeader title={`Edit ${spec.label.toLowerCase()} ${doc.document_no ?? `#${doc.document_id}`}`} subtitle={`Version ${doc.version} · ${STATUS_LABELS[doc.status as DocumentStatus] ?? doc.status}`} breadcrumbs={[...crumbs, { label: doc.document_no ?? `#${doc.document_id}`, to: `/documents/${doc.document_id}` }]} />
-        {doc.status === 'APPROVED' || doc.status === 'PENDING_APPROVAL' ? <Notice kind="info">Saving changes returns the document to draft; it will need approval again.</Notice> : null}
+      <PageShell paddingBottom>
+        <BreadcrumbHeader
+          breadcrumbs={[...crumbs, { label: doc.document_no ?? `#${doc.document_id}`, to: `/documents/${doc.document_id}` }]}
+          title={`Edit ${spec.label.toLowerCase()} ${doc.document_no ?? `#${doc.document_id}`}`}
+          description={spec.description}
+          icon={icon}
+          badge={<Badge tone={STATUS_BADGE_TONE[statusTone(doc.status)]}>{STATUS_LABELS[doc.status as DocumentStatus] ?? doc.status}</Badge>}
+          meta={<span className="text-xs text-gray-500">Version {doc.version}</span>}
+          escBack={false}
+        />
+        {reapproval}
         <DocumentForm key={doc.document_id} spec={spec} documentId={doc.document_id} initial={initial} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
-      </div>
+      </PageShell>
     )
   }
 
   const s = spec as NonNullable<typeof spec>
-  if (s.formKind === 'landed_cost') {
-    return <LandedCostAllocationPage key={s.code} spec={s} />
+  if (s.formKind === 'packing') {
+    return <DocumentForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
+  if (s.formKind === 'revaluation') {
+    return <StockRevaluationPage key={s.code} spec={s} />
+  }
+  /*
+   * Production has its own screen. Same route, same spec, same draft shape and the same
+   * create / post calls — what differs is that the editor reads live availability, cost, batch
+   * and serial stock while the run is being built.
+   */
+  if (s.formKind === 'production') {
+    return (
+      <ProductionWorkspace
+        key={`production-${freshKey}`}
+        spec={s}
+        onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        onNew={startAnother}
+      />
+    )
+  }
+  if (s.code === 'STOCK_TRANSFER') {
+    return <StockTransferWorkspace key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
+  if (s.code === 'BATCH_ADJUSTMENT') {
+    return <BatchAdjustmentPage key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
+  if (s.code === 'CONSUMPTION') {
+    return <ConsumptionForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
+  if (s.formKind === 'disassembly') return <DisassemblyPage spec={s} />
+  if (s.formKind === 'landed_cost') return <LandedCostAllocationPage key={s.code} spec={s} />
+  if (s.code === 'MATERIAL_ISSUE') {
+    return <MaterialIssuePage key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
+  // The delivery challan has its own screen: same draft model, same payload and
+  // the same create / post calls, with an entry experience built for dispatch.
+  if (s.formKind === 'delivery_challan') {
+    return <DeliveryChallanForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
+  if (s.formKind === 'inward_challan') {
+    return <InwardChallanForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
+  if (isJobWork(s.formKind)) {
+    return <JobWorkPage key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
+  if (isReceipt) return <MaterialReceiptForm key={s.code} spec={s} />
+  if (s.formKind === 'physical_count') {
+    return <PhysicalStockCountPage key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
   }
   return (
-    <div className="page">
-      <PageHeader title={`New ${s.label.toLowerCase()}`} breadcrumbs={crumbs} />
+    <PageShell paddingBottom>
+      <BreadcrumbHeader
+        breadcrumbs={crumbs}
+        title={`New ${s.label.toLowerCase()}`}
+        description={s.description}
+        icon={icon}
+        badge={<Badge tone="info">Draft</Badge>}
+        escBack={false}
+      />
       <DocumentForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
-    </div>
+    </PageShell>
   )
 }

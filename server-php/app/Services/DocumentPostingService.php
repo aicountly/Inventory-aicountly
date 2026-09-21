@@ -224,7 +224,7 @@ class DocumentPostingService
             // sits on this company's receipts" counts an amount that is no longer there.
             // Only the rows this document WROTE (document_id = itself). A LANDED_COST document's
             // own rows are not touched from here and cannot be: reverse() refuses that type above.
-            $this->writeLandedCostAllocation($db, $cmpId, $documentId, $documentId, []);
+            $this->writeLandedCostAllocation($db, $cmpId, $documentId, []);
             // 3. Status buckets and pending quantities.
             $this->status->reverseForDocument($cmpId, $documentId, $documentId);
             $this->packing->releaseConsumedBy($cmpId, $documentId, $actor);
