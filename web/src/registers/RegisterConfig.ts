@@ -394,6 +394,17 @@ export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
 
 
   /**
+   * Heading on the empty state, when filters are set and nothing matched.
+   *
+   * "No rows match these filters" is right for a register with no better word
+   * for its rows, and vague for one that has: a reader who filtered a stock
+   * grid is looking for stock, and being told about "rows" makes them check
+   * whether they are on the screen they think they are. Defaults to that
+   * sentence; `emptyMessage` remains the line under it.
+   */
+  emptyTitle?: string
+
+  /**
    * Heading over the table card. Defaults to the register's own title.
    *
    * A node rather than a string because a register with `views` puts its view
@@ -486,16 +497,6 @@ export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
    * Return null to fall through to the filtered message.
    */
   emptyUnfiltered?: ReactNode | ((summary: S, activeFilterCount: number) => ReactNode | null)
-
-  /**
-   * Heading of the filtered empty state.
-   *
-   * Defaults to "No rows match these filters", which is right for most registers and
-   * vague on one a reader reaches by name — "No warehouse stock found" tells them the
-   * register ran and found nothing, rather than that something about their filters is
-   * the subject. `emptyMessage` is the line under it either way.
-   */
-  emptyTitle?: string
 
   /** Noun used in the totals label: "Total (412 movements)". */
   rowNoun?: string
