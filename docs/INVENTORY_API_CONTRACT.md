@@ -39,6 +39,16 @@ Warehouse group fields: `grp_name` (required, unique per company), `grp_code` (o
 
 `GET /v1/brands/sales` → `{available, reason, currency, rows[{brand_id, sales, trend[]|null}]}`. A **relay**, not a store: Inventory holds no turnover for a brand and this endpoint creates none — it asks Books (`integration/inventory/brand-sales`) for the company / FY / branch on screen and hands the answer back. It answers `200` whether or not Books could be reached, with `available:false` and a `reason` of `not_configured` (the relay is switched off), `not_implemented` (Books does not serve the path yet) or `unavailable`. Nothing is written and nothing is cached across requests.
 
+#### Batches — filters, figures and a bulk status
+`GET /v1/batches` adds, on top of the shared list parameters (`q` sweeps batch no / lot no / item name / SKU):
+`item_id`, `item_grp_id`, `stock_cat_id`, `brand_id`, `lot_no`, `status` (comma-separated, from `active|quarantine|recalled|expired|closed`), `expiring_before`, `expiry_from`, `expiry_to`, `mfg_from`, `mfg_to`, `has_expiry=1|0`, `in_warehouse_id` (batches with a balance row in that warehouse), `stock=with|zero`, `warehouse_id` (scopes the stock figures, never the rows), `with_stock=1` (adds `stock{on_hand, reserved, available}`, `warehouses[{warehouse_id, warehouse_name, warehouse_code, on_hand}]` and `warehouse_count`), and `health` (comma-separated, from `active|expiring|expired|inactive`). Sortable on `batch_no, lot_no, item_name, mfg_date, expiry_date, status, on_hand, created_at, updated_at`.
+
+`health` is **derived, never stored**: `expired` is an expiry date in the past or the `expired` status; then `inactive` for `quarantine|recalled|closed`; then `expiring` inside the `near_expiry_days` window (default 30); everything else is `active`. The four are mutually exclusive and exhaust the set.
+
+`GET /v1/batches/summary` takes the same filters (paging is ignored) and returns `{total, active, expiring_soon, expired, inactive, total_on_hand, with_stock, zero_stock, previous_total, comparison_days, near_expiry_days, by_status{}, expiry_buckets{expired, within_30, days_31_90, days_91_180, beyond_180, no_expiry}}`. `previous_total` is how many of the matching batches already existed `comparison_days` ago.
+
+`POST /v1/batches/bulk-update {batch_ids:[…], status}` sets one status across a selection (max 500) in a single transaction, writing one `batch.bulk_update` audit entry per batch that actually changed → `{updated, unchanged, status, batch_ids}`.
+
 `POST /v1/bill-of-materials/{id}/explode {production_qty, warehouse_id?, finished_rate?, document_date?, narration?}` → the ready-to-create PRODUCTION payload (component OUT lines scaled by `production_qty / yield_qty` plus scrap %, by-product IN lines, finished IN line at `finished_rate`, `metadata{bom_id, production_qty, finished_rate, warehouse_id}`). Nothing is saved.
 
 ## Availability
