@@ -13,6 +13,7 @@ import { DocumentForm } from './DocumentForm'
 import { BatchAdjustmentPage } from './batch/BatchAdjustmentPage'
 import { DeliveryChallanForm } from './challan/DeliveryChallanForm'
 import { ConsumptionForm } from './consumption/ConsumptionForm'
+import { DisassemblyPage } from './disassembly/DisassemblyPage'
 import { InwardChallanForm } from './grn/InwardChallanForm'
 import { JobWorkPage } from './jobwork/JobWorkPage'
 import { MaterialIssuePage } from './materialIssue/MaterialIssuePage'
@@ -243,6 +244,11 @@ export function DocumentFormPage() {
         />
       )
     }
+    // Disassembly brings its own page shell — breadcrumbs, context panel, sticky footer — so it
+    // replaces the wrapper rather than sitting inside it, like every screen in this list.
+    if (spec.formKind === 'disassembly') {
+      return <DisassemblyPage key={doc.document_id} spec={spec} documentId={doc.document_id} initial={initial} document={doc} />
+    }
     if (spec.code === 'MATERIAL_ISSUE') {
       return (
         <MaterialIssuePage
@@ -369,6 +375,7 @@ export function DocumentFormPage() {
   if (s.code === 'CONSUMPTION') {
     return <ConsumptionForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
   }
+  if (s.formKind === 'disassembly') return <DisassemblyPage spec={s} />
   if (s.code === 'MATERIAL_ISSUE') {
     return <MaterialIssuePage key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
   }
