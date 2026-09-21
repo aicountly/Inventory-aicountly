@@ -9,6 +9,7 @@ import { Badge } from '../ui/Badge'
 import { BreadcrumbHeader } from '../ui/shell/BreadcrumbHeader'
 import { PageShell } from '../ui/shell/PageShell'
 import { DocumentForm } from './DocumentForm'
+import { ConsumptionForm } from './consumption/ConsumptionForm'
 import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS, statusTone } from './actions'
 import type { StatusTone } from './actions'
 import { documentTypeGlyph } from './documentTypeIcon'
@@ -109,6 +110,19 @@ export function DocumentFormPage() {
       )
     }
     const initial = draftFromDocument(doc, spec)
+    if (spec.code === 'CONSUMPTION') {
+      return (
+        <ConsumptionForm
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          existingStatus={doc.status}
+          existingVersion={doc.version}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
     return (
       <PageShell paddingBottom>
         <BreadcrumbHeader
@@ -127,6 +141,9 @@ export function DocumentFormPage() {
   }
 
   const s = spec as NonNullable<typeof spec>
+  if (s.code === 'CONSUMPTION') {
+    return <ConsumptionForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
   return (
     <PageShell paddingBottom>
       <BreadcrumbHeader

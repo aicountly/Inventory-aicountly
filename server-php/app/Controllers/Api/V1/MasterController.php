@@ -26,6 +26,15 @@ abstract class MasterController extends BaseController
     protected array $deleteGuards = [];
     /** @var list<string> */
     protected array $searchColumns = [];
+    /**
+     * The company the list being built belongs to.
+     *
+     * Set immediately before applyIndexFilters() runs, so an override that has
+     * to reach outside its own table (a subquery over the item tables) scopes
+     * that subquery to the same tenant the list is scoped to, without re-parsing
+     * the request to find out which one that is.
+     */
+    protected int $indexCmpId = 0;
     protected ?string $parentColumn = null;
     protected bool $hasSoftDelete = true;
     protected string $entityType = 'master';
@@ -68,6 +77,7 @@ abstract class MasterController extends BaseController
             }
             $b->groupEnd();
         }
+        $this->indexCmpId = $cmpId;
         $this->applyIndexFilters($b);
         $total = (clone $b)->countAllResults(false);
         $sortable = array_merge([$this->nameColumn, $this->pk, 'created_at', 'updated_at'], $this->columns, $this->extraSortColumns);
@@ -232,15 +242,25 @@ abstract class MasterController extends BaseController
     /**
      * Apply the (already whitelisted) sort to the list builder.
      *
-     * The default is the plain ORDER BY every master has always used. A subclass overrides it only
-     * for a key it declared in $extraSortColumns — a derived figure that has to be computed before
-     * it can be ordered by. The count above is taken before this runs, so a subquery added here
-     * cannot change the total.
+     * The default is the plain ORDER BY every master has always used, plus a tie-break on the name.
+     * The tie-break is not decoration: a master whose rows were all written in one migration carries
+     * the same updated_at on every row, and ordering by a column of equal values leaves the order
+     * to the planner — so paging it can show one row on two pages and another on none. An override
+     * that orders by something else does its own tie-break (BrandsController) and never reaches
+     * this.
+     *
+     * A subclass overrides this only for a key it declared in $extraSortColumns — a derived figure
+     * that has to be computed before it can be ordered by. The count above is taken before this
+     * runs, so a subquery added here cannot change the total.
      */
     protected function applySort($builder, string $sort, string $order): void
     {
         $builder->orderBy($sort, $order);
+        if ($sort !== $this->nameColumn) {
+            $builder->orderBy($this->nameColumn, 'ASC');
+        }
     }
+
 
     /** @return array<string, mixed>|null */
     protected function find(int $cmpId, int $id): ?array
