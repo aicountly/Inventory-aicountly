@@ -96,6 +96,20 @@ export function shortBy(r: AvailabilityCheckResult): number {
 
 export type PendingKind = 'challan' | 'deferred_purchase' | 'job_work'
 
+/**
+ * The register's display status, which is NOT the stored one.
+ *
+ * `inv_pending_quantities.status` knows open / partial / settled / cancelled.
+ * The register adds `overdue` (past the document's expected return date, or past
+ * the company's grace period when it recorded none) and `settling` (part-settled
+ * with a settlement inside the settling window — work in progress, as against a
+ * `partial` that stalled). Both are derived in SQL by PendingRegisterQuery so the
+ * filter, the badge and the KPI count cannot disagree.
+ */
+export type PendingStatus = 'open' | 'partial' | 'overdue' | 'settling' | 'settled' | 'cancelled'
+
+export type PendingPriority = 'high' | 'medium' | 'low'
+
 export interface PendingRow {
   pending_id: number
   cmp_id: number
@@ -106,37 +120,180 @@ export interface PendingRow {
   direction: 'in' | 'out'
   item_id: number
   item_name: string | null
+  item_sku: string | null
+  hsn_sac: string | null
   unit_id: number | null
   unit_symbol: string | null
   warehouse_id: number | null
   warehouse_name: string | null
   party_ref: number | null
+  /** Carried on the document, so a register row can name the party rather than its id. */
+  party_name: string | null
   qty_original: number
   qty_settled: number
   qty_open: number
-  status: 'open' | 'partial'
+
+  /** Inventory's own cost for the line — the captured valuation rate, else item WAC. */
+  unit_cost: number
+  /** qty_open × unit_cost. At cost, never at a selling price. */
+  pending_value: number
+
   document_no: string | null
   document_date: string | null
   document_type: string
   document_type_label?: string
+  document_status: string | null
+
+  /** What the document promised, where it recorded one. */
+  expected_return_date: string | null
+  /** The date the line is measured late against: the above, or document date + grace. */
+  due_date: string | null
+  /** False when `due_date` is the company's grace period standing in for a promise. */
+  has_expected_date: boolean
+  ageing_days: number
+  days_overdue: number
+  is_overdue: boolean
+
+  /** The stored settlement state, kept beside the derived display status. */
+  settlement_status: 'open' | 'partial' | 'settled' | 'cancelled' | string
+  status: PendingStatus
+  priority: PendingPriority
+  last_activity_at: string | null
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+/** Every figure over the WHOLE filtered set — never the page on screen. */
+export interface PendingSummaryResponse {
+  open_lines: number
+  open_quantity: number
+  overdue_lines: number
+  overdue_quantity: number
+  overdue_value: number
+  pending_value: number
+  average_ageing_days: number
+  inbound_pending: number
+  outbound_pending: number
+  /** Outbound − inbound: what the register is net exposed to. */
+  net_exposure: number
+  original_qty_total: number
+  settled_qty_total: number
+  open_qty_total: number
+  settled_today: number
+  settled_today_qty: number
+  item_count: number
+  party_count: number
+  warehouse_count: number
+  document_count: number
+  /** The pre-existing envelope, kept so nothing that read it breaks. */
+  qty_open: number
+  rows: number
+}
+
+/**
+ * The same figures a month back (and yesterday, for the daily count), so the KPI
+ * cards can show a real delta.
+ *
+ * Reconstructed from the settlement trail rather than stored, and `null` when it
+ * cannot be computed — StatCard then renders its hint and no percentage, which is
+ * the designed fallback. Nothing here is ever estimated.
+ */
+export interface PendingComparison {
+  open_lines: number
+  open_quantity: number
+  overdue_lines: number
+  pending_value: number
+  average_ageing_days: number
+  settled_today: number
+  as_of: string
+  settled_as_of: string
+}
+
+export interface PendingTrendPoint {
+  date: string
+  open_lines: number
+  open_quantity: number
+  pending_value: number
+}
+
+export interface PendingBreakdownRow {
+  /** The id behind the group, for a drill-down. Null where the label IS the value. */
+  key: string | null
+  label: string
+  lines: number
+  open_quantity: number
+  pending_value: number
+  overdue_lines: number
+  max_ageing_days: number
+}
+
+export interface PendingBreakdowns {
+  kind: PendingBreakdownRow[]
+  warehouse: PendingBreakdownRow[]
+  item: PendingBreakdownRow[]
+  party: PendingBreakdownRow[]
+  ageing: PendingBreakdownRow[]
+  direction: PendingBreakdownRow[]
+}
+
+/** The thresholds the ageing, overdue and priority derivations were made on. */
+export interface PendingPolicy {
+  grace_days: number
+  high_overdue_days: number
+  high_ageing_days: number
+  high_value: number
+  settling_window_days: number
 }
 
 export interface PendingListResponse extends ListResponse<PendingRow> {
-  summary?: { qty_open: number; rows: number }
+  summary?: PendingSummaryResponse
+  previous?: PendingComparison | null
+  trend?: PendingTrendPoint[]
+  breakdowns?: PendingBreakdowns
+  policy?: PendingPolicy
+  /** Only sent on an empty page: true when nothing is pending at all. */
+  unfiltered_empty?: boolean
 }
+
+/** Ageing buckets the API filters on, matching PendingRegisterPolicy. */
+export const PENDING_AGEING_BUCKETS = [
+  { value: '0_7', label: '0 – 7 days' },
+  { value: '8_15', label: '8 – 15 days' },
+  { value: '16_30', label: '16 – 30 days' },
+  { value: '31_60', label: '31 – 60 days' },
+  { value: '60_', label: 'Over 60 days' },
+] as const
 
 export interface PendingFilters extends ListQuery {
   kind?: PendingKind
   direction?: 'in' | 'out'
   party_ref?: number
   item_id?: number
+  item_search?: string
   warehouse_id?: number
   document_id?: number
+  document_no?: string
+  document_type?: string
+  from?: string
+  to?: string
+  /** CSV of PendingStatus. Empty means the register's default: open and partial. */
+  status?: string
+  priority?: string
+  ageing_bucket?: string
+  ageing_from?: number
+  ageing_to?: number
+  min_open_qty?: number
+  max_open_qty?: number
+  min_pending_value?: number
+  max_pending_value?: number
+  overdue_only?: string
+  /** Which optional aggregate blocks to compute; `''` asks for none. */
+  include?: string
 }
 
 export const pendingApi = {
   list(filters: PendingFilters = {}, signal?: AbortSignal): Promise<PendingListResponse> {
-    return api.list<PendingRow>('v1/pending-quantities', { limit: 500, ...filters }, { signal }) as Promise<PendingListResponse>
+    return api.list<PendingRow>('v1/pending-quantities', { limit: 100, ...filters }, { signal }) as Promise<PendingListResponse>
   },
 }
 

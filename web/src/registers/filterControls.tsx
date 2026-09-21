@@ -11,6 +11,7 @@ import { cx } from '../ui/cx'
 import { BatchFilter } from './BatchFilter'
 import { DateRangeFilter } from './DateRangeFilter'
 import { useDocumentTypeOptions } from './useDocumentTypeOptions'
+import { usePartyOptions } from './usePartyOptions'
 import type { DateRangeContext } from './dateRangePresets'
 import type { ReportFilter } from '../reports/types'
 
@@ -79,6 +80,50 @@ function DocumentTypeControl({ filter, value, onChange, layout }: FilterControlP
       >
         <option value="">All document types</option>
         {documentTypes.options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </Select>
+    </FilterField>
+  )
+}
+
+/**
+ * The party picker.
+ *
+ * Falls back to a numeric ledger-id box when the list is unavailable — empty
+ * because the request failed, or because the company has more parties than the
+ * endpoint caps at. A picker that cannot offer the party a reader is looking for
+ * must not also take away the only other way of naming it.
+ */
+function PartyControl({ filter, value, onChange, layout }: FilterControlProps & { layout: FilterControlLayout }) {
+  const parties = usePartyOptions()
+  if (!parties.loading && parties.options.length === 0) {
+    return (
+      <FilterField label={filter.label} {...fieldProps(layout)}>
+        <Input
+          inputMode="numeric"
+          value={value}
+          onChange={(e) => onChange(filter.key, e.target.value.replace(/[^\d]/g, ''))}
+          aria-label={filter.label}
+          placeholder="Ledger id"
+          className={layout === 'stacked' ? 'w-full' : 'w-[7rem]'}
+        />
+      </FilterField>
+    )
+  }
+  return (
+    <FilterField label={filter.label} {...fieldProps(layout)}>
+      <Select
+        value={value}
+        onChange={(e) => onChange(filter.key, e.target.value)}
+        aria-label={filter.label}
+        disabled={parties.loading && parties.options.length === 0}
+        className={selectWidth(layout, 'min-w-[10rem]')}
+      >
+        <option value="">{filter.placeholder ?? 'All parties'}</option>
+        {parties.options.map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}
           </option>
@@ -263,6 +308,9 @@ export function FilterControl(props: FilterControlProps) {
 
     case 'document_type':
       return <DocumentTypeControl {...props} layout={layout} />
+
+    case 'party':
+      return <PartyControl {...props} layout={layout} />
 
     case 'date':
       return (

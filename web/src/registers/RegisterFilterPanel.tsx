@@ -36,20 +36,6 @@ export interface RegisterFilterPanelProps {
 }
 
 /**
- * Cells per row at `xl` and wider, spelled out because Tailwind reads class names out of
- * the source: `xl:grid-cols-${n}` is a string at build time and produces no CSS at all.
- *
- * A register with many filters wants five or six so its controls land in whole rows; the
- * narrower breakpoints stay one and two either way, because a six-column grid on a laptop
- * is six controls too narrow to read.
- */
-const GRID_COLUMNS: Record<number, string> = {
-  4: 'xl:grid-cols-4',
-  5: 'lg:grid-cols-3 xl:grid-cols-5',
-  6: 'lg:grid-cols-3 xl:grid-cols-6',
-}
-
-/**
  * The register filter *panel* — the same declared `ReportFilter[]` as the
  * toolbar, arranged as a card: heading, quick period chips, a labelled grid and
  * an overflow popover for the filters a register would rather not spend a
@@ -302,9 +288,15 @@ export function RegisterFilterPanel({
         </div>
       </div>
 
-      <div className={cx('grid grid-cols-1 items-end gap-x-4 gap-y-3 sm:grid-cols-2', GRID_COLUMNS[spec.gridColumns ?? 4])}>
+      {/* Six across on a wide screen: a register with eight primary filters reads
+          as two tidy rows there and as four cramped ones at `xl`, and the extra
+          two tracks cost nothing to a register that declares four. */}
+      <div className="grid grid-cols-1 items-end gap-x-4 gap-y-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-6">
         {primary.map(control)}
-        <div className="flex items-end justify-end gap-2 min-w-0">
+        {/* Its own full-width row, right-aligned: the alternative is Clear all
+            and Apply filters stranded mid-row under whichever filter happened
+            to land above them. */}
+        <div className="col-span-full flex items-end justify-end gap-2 min-w-0">
           {onReset ? (
             <Button
               variant="secondary"

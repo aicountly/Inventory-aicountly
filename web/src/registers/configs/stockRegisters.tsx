@@ -547,9 +547,6 @@ export const movementRegister = defineRegister<StockMovementRow, MovementRegiste
     // into the URL, and "This FY" takes them from the financial year the header selects —
     // never from the calendar year, which in India is not the same thing.
     quickRanges: ['today', 'last_7', 'last_30', 'this_month', 'fy_to_date'],
-    // Eight controls plus the button cell: two clean rows of five rather than three
-    // ragged rows of four.
-    gridColumns: 5,
     primaryKeys: [
       'from',
       'q',

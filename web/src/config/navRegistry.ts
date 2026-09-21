@@ -307,9 +307,13 @@ export const REGISTER_NAV: readonly NavLeaf[] = [
     permissions: [P.report('valuation')],
   },
   {
-    label: 'Pending quantities',
+    // Named as the register names itself. Its siblings here are "Movement
+    // register" and "Valuation register", and the screen's own <h1> is
+    // "Pending quantity register" — three different names for one destination
+    // is how a reader stops trusting the nav.
+    label: 'Pending quantity register',
     path: '/registers/pending-quantities',
-    description: 'Everything issued or expected and not yet settled.',
+    description: 'Everything issued or expected and not yet settled, with what is overdue.',
     icon: Timer,
     permissions: [P.documentsRead],
   },
