@@ -77,14 +77,22 @@ export function assertScope<T>(envelope: DashboardEnvelope<T>, expected: { cmp_i
   return envelope
 }
 
+/**
+ * One aggregate, fetched through the API client's own query builder.
+ *
+ * The parameters go in `opts.query` and NOT appended to `path`, which is the
+ * whole point of this function. `api` builds the final URL as
+ * `path + buildQueryString(scope + query)`, so a path that already carried a
+ * `?from=...` produced a SECOND `?` — and everything the client appended after
+ * it, the company scope included, landed inside the previous parameter's value.
+ * The server then saw no `cmp_id` and answered `context_required`, which the
+ * valuation bridge rendered as "Company context required (cmp_id, fy_id, bo_id)"
+ * while every neighbouring card (which passes its filters the correct way)
+ * loaded fine. Handing the client the parameters lets it merge them with the
+ * scope into one query string, which is the only way the scope ever arrives.
+ */
 async function getEnvelope<T>(path: string, query: Record<string, string | number | undefined>, signal?: AbortSignal): Promise<DashboardEnvelope<T>> {
-  const search = new URLSearchParams()
-  for (const [k, v] of Object.entries(query)) {
-    if (v === undefined || v === '') continue
-    search.set(k, String(v))
-  }
-  const qs = search.toString()
-  const res = await api.get<ItemResponse<DashboardEnvelope<T>>>(`${path}${qs ? `?${qs}` : ''}`, { signal })
+  const res = await api.get<ItemResponse<DashboardEnvelope<T>>>(path, { query, signal })
   return res.data
 }
 
