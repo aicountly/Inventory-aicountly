@@ -266,6 +266,13 @@
 .dark .text-amber-900 {
   color: rgb(252 211 77);
 }
+/* The ageing register's 91-180 band. Orange sits between amber and rose and is the
+   only tint that keeps the five ageing bands distinguishable; like every accent here
+   it moves to its 300 shade so it reads as ink on a dark card. */
+.dark .text-orange-600,
+.dark .text-orange-700 {
+  color: rgb(253 186 116);
+}
 .dark .text-red-600,
 .dark .text-red-600\/80,
 .dark .text-red-600\/90,

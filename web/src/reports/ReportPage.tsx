@@ -217,9 +217,9 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
   // ---- KPI cards -----------------------------------------------------------
   const kpiCards = useMemo(() => {
     if (!result.data || summary === undefined) return []
-    if (config.kpis) return config.kpis(summary, result.data)
+    if (config.kpis) return config.kpis(summary, result.data, values)
     return summaryItemsToCards(config.summary(summary, result.data))
-  }, [config, result.data, summary])
+  }, [config, result.data, summary, values])
 
   // ---- the at-a-glance strip ----------------------------------------------
   // Derived from the response already in hand — never a second request, and
@@ -438,14 +438,14 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
       const rescoped = summaryForRows(summary, all)
       const response: ReportResponse<T, S> = { ...result.data, data: [...all], summary: rescoped }
       const cards = config.kpis
-        ? config.kpis(rescoped, response)
+        ? config.kpis(rescoped, response, values)
         : summaryItemsToCards(config.summary(rescoped, response))
       return {
         summaryCards: toSheetCards(cards),
         totalsText: config.totals ? totalsRowToText(visibleColumns, config.totals(rescoped, all)) : null,
       }
     },
-    [summaryForRows, summary, config, result.data, visibleColumns],
+    [summaryForRows, summary, config, result.data, visibleColumns, values],
   )
 
   const printSummaryCards = useMemo(() => toSheetCards(kpiCards), [kpiCards])

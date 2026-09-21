@@ -145,6 +145,27 @@ function StockCategoryControl({ filter, value, onChange, layout }: FilterControl
   )
 }
 
+function BrandControl({ filter, value, onChange, layout }: FilterControlProps & { layout: FilterControlLayout }) {
+  const { options } = useFormOptions()
+  return (
+    <FilterField label={filter.label} {...fieldProps(layout)}>
+      <Select
+        value={value}
+        onChange={(e) => onChange(filter.key, e.target.value)}
+        aria-label={filter.label}
+        className={selectWidth(layout, 'min-w-[9rem]')}
+      >
+        <option value="">{filter.placeholder ?? 'All brands'}</option>
+        {(options?.brands ?? []).map((b) => (
+          <option key={b.brand_id} value={b.brand_id}>
+            {b.brand_name}
+          </option>
+        ))}
+      </Select>
+    </FilterField>
+  )
+}
+
 /**
  * The item typeahead keeps its own wrapper rather than a `FilterField`: the
  * picker swaps between an input and a chip with a clear button, and a `<label>`
@@ -236,6 +257,9 @@ export function FilterControl(props: FilterControlProps) {
 
     case 'stock_category':
       return <StockCategoryControl {...props} layout={layout} />
+
+    case 'brand':
+      return <BrandControl {...props} layout={layout} />
 
     case 'document_type':
       return <DocumentTypeControl {...props} layout={layout} />
