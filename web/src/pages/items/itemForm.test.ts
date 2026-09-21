@@ -142,10 +142,39 @@ describe('itemToForm', () => {
       { fy_id: 31, warehouse_id: 4, unit_id: 1, batch_id: null, opening_qty: '60.0000', opening_valuation_rate: '2.1000' },
     ]
     const f = itemToForm(item, openings, 31)
-    expect(f).toMatchObject({ item_name: 'Bolt', unit_id: '1', purchase_unit_id: '2', valuation_method: 'FIFO', track_batch: true, mrp: '12.5000', min_stock_qty: '10.0000', item_grp_id: '3', itc_eligibility: 'block' })
+    // The decimals are trimmed for the box the user types in: PostgreSQL returns all four of
+    // NUMERIC(18,4), and `12.5000` is noise to edit around. `toNumber` reads either spelling, so
+    // the payload is unchanged — see the `num` helper in itemForm.ts.
+    expect(f).toMatchObject({ item_name: 'Bolt', unit_id: '1', purchase_unit_id: '2', valuation_method: 'FIFO', track_batch: true, mrp: '12.5', min_stock_qty: '10', item_grp_id: '3', itc_eligibility: 'block' })
     expect(f.unitLines).toHaveLength(1)
     expect(f.unitLines[0]).toMatchObject({ unit_id: '2', conversion_factor: '100', uom_role: 'purchase' })
     expect(f.openings).toHaveLength(1)
-    expect(f.openings[0]).toMatchObject({ warehouse_id: '4', unit_id: '1', opening_qty: '60.0000', opening_valuation_rate: '2.1000' })
+    expect(f.openings[0]).toMatchObject({ warehouse_id: '4', unit_id: '1', opening_qty: '60', opening_valuation_rate: '2.1' })
+  })
+
+  it('trims stored decimals without touching anything that is not one', () => {
+    const base = {
+      item_id: 1,
+      item_name: 'Bolt',
+      item_type: 'stock',
+      unit_id: 1,
+      is_active: 1,
+      valuation_method: 'FIFO',
+      itc_eligibility: 'inherit',
+      unit_lines: [],
+      openings: [],
+      attributes: null,
+    } as unknown as Item
+
+    const trimmed = itemToForm({ ...base, mrp: '15.0000', standard_cost: '0.0833', safety_stock_qty: '100' } as Item, [], 0)
+    expect(trimmed.mrp).toBe('15')
+    // A real decimal keeps every digit that is not a trailing zero.
+    expect(trimmed.standard_cost).toBe('0.0833')
+    expect(trimmed.safety_stock_qty).toBe('100')
+
+    // Null stays empty, and the round trip still reads as the same number.
+    const empty = itemToForm({ ...base, mrp: null } as Item, [], 0)
+    expect(empty.mrp).toBe('')
+    expect(itemPayload(trimmed).mrp).toBe(15)
   })
 })

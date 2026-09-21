@@ -14,6 +14,11 @@ export interface SegmentedControlProps<V extends string> {
   options: readonly SegmentedOption<V>[]
   className?: string
   size?: 'sm' | 'md'
+  /**
+   * Names the group for assistive technology when no visible `label` is drawn.
+   * A bare row of tabs otherwise announces as an unnamed tablist.
+   */
+  'aria-label'?: string
 }
 
 /**
@@ -28,6 +33,7 @@ export function SegmentedControl<V extends string>({
   options,
   className,
   size = 'sm',
+  'aria-label': ariaLabel,
 }: SegmentedControlProps<V>) {
   return (
     <div className={cx(AIC, 'inline-flex flex-col gap-1', className)}>
@@ -36,7 +42,7 @@ export function SegmentedControl<V extends string>({
           {label}
         </span>
       ) : null}
-      <div className="inline-flex items-center bg-gray-100 rounded-lg p-0.5" role="tablist">
+      <div className="inline-flex items-center bg-gray-100 rounded-lg p-0.5" role="tablist" aria-label={ariaLabel}>
         {options.map((opt) => {
           const active = value === opt.value
           return (

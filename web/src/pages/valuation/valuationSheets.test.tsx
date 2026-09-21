@@ -37,11 +37,37 @@ vi.mock('../../company/CompanyContext', () => ({
   useCompany: () => ({
     scope: { cmp_id: 1, fy_id: 3, bo_id: 0 },
     companyName: 'Acme Ltd',
+    // The cost-layers period picker is built from the selected year, so the
+    // range is part of the scope this screen reads.
+    fyRange: { from: '2026-04-01', to: '2027-03-31' },
+    fy: { fy_id: 3, label: 'FY 2026-27' },
+    branch: null,
     addressLines: [],
     gstin: null,
     logo: null,
   }),
 }))
+
+vi.mock('../../services/registersApi', () => ({
+  fetchRegistersSummary: async () => ({
+    as_on: '2026-09-01',
+    fy: { from: '2026-04-01', to: '2027-03-31' },
+    currency: 'INR',
+    items: null,
+    warehouses: null,
+    locations: null,
+    movements: null,
+    stock_value: { amount: 1234567, as_of: '2026-08-31', source: 'reconciliation' },
+  }),
+}))
+
+vi.mock('../../services/items', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../services/items')>()
+  return {
+    ...actual,
+    itemsApi: { ...actual.itemsApi, get: async () => ({ item_id: 12, unit_symbol: 'Pcs' }) },
+  }
+})
 
 vi.mock('../../company/useScopeLabel', () => ({
   useScopeLabel: () => 'Acme Ltd · FY 2026-27 · All branches',
@@ -76,6 +102,24 @@ vi.mock('../../services/valuationApi', async (importOriginal) => {
       ...actual.valuationApi,
       costLayers: (...args: unknown[]) => costLayers(...args),
       recalcJobs: (...args: unknown[]) => recalcJobs(...args),
+      snapshot: async () => ({
+        data: [
+          {
+            item_id: 12,
+            item_name: 'Widget A',
+            item_alias: null,
+            item_sku: 'W-A',
+            unit_symbol: 'Pcs',
+            closing_qty: 1200,
+            unit_cost: 25.5,
+            stock_value: 30600,
+            valuation_method_applied: 'FIFO',
+          },
+        ],
+        meta: { total: 1, limit: 1, offset: 0 },
+        summary: { as_of: '2026-09-01', method: 'FIFO', total_qty: 1200, total_value: 30600, item_count: 1 },
+      }),
+      revisions: async () => ({ data: [], meta: { total: 0, limit: 5, offset: 0 } }),
     },
   }
 })
@@ -175,12 +219,13 @@ describe('CostLayersPage export', () => {
 
     const lines = downloadCsv.mock.calls[0][1].trim().split('\r\n')
     expect(lines[0]).toBe(
-      'Received,Kind,Source document,Warehouse,Received qty,Consumed qty,Remaining qty,Unit cost (valuation),Remaining value (valuation),Issues',
+      'Layer date,Receipt ref,Warehouse,Batch / lot,Qty in (Pcs),Qty out (Pcs),Balance qty (Pcs),Unit cost (valuation),Remaining value (valuation),Status',
     )
     expect(lines).toHaveLength(31)
-    // `layer_kind` is a badge on screen; the sheet says the word, and the
-    // consumption list becomes a count rather than an unprintable sub-table.
-    expect(lines[1]).toBe('2026-06-01,Receipt,GRN-1,Central store,100,60,40,25.5,1020,1')
+    // The state is a badge on screen; the sheet says the word. The item and
+    // issue-count columns are off by default — every row carries the same item,
+    // and the consumption trail is read by opening a layer.
+    expect(lines[1]).toBe('2026-06-01,GRN-1,Central store,,100,60,40,25.5,1020,Partially consumed')
   })
 
   it('carries the item summary onto the sheet and says where the detail went', async () => {
@@ -199,7 +244,7 @@ describe('CostLayersPage export', () => {
       'Open value: 30,600.00',
       'Backorder qty: 0',
     ])
-    expect(sheet.footerNotes?.join(' ')).toContain('Consumed by')
+    expect(sheet.footerNotes?.join(' ')).toContain('open a layer to read its consumption trail')
     expect(sheet.rows).toHaveLength(30)
   })
 })
