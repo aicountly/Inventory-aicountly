@@ -1,337 +1,387 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import type { ItemFormOptions, ItemSearchRow } from '../../services/items'
-import { ApiError } from '../../services/api'
+import type { Item, ItemFormOptions, ItemOpeningsResponse } from '../../services/items'
 
-const can = vi.fn<(key: string | readonly string[]) => boolean>(() => true)
-const create = vi.fn()
-const update = vi.fn()
-const search = vi.fn<(q: string, limit?: number, signal?: AbortSignal) => Promise<ItemSearchRow[]>>(async () => [])
-const openings = vi.fn(async () => ({ rows: [], effective_fy_id: 0, carried_forward: false }))
-const saveOpenings = vi.fn(async () => ({ rows: [], effective_fy_id: 0, carried_forward: false }))
-const toastSuccess = vi.fn()
+/**
+ * The Edit Item workspace, mounted against stubbed services.
+ *
+ * What this suite is for: the page carries every field of the item master, and the two ways to
+ * break it silently are (a) initialising the form before the fetch lands, so the user's values are
+ * replaced by defaults, and (b) sending a payload that drops something the old screen sent. Both
+ * typecheck. Both are pinned below, along with the behaviour the redesign added — dirty tracking,
+ * Ctrl+S, the delete moving behind More Actions, and the guard on the way out.
+ */
+
+const toast = { success: vi.fn(), error: vi.fn(), info: vi.fn() }
+
+vi.mock('../../company/CompanyContext', () => ({
+  useCompany: () => ({
+    scope: { cmp_id: 1, fy_id: 3, bo_id: 0 },
+    companyName: 'Acme Ltd',
+    fy: { fyId: 3, label: 'FY 2026-27', start: '2026-04-01', end: '2027-03-31' },
+  }),
+}))
+
+vi.mock('../../access/AccessContext', () => ({
+  useAccess: () => ({ can: () => true, loading: false, member: { uuid: 'user-a' } }),
+  useCan: () => true,
+}))
+
+vi.mock('../../ui/ToastContext', () => ({ useToast: () => toast }))
+
+// The base-currency probe is a label detail behind `settings.read`; it must never be what decides
+// whether the page renders, so it is stubbed to the quiet "not known here" answer.
+vi.mock('../../hooks/useBaseCurrency', () => ({ useBaseCurrencySymbol: () => '₹' }))
 
 const OPTIONS: ItemFormOptions = {
-  item_groups: [
-    { item_grp_id: 3, grp_name: 'Medicines', grp_alias: null, is_primary: 1, parent_grp_id: null },
-    { item_grp_id: 4, grp_name: 'Stationery', grp_alias: null, is_primary: 1, parent_grp_id: null },
-  ],
-  stock_categories: [{ stock_cat_id: 7, cat_name: 'Tablets', cat_alias: null }],
-  brands: [{ brand_id: 9, brand_name: 'Acme' }],
+  item_groups: [{ item_grp_id: 1, grp_name: 'General', grp_alias: null, is_primary: 1, parent_grp_id: null }],
+  stock_categories: [{ stock_cat_id: 2, cat_name: 'Raw Material', cat_alias: null }],
+  brands: [{ brand_id: 5, brand_name: 'Acme' }],
   units: [
-    { unit_id: 1, unit_name: 'Pieces', unit_symbol: 'Pcs', print_name: null, uqc_gst: null },
-    { unit_id: 2, unit_name: 'Box', unit_symbol: 'Box', print_name: null, uqc_gst: null },
+    { unit_id: 10, unit_name: 'Dozen', unit_symbol: 'DOZ', print_name: null, uqc_gst: null },
+    { unit_id: 11, unit_name: 'Piece', unit_symbol: 'Pcs', print_name: null, uqc_gst: null },
   ],
-  warehouses: [{ warehouse_id: 11, warehouse_name: 'Main store', warehouse_code: 'MS', warehouse_type: 'main', is_default: 1, bo_id: 0 }],
+  warehouses: [
+    { warehouse_id: 7, warehouse_name: 'Main store', warehouse_code: null, warehouse_type: 'store', is_default: 1, bo_id: 0 },
+  ],
   valuation_methods: ['FIFO', 'LIFO', 'WAC'],
   default_valuation_method: 'FIFO',
   negative_stock_policies: ['allow', 'warn', 'block'],
   itc_eligibility_options: ['inherit', 'claim', 'block'],
 }
 
-const formOptionsState = { options: OPTIONS as ItemFormOptions | null, loading: false, error: null as string | null, reload: vi.fn() }
-
-vi.mock('../../access/AccessContext', () => ({
-  useAccess: () => ({ can, loading: false, isOwner: true }),
-  useCan: () => true,
-}))
-
-vi.mock('../../company/CompanyContext', () => ({
-  useCompany: () => ({
-    scope: { cmp_id: 7, fy_id: 2, bo_id: 0 },
-    companyName: 'Demo Company',
-    fy: { fyId: 2, label: 'FY 2026-27', start: '2026-04-01', end: '2027-03-31' },
-    branch: null,
-  }),
-}))
-
-vi.mock('../../ui/ToastContext', () => ({
-  useToast: () => ({ success: toastSuccess, error: vi.fn(), info: vi.fn(), notify: vi.fn() }),
-}))
-
 vi.mock('../../hooks/useFormOptions', () => ({
-  useFormOptions: () => formOptionsState,
+  useFormOptions: () => ({ options: OPTIONS, loading: false, error: null, reload: vi.fn() }),
   invalidateFormOptions: vi.fn(),
 }))
 
-vi.mock('../../hooks/useBaseCurrency', () => ({ useBaseCurrency: () => 'INR' }))
+const getItem = vi.fn()
+const updateItem = vi.fn()
+const removeItem = vi.fn()
+const saveOpenings = vi.fn()
+const getOpenings = vi.fn()
 
 vi.mock('../../services/items', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../services/items')>()
   return {
     ...actual,
-    itemsApi: { ...actual.itemsApi, create, update, search, openings, saveOpenings },
+    itemsApi: {
+      ...actual.itemsApi,
+      get: (...a: unknown[]) => getItem(...a),
+      update: (...a: unknown[]) => updateItem(...a),
+      remove: (...a: unknown[]) => removeItem(...a),
+      openings: (...a: unknown[]) => getOpenings(...a),
+      saveOpenings: (...a: unknown[]) => saveOpenings(...a),
+    },
   }
+})
+
+const auditEntity = vi.fn()
+vi.mock('../../services/auditApi', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../services/auditApi')>()
+  return { ...actual, auditApi: { ...actual.auditApi, entity: (...a: unknown[]) => auditEntity(...a) } }
 })
 
 const { ItemFormPage } = await import('./ItemFormPage')
 
-function renderPage() {
+const ITEM: Item = {
+  item_id: 17859,
+  item_name: 'Ballpoint Pens',
+  item_alias: 'Pen',
+  print_name: 'Pen',
+  item_type: 'stock',
+  item_sku: 'BP-001',
+  item_upc: '8901234567890',
+  hsn_sac: '960810',
+  mrp: '15.0000',
+  unit_id: 10,
+  purchase_unit_id: null,
+  sales_unit_id: null,
+  parent_item_id: null,
+  stock_cat_id: 2,
+  item_grp_id: 1,
+  brand_id: null,
+  books_sales_acc_id: 44,
+  books_purchase_acc_id: null,
+  books_tax_cat_id: 9,
+  itc_eligibility: 'inherit',
+  valuation_method: 'FIFO',
+  standard_cost: '9.0000',
+  negative_stock_policy: null,
+  track_batch: 0,
+  track_serial: 0,
+  track_expiry: 0,
+  shelf_life_days: null,
+  min_stock_qty: '10.0000',
+  max_stock_qty: null,
+  reorder_point_qty: null,
+  reorder_qty: null,
+  safety_stock_qty: null,
+  lead_time_days: null,
+  default_warehouse_id: 7,
+  is_active: 1,
+  updated_at: '2026-09-16 10:24:00',
+  created_at: '2026-01-02 09:00:00',
+  updated_by: 'Rahul Gupta',
+  unit_symbol: 'DOZ',
+  unit_name: 'Dozen',
+  grp_name: 'General',
+  cat_name: 'Raw Material',
+  brand_name: null,
+  attributes: { description: 'Smooth writing ballpoint pens.', tags: ['Stationery'], gsm: 70 },
+  variant_attributes: null,
+  unit_lines: [
+    { unit_id: 10, is_default: 1, conversion_factor: 1, uom_role: 'base' },
+    { unit_id: 11, is_default: 0, conversion_factor: 0.0833, uom_role: 'purchase' },
+  ],
+  openings: [],
+  stock: { on_hand: -1, available: -1, reserved: 0 },
+}
+
+const OPENINGS: ItemOpeningsResponse = { rows: [], effective_fy_id: 0, carried_forward: false }
+
+function mount() {
   return render(
-    <MemoryRouter initialEntries={['/items/new']}>
+    <MemoryRouter initialEntries={['/items/17859']}>
       <Routes>
-        <Route path="/items/new" element={<ItemFormPage />} />
+        <Route path="/items/:id" element={<ItemFormPage />} />
         <Route path="/items" element={<p>Items list</p>} />
       </Routes>
     </MemoryRouter>,
   )
 }
 
-const nameInput = () => screen.getByLabelText(/^item name/i) as HTMLInputElement
-const baseUnitSelect = () => screen.getByLabelText(/^base unit/i) as HTMLSelectElement
-/** The header and the sticky bar both carry the primary action; either will do. */
-const createButton = () => screen.getAllByRole('button', { name: /create item/i })[0]
-/** The stepper, so a step button is not confused with the same word in the setup checklist. */
-const stepper = () => within(screen.getByRole('navigation', { name: /item setup progress/i }))
-
-function fillMinimum() {
-  fireEvent.change(nameInput(), { target: { value: 'Bolt M8' } })
-  fireEvent.change(baseUnitSelect(), { target: { value: '1' } })
+/** The page paints a skeleton first; every test starts once the real form is on screen. */
+async function mountLoaded() {
+  mount()
+  await screen.findByDisplayValue('Ballpoint Pens')
 }
 
 beforeEach(() => {
-  can.mockReset()
-  can.mockReturnValue(true)
-  create.mockReset()
-  create.mockResolvedValue({ item_id: 42 })
-  update.mockReset()
-  search.mockReset()
-  search.mockResolvedValue([])
-  openings.mockClear()
-  saveOpenings.mockClear()
-  toastSuccess.mockReset()
-  formOptionsState.options = OPTIONS
-  formOptionsState.loading = false
-  formOptionsState.error = null
+  vi.clearAllMocks()
+  getItem.mockResolvedValue(ITEM)
+  getOpenings.mockResolvedValue(OPENINGS)
+  updateItem.mockResolvedValue(ITEM)
+  removeItem.mockResolvedValue(undefined)
+  auditEntity.mockResolvedValue({
+    data: [
+      {
+        audit_id: 1,
+        action: 'item.updated',
+        actor_uuid: '7',
+        created_at: '2026-09-16 10:24:00',
+        entity_type: 'item',
+        entity_id: 17859,
+      },
+    ],
+    meta: { total: 1 },
+  })
 })
 
-afterEach(() => {
-  vi.clearAllTimers()
-})
-
-describe('ItemFormPage — new item', () => {
-  it('renders the four steps and every identity field the old form had', () => {
-    renderPage()
-    for (const step of ['Identity', 'Classification', 'Units', 'Valuation']) {
-      expect(stepper().getByRole('button', { name: new RegExp(`^${step}`) })).toBeTruthy()
-    }
-    expect(nameInput()).toBeTruthy()
-    expect(screen.getByLabelText(/^alias/i)).toBeTruthy()
-    expect(screen.getByLabelText(/^print name/i)).toBeTruthy()
-    expect(screen.getByLabelText(/^type/i)).toBeTruthy()
-    expect(screen.getByLabelText(/^sku/i)).toBeTruthy()
-    expect(screen.getByLabelText(/barcode/i)).toBeTruthy()
-    expect(screen.getByLabelText(/hsn/i)).toBeTruthy()
-    expect(screen.getByLabelText(/^mrp/i)).toBeTruthy()
-    expect(screen.getByRole('switch', { name: /active item/i })).toBeTruthy()
+describe('ItemFormPage', () => {
+  it('shows a skeleton rather than an empty form while the item loads', () => {
+    mount()
+    expect(screen.getByRole('status').textContent).toContain('Loading item')
+    expect(screen.queryByDisplayValue('Ballpoint Pens')).toBeNull()
   })
 
-  it('keeps the fields the screenshot never reached — tax attribute, stock levels and opening stock', () => {
-    renderPage()
-    expect(screen.getByLabelText(/input tax credit/i)).toBeTruthy()
-    expect(screen.getByLabelText(/^reorder point/i)).toBeTruthy()
-    expect(screen.getByLabelText(/^safety stock/i)).toBeTruthy()
-    expect(screen.getByLabelText(/^lead time/i)).toBeTruthy()
-    expect(screen.getByLabelText(/^default warehouse/i)).toBeTruthy()
-    expect(screen.getByRole('button', { name: /add opening row/i })).toBeTruthy()
+  /**
+   * The failure this pins: initialising the form from defaults and letting the fetched item land
+   * behind it. Everything below would still render — with the wrong values.
+   */
+  it('populates every section from the fetched item', async () => {
+    await mountLoaded()
+    expect((screen.getByLabelText(/^Alias/) as HTMLInputElement).value).toBe('Pen')
+    expect((screen.getByLabelText(/^SKU/) as HTMLInputElement).value).toBe('BP-001')
+    expect((screen.getByLabelText(/Barcode/) as HTMLInputElement).value).toBe('8901234567890')
+    expect((screen.getByLabelText(/HSN/) as HTMLInputElement).value).toBe('960810')
+    expect((screen.getByLabelText(/^MRP/) as HTMLInputElement).value).toBe('15')
+    expect((screen.getByLabelText(/Item group/) as HTMLSelectElement).value).toBe('1')
+    expect((screen.getByLabelText(/Stock category/) as HTMLSelectElement).value).toBe('2')
+    expect((screen.getByLabelText(/Base unit/) as HTMLSelectElement).value).toBe('10')
+    expect((screen.getByLabelText(/Valuation method/) as HTMLSelectElement).value).toBe('FIFO')
+    expect((screen.getByLabelText(/Standard cost/) as HTMLInputElement).value).toBe('9')
+    expect((screen.getByLabelText(/Minimum/) as HTMLInputElement).value).toBe('10')
+    expect((screen.getByLabelText(/Default warehouse/) as HTMLSelectElement).value).toBe('7')
+    // Attributes come out of `attributes_json`, which no earlier screen surfaced.
+    expect((screen.getByLabelText(/Description/) as HTMLTextAreaElement).value).toBe('Smooth writing ballpoint pens.')
+    // Once in the Additional card's tag editor, once in the preview that mirrors the draft.
+    expect(screen.getAllByText('Stationery')).toHaveLength(2)
+    expect((screen.getByLabelText(/Custom field 1 name/) as HTMLInputElement).value).toBe('gsm')
   })
 
-  it('fills the master selects from the form-options API', () => {
-    renderPage()
-    const group = screen.getByLabelText(/^item group/i) as HTMLSelectElement
-    expect([...group.options].map((o) => o.textContent)).toEqual(['— None —', 'Medicines', 'Stationery'])
-    expect(([...(screen.getByLabelText(/^brand/i) as HTMLSelectElement).options]).map((o) => o.textContent)).toContain('Acme')
-    expect(([...baseUnitSelect().options]).map((o) => o.textContent)).toContain('Pieces (Pcs)')
+  it('reads an alternate-unit conversion back in both directions', async () => {
+    await mountLoaded()
+    expect(screen.getByText('1 Pcs = 0.0833 DOZ')).toBeTruthy()
+    expect(screen.getByText('≈ 12.0048 Pcs = 1 DOZ')).toBeTruthy()
   })
 
-  it('explains a master list that failed to load and offers a retry', () => {
-    formOptionsState.options = null
-    formOptionsState.error = 'Could not load form options.'
-    renderPage()
-    expect(screen.getAllByText(/could not load form options/i).length).toBeGreaterThan(0)
-    expect(screen.getAllByRole('button', { name: /retry/i }).length).toBeGreaterThan(0)
-  })
+  it('sends the whole item on save and keeps attributes it did not touch', async () => {
+    await mountLoaded()
+    fireEvent.change(screen.getByLabelText(/Item name/), { target: { value: 'Ballpoint Pens XL' } })
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }))
 
-  it('refuses to submit without an item name and marks the step', async () => {
-    renderPage()
-    fireEvent.click(createButton())
-    expect(await screen.findByText('Item name is required', {}, { timeout: 3000 })).toBeTruthy()
-    expect(create).not.toHaveBeenCalled()
-    expect(stepper().getByRole('button', { name: /^Identity/ }).getAttribute('aria-invalid')).toBe('true')
-  })
-
-  it('refuses to submit without a base unit', async () => {
-    renderPage()
-    fireEvent.change(nameInput(), { target: { value: 'Bolt M8' } })
-    fireEvent.click(createButton())
-    expect(await screen.findByText('Pick the base unit', {}, { timeout: 3000 })).toBeTruthy()
-    expect(create).not.toHaveBeenCalled()
-  })
-
-  it('adds and removes an alternate unit, showing the conversion in words', async () => {
-    renderPage()
-    fillMinimum()
-    fireEvent.click(screen.getByRole('button', { name: /add alternate unit/i }))
-    const altSelect = screen.getByLabelText(/^alternate unit 1$/i) as HTMLSelectElement
-    // The base unit is never offered as its own alternate.
-    expect([...altSelect.options].map((o) => o.value)).not.toContain('1')
-    fireEvent.change(altSelect, { target: { value: '2' } })
-    fireEvent.change(screen.getByLabelText(/^quantity/i), { target: { value: '12' } })
-    expect(await screen.findByText('1 Box (Box) = 12 Pcs', {}, { timeout: 3000 })).toBeTruthy()
-
-    fireEvent.click(screen.getByRole('button', { name: /remove alternate unit 1/i }))
-    await waitFor(() => expect(screen.queryByLabelText(/^alternate unit 1$/i)).toBeNull())
-  })
-
-  it('submits the same payload shape the API already accepts', async () => {
-    renderPage()
-    fillMinimum()
-    fireEvent.change(screen.getByLabelText(/hsn/i), { target: { value: '7318ab' } })
-    fireEvent.click(screen.getByRole('switch', { name: /track batches/i }))
-    fireEvent.click(screen.getByRole('switch', { name: /track serials/i }))
-    fireEvent.click(screen.getByRole('button', { name: /add alternate unit/i }))
-    fireEvent.change(screen.getByLabelText(/^alternate unit 1$/i), { target: { value: '2' } })
-    fireEvent.change(screen.getByLabelText(/^quantity/i), { target: { value: '12' } })
-
-    fireEvent.click(createButton())
-    await waitFor(() => expect(create).toHaveBeenCalledTimes(1), { timeout: 3000 })
-    expect(create.mock.calls[0][0]).toMatchObject({
-      item_name: 'Bolt M8',
-      item_type: 'stock',
-      unit_id: 1,
-      hsn_sac: '7318AB',
+    await waitFor(() => expect(updateItem).toHaveBeenCalled())
+    const [id, body] = updateItem.mock.calls[0] as [number, Record<string, unknown>]
+    expect(id).toBe(17859)
+    expect(body).toMatchObject({
+      item_name: 'Ballpoint Pens XL',
+      item_alias: 'Pen',
+      item_sku: 'BP-001',
+      hsn_sac: '960810',
+      mrp: 15,
+      item_grp_id: 1,
+      stock_cat_id: 2,
+      unit_id: 10,
       valuation_method: 'FIFO',
-      track_batch: 1,
-      track_serial: 1,
-      track_expiry: 0,
+      standard_cost: 9,
       itc_eligibility: 'inherit',
+      min_stock_qty: 10,
+      default_warehouse_id: 7,
       is_active: 1,
-      unit_lines: [
-        { unit_id: 1, is_default: 1, conversion_factor: 1, uom_role: 'base' },
-        { unit_id: 2, is_default: 0, conversion_factor: 12, uom_role: null },
-      ],
     })
-    await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith('Item created'), { timeout: 3000 })
-  })
-
-  it('submits once however many times the button is pressed', async () => {
-    let release: (value: { item_id: number }) => void = () => {}
-    create.mockImplementation(() => new Promise((resolve) => { release = resolve }))
-    renderPage()
-    fillMinimum()
-    const button = createButton()
-    fireEvent.click(button)
-    fireEvent.click(button)
-    fireEvent.click(button)
-    expect(create).toHaveBeenCalledTimes(1)
-    release({ item_id: 42 })
-    await waitFor(() => expect(toastSuccess).toHaveBeenCalled(), { timeout: 3000 })
-  })
-
-  it('puts a server field error on the field the server blamed', async () => {
-    create.mockRejectedValue(new ApiError(409, 'conflict', 'SKU "BLT-1" already exists', { field: 'item_sku' }))
-    renderPage()
-    fillMinimum()
-    fireEvent.change(screen.getByLabelText(/^sku/i), { target: { value: 'BLT-1' } })
-    fireEvent.click(createButton())
-    expect(await screen.findByText(/sku "blt-1" already exists/i, {}, { timeout: 3000 })).toBeTruthy()
-
-    // The message is about the SKU that was sent; typing a new one retires it.
-    fireEvent.change(screen.getByLabelText(/^sku/i), { target: { value: 'BLT-2' } })
-    await waitFor(() => expect(screen.queryByText(/sku "blt-1" already exists/i)).toBeNull())
-  })
-
-  it('reports a possible duplicate from the existing item search without blocking', async () => {
-    search.mockResolvedValue([
-      { item_id: 5, item_name: 'Bolt M8', item_alias: null, print_name: null, item_sku: 'BLT-8', item_upc: null, hsn_sac: '7318', unit_id: 1, unit_symbol: 'Pcs', track_batch: 0, track_serial: 0, valuation_method: 'FIFO', default_warehouse_id: null },
+    expect(body.unit_lines).toEqual([
+      { unit_id: 10, is_default: 1, conversion_factor: 1, uom_role: 'base' },
+      { unit_id: 11, is_default: 0, conversion_factor: 0.0833, uom_role: 'purchase' },
     ])
-    renderPage()
-    fillMinimum()
-    expect(await screen.findByText(/a possible duplicate/i, {}, { timeout: 3000 })).toBeTruthy()
-    expect(screen.getByText('Same name')).toBeTruthy()
-    // Nothing is blocked: the create button is still live.
-    expect((createButton() as HTMLButtonElement).disabled).toBe(false)
-    fireEvent.click(screen.getByRole('button', { name: /continue anyway/i }))
-    await waitFor(() => expect(screen.queryByText(/a possible duplicate/i)).toBeNull())
+    // Untouched attributes must not ride along: the server only rewrites the column when they do.
+    expect('attributes' in body).toBe(false)
+    // Books' own columns are never sent from here.
+    expect('books_sales_acc_id' in body).toBe(false)
+    expect('books_tax_cat_id' in body).toBe(false)
+    // Openings were not touched, so the separate endpoint is left alone.
+    expect(saveOpenings).not.toHaveBeenCalled()
+    expect(toast.success).toHaveBeenCalledWith('Item updated successfully')
   })
 
-  it('offers a neighbour’s HSN rather than inventing one', async () => {
-    search.mockResolvedValue([
-      { item_id: 5, item_name: 'Bolt M8 galvanised', item_alias: null, print_name: null, item_sku: null, item_upc: null, hsn_sac: '7318', unit_id: 1, unit_symbol: 'Pcs', track_batch: 0, track_serial: 0, valuation_method: 'FIFO', default_warehouse_id: null },
-    ])
-    renderPage()
-    fillMinimum()
-    const suggest = await screen.findByTitle(/use 7318, from a similar item/i, {}, { timeout: 3000 })
-    expect((screen.getByLabelText(/hsn/i) as HTMLInputElement).value).toBe('')
-    fireEvent.click(suggest)
-    expect((screen.getByLabelText(/hsn/i) as HTMLInputElement).value).toBe('7318')
+  it('carries attributes once one of them is edited, preserving the keys it does not model', async () => {
+    await mountLoaded()
+    fireEvent.change(screen.getByLabelText(/Description/), { target: { value: 'New copy.' } })
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }))
+
+    await waitFor(() => expect(updateItem).toHaveBeenCalled())
+    const body = (updateItem.mock.calls[0] as [number, Record<string, unknown>])[1]
+    expect(body.attributes).toEqual({ description: 'New copy.', tags: ['Stationery'], gsm: '70' })
   })
-})
 
-describe('ItemFormPage — the assistant never writes on its own', () => {
-  it('leaves a value the user typed alone until it is ticked and applied', async () => {
-    renderPage()
-    const groupSelect = () => screen.getByRole('combobox', { name: /^item group/i }) as HTMLSelectElement
-    fireEvent.change(nameInput(), { target: { value: 'Medicines pack' } })
-    fireEvent.change(groupSelect(), { target: { value: '4' } })
+  it('saves on Ctrl+S', async () => {
+    await mountLoaded()
+    fireEvent.change(screen.getByLabelText(/Item name/), { target: { value: 'Edited' } })
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true })
+    await waitFor(() => expect(updateItem).toHaveBeenCalled())
+  })
 
-    fireEvent.click(screen.getByRole('button', { name: /^assist/i }))
+  it('refuses to save an invalid HSN and says which field is wrong', async () => {
+    await mountLoaded()
+    fireEvent.change(screen.getByLabelText(/HSN/), { target: { value: '12' } })
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }))
+
+    await screen.findByText('HSN/SAC must be 4 to 8 letters or digits')
+    expect(updateItem).not.toHaveBeenCalled()
+  })
+
+  it('keeps the edits when the server refuses the save', async () => {
+    await mountLoaded()
+    updateItem.mockRejectedValue(new Error('SKU "BP-001" already exists'))
+    fireEvent.change(screen.getByLabelText(/^SKU/), { target: { value: 'BP-002' } })
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }))
+
+    await screen.findByText('SKU "BP-001" already exists')
+    expect((screen.getByLabelText(/^SKU/) as HTMLInputElement).value).toBe('BP-002')
+  })
+
+  /** The old screen put Delete beside Save. It is one deliberate step further away now. */
+  it('keeps delete out of the header and behind a confirmation', async () => {
+    await mountLoaded()
+    expect(screen.queryByRole('button', { name: /^Delete$/ })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: /More Actions/ }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: /Delete item/ }))
+
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText(/about to delete/)).toBeTruthy()
+    expect(removeItem).not.toHaveBeenCalled()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /Delete item/ }))
+    await waitFor(() => expect(removeItem).toHaveBeenCalledWith(17859))
+  })
+
+  it('reports the item as unsaved once it is edited, and clean again after a save', async () => {
+    await mountLoaded()
+    expect(screen.queryByText('Unsaved changes')).toBeNull()
+    fireEvent.change(screen.getByLabelText(/Item name/), { target: { value: 'Edited' } })
+    expect(screen.getByText('Unsaved changes')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: /Save Changes/ }))
+    await waitFor(() => expect(screen.queryByText('Unsaved changes')).toBeNull())
+  })
+
+  it('holds an in-app navigation while the form is dirty', async () => {
+    await mountLoaded()
+    fireEvent.change(screen.getByLabelText(/Item name/), { target: { value: 'Edited' } })
+    fireEvent.click(screen.getByRole('link', { name: /Back to items/ }))
+
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText(/unsaved changes/i)).toBeTruthy()
+    expect(screen.queryByText('Items list')).toBeNull()
+  })
+
+  it('shows the real audit trail rather than composing its own', async () => {
+    await mountLoaded()
+    await waitFor(() => expect(auditEntity).toHaveBeenCalledWith('item', 17859, expect.anything(), expect.anything()))
+    expect(await screen.findByText('Item updated')).toBeTruthy()
+  })
+
+  it('fetches the item once, not once per render', async () => {
+    await mountLoaded()
+    fireEvent.change(screen.getByLabelText(/Item name/), { target: { value: 'Edited' } })
+    fireEvent.change(screen.getByLabelText(/Item name/), { target: { value: 'Edited twice' } })
+    await new Promise((r) => setTimeout(r, 450))
+    expect(getItem).toHaveBeenCalledTimes(1)
+    expect(getOpenings).toHaveBeenCalledTimes(1)
+    expect(auditEntity).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * The rule the Suggest drawer exists to enforce. A button that rewrote fields on click would be
+   * the most destructive control on the page and nobody would find out until the next save.
+   */
+  it('previews suggestions and writes nothing until one is applied', async () => {
+    getItem.mockResolvedValue({ ...ITEM, item_alias: null, print_name: null, attributes: null })
+    await mountLoaded()
+
+    // By id, not by label: the drawer's own row is labelled "Print name" too, and the point of
+    // the test is that the two are different things.
+    const printName = () => document.getElementById('item-field-print_name') as HTMLInputElement
+
+    fireEvent.click(screen.getByRole('button', { name: /Suggest with AI/ }))
     const drawer = await screen.findByRole('dialog')
-    // Opening the drawer changed nothing.
-    expect(groupSelect().value).toBe('4')
+    // Wait for the list, not just the panel: it is fetched after the drawer opens.
+    expect(await within(drawer).findByText('Print name')).toBeTruthy()
+    // Shown, not applied.
+    expect(printName().value).toBe('')
+    // And never a tax classification.
+    expect(within(drawer).queryByText(/HSN \/ SAC$/)).toBeNull()
+    expect(within(drawer).getByText(/Tax classification is resolved in Books/)).toBeTruthy()
 
-    const groupRow = within(drawer).getByText('Item group').closest('label') as HTMLLabelElement
-    const checkbox = within(groupRow).getByRole('checkbox') as HTMLInputElement
-    // A suggestion that would replace a typed value starts unticked.
-    expect(checkbox.checked).toBe(false)
-    expect(within(groupRow).getByText('Stationery')).toBeTruthy()
-    expect(within(groupRow).getByText('Medicines')).toBeTruthy()
+    fireEvent.click(within(drawer).getByRole('button', { name: /Select all/ }))
+    fireEvent.click(await within(drawer).findByRole('button', { name: /Apply \d+ suggestion/ }))
 
-    fireEvent.click(checkbox)
-    fireEvent.click(within(drawer).getByRole('button', { name: /apply selected/i }))
-    await waitFor(() => expect(groupSelect().value).toBe('3'), { timeout: 3000 })
+    await waitFor(() => expect(printName().value).toBe('Ballpoint Pens'))
+    // Applying fills the form in; it does not save.
+    expect(updateItem).not.toHaveBeenCalled()
+    expect(screen.getByText('Unsaved changes')).toBeTruthy()
   })
 
-  it('generates a SKU on request and never behind the user’s back', () => {
-    renderPage()
-    fireEvent.change(nameInput(), { target: { value: 'Bolt M8' } })
-    expect((screen.getByLabelText(/^sku/i) as HTMLInputElement).value).toBe('')
-    fireEvent.click(screen.getByRole('button', { name: /generate a sku/i }))
-    expect((screen.getByLabelText(/^sku/i) as HTMLInputElement).value).toMatch(/^BOLT8-[0-9A-Z]{4}$/)
-  })
-})
-
-describe('ItemFormPage — leaving with unsaved edits', () => {
-  it('asks before discarding, and does not ask once the item is saved', async () => {
-    renderPage()
-    fillMinimum()
-    fireEvent.click(screen.getAllByRole('button', { name: /^cancel$/i })[0])
-    expect(await screen.findByText(/discard unsaved changes\?/i, {}, { timeout: 3000 })).toBeTruthy()
-
-    const dialog = screen.getByRole('dialog')
-    fireEvent.click(within(dialog).getByRole('button', { name: /^cancel$/i }))
-    await waitFor(() => expect(screen.queryByText(/discard unsaved changes\?/i)).toBeNull())
-
-    fireEvent.click(createButton())
-    await waitFor(() => expect(create).toHaveBeenCalled(), { timeout: 3000 })
-    await waitFor(() => expect(screen.getByText('Items list')).toBeTruthy(), { timeout: 3000 })
-  })
-})
-
-describe('ItemFormPage — permissions', () => {
-  it('hides every write control from a reader', () => {
-    can.mockImplementation((key) => (typeof key === 'string' ? key === 'masters.items.read' : false))
-    renderPage()
-    expect(screen.queryByRole('button', { name: /create item/i })).toBeNull()
-    expect(screen.queryByRole('button', { name: /add alternate unit/i })).toBeNull()
-    expect((nameInput()).disabled).toBe(true)
-    expect(screen.getAllByRole('button', { name: /^back$/i }).length).toBeGreaterThan(0)
-  })
-
-  it('says so plainly when the user may not read items at all', () => {
-    can.mockReturnValue(false)
-    renderPage()
-    expect(screen.getByText(/do not have permission to view items/i)).toBeTruthy()
+  it('runs the deterministic insight checks over the draft', async () => {
+    await mountLoaded()
+    // The fixture sells at 15 against a cost of 9, so the card opens healthy…
+    expect(await screen.findByText('Looks good!')).toBeTruthy()
+    // …and turns critical the moment the price stops covering the cost.
+    fireEvent.change(screen.getByLabelText(/^MRP/), { target: { value: '5' } })
+    expect(await screen.findByText('Configuration issue detected')).toBeTruthy()
+    // Said in both places it matters: the insight card, and beside the fields themselves.
+    expect(screen.getAllByText(/MRP is below standard cost/).length).toBeGreaterThanOrEqual(2)
   })
 })

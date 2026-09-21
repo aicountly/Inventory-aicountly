@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { Modal } from '../../../components/Modal'
-import { Notice } from '../../../components/Notice'
-import { Button } from '../../../ui/Button'
+import { Modal } from '../../components/Modal'
+import { Notice } from '../../components/Notice'
+import { Button } from '../../ui/Button'
 
 /**
  * Reading a barcode with the device camera, where the browser can do it.

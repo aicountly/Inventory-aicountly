@@ -3,20 +3,23 @@ import { useAccess } from '../access/AccessContext'
 import { useCompany } from '../company/CompanyContext'
 import { P } from '../services/access'
 import { settingsApi } from '../services/settingsApi'
+import { currencySymbol } from '../utils/format'
 
 /**
- * The company's base currency code, or null while it is unknown.
+ * The symbol the selected company keeps its books in — `₹`, `$`, `AED` — or null when it is not
+ * known here.
  *
- * Aicountly is multi-currency, so a money field may not assume rupees; the code
- * is a company setting and `GET /v1/settings` is the only place Inventory holds
- * it. That endpoint is behind `settings.read`, which the person entering an
- * item may well not have — so the read is GATED on the permission and every
- * failure resolves to null. A money field then renders without an adornment,
- * exactly as every other money field in this app does today. Never a hardcoded
- * symbol: a wrong currency on a cost field is worse than no currency at all.
+ * Aicountly is multi-currency, so a screen that wants to label a money field cannot assume a rupee
+ * (utils/format is explicit about this). The base currency lives on `GET /v1/settings`, which is
+ * behind `settings.read`: a warehouse clerk editing an item may well not have it.
  *
- * Cached per company for the session like `useFormOptions`, so opening five
- * item forms is one request.
+ * So this resolves to null rather than to a guess, and every caller is expected to render the
+ * label without a symbol in that case. A failure — a 403, an outage — is swallowed on purpose:
+ * this is a label, and a red banner about the company settings on top of the item form would be a
+ * cosmetic detail reported as a problem.
+ *
+ * One request per company per session, shared by every screen that asks, in the same shape as
+ * `useFormOptions`.
  */
 const cache = new Map<number, Promise<string | null>>()
 
@@ -25,37 +28,37 @@ function load(cmpId: number): Promise<string | null> {
   if (hit) return hit
   const promise = settingsApi
     .get()
-    .then((s) => {
-      const code = String(s.base_currency_code ?? '').trim().toUpperCase()
-      return /^[A-Z]{3}$/.test(code) ? code : null
+    .then((s) => (s.base_currency_code ? currencySymbol(s.base_currency_code) : null))
+    .catch(() => {
+      cache.delete(cmpId)
+      return null
     })
-    .catch(() => null)
   cache.set(cmpId, promise)
   return promise
 }
 
-export function useBaseCurrency(): string | null {
+export function useBaseCurrencySymbol(): string | null {
   const { scope } = useCompany()
-  const { can } = useAccess()
+  const { can, loading } = useAccess()
   const cmpId = scope?.cmp_id ?? null
-  const allowed = can(P.settingsRead)
-  const [code, setCode] = useState<string | null>(null)
+  const mayRead = !loading && can(P.settingsRead)
+  const [symbol, setSymbol] = useState<string | null>(null)
 
   useEffect(() => {
-    if (cmpId === null || !allowed) {
-      setCode(null)
+    if (cmpId === null || !mayRead) {
+      setSymbol(null)
       return undefined
     }
     let active = true
-    void load(cmpId).then((c) => {
-      if (active) setCode(c)
+    load(cmpId).then((s) => {
+      if (active) setSymbol(s)
     })
     return () => {
       active = false
     }
-  }, [cmpId, allowed])
+  }, [cmpId, mayRead])
 
-  return code
+  return symbol
 }
 
-export default useBaseCurrency
+export default useBaseCurrencySymbol
