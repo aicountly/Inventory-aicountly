@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { DocumentFormPage } from './DocumentFormPage'
+import { ToastProvider } from '../ui/ToastContext'
 
 /*
  * A render-level check that the revamped Opening Stock screen actually mounts
@@ -77,11 +78,13 @@ vi.mock('../services/stockViewsApi', () => ({
 
 function renderOpeningStock() {
   return render(
-    <MemoryRouter initialEntries={['/documents/new/opening_stock']}>
-      <Routes>
-        <Route path="/documents/new/:slug" element={<DocumentFormPage />} />
-      </Routes>
-    </MemoryRouter>,
+    <ToastProvider>
+      <MemoryRouter initialEntries={['/documents/new/opening_stock']}>
+        <Routes>
+          <Route path="/documents/new/:slug" element={<DocumentFormPage />} />
+        </Routes>
+      </MemoryRouter>
+    </ToastProvider>,
   )
 }
 
