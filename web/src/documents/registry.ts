@@ -15,6 +15,7 @@ export type FormKind =
   | 'disassembly'
   | 'physical_count'
   | 'production'
+  | 'assembly'
   | 'job_work_out'
   | 'job_work_in'
   | 'packing'
@@ -93,10 +94,11 @@ export const NATIVE_DOCUMENT_TYPES: DocumentTypeSpec[] = [
   // are stored, not thrown away, and the register can be filtered by supplier.
   spec({ code: 'MATERIAL_RECEIPT', label: 'Material Receipt', description: 'Receive material into stores at a cost.', lineMode: 'fixed_in', formKind: 'lines', valuation: true, cogs: false, rate: true, party: 'supplier' }),
   spec({ code: 'PRODUCTION', label: 'Production', description: 'Consume components from a bill of materials and receive finished goods.', lineMode: 'by_line', formKind: 'production', valuation: true, cogs: true, valuationRate: true }),
-  spec({ code: 'ASSEMBLY', label: 'Assembly', description: 'Assemble a kit: components out, assembled item in.', lineMode: 'by_line', formKind: 'lines', valuation: true, cogs: false, valuationRate: true }),
-  // formKind 'disassembly', not 'lines': the type stays `by_line` on the wire (each stored line
-  // carries its own direction, exactly as before) but the screen is the two-sided workspace —
-  // finished product consumed, components produced — instead of a grid with a Dir. dropdown.
+  // formKind 'assembly' / 'disassembly', not 'lines': both types stay `by_line` on the wire (each
+  // stored line carries its own direction, exactly as before) but each screen is the two-sided
+  // workspace its document actually is — components consumed and a finished item built, or a
+  // finished product consumed and its components produced — instead of a grid with a Dir. dropdown.
+  spec({ code: 'ASSEMBLY', label: 'Assembly', description: 'Assemble a kit: consume components and create finished item.', lineMode: 'by_line', formKind: 'assembly', valuation: true, cogs: false, valuationRate: true }),
   spec({ code: 'DISASSEMBLY', label: 'Disassembly', description: 'Break a finished product into its components and update stock instantly.', lineMode: 'by_line', formKind: 'disassembly', valuation: true, cogs: false, valuationRate: true }),
   // rate: the challan value of the goods sent. Not a valuation — the stock never leaves
   // ownership, so nothing is costed here — but Table 4 of ITC-04 declares the value each challan
