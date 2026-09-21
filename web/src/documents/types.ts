@@ -263,6 +263,23 @@ export interface DocumentMetadata {
   challan_settlements?: ChallanSettlement[]
   linked_source_document_id?: number
   box_marks?: string[]
+  /*
+   * Job work paperwork. These are the details a job-work challan carries and
+   * inv_documents has no column for — the transporter's number, the job worker's
+   * own reference, what the job is. They are held in metadata rather than
+   * migrated into columns because nothing in Inventory reads them: they are
+   * printed and searched, not posted on, and a column per printed field is how a
+   * document table stops being a document table.
+   */
+  challan_no?: string
+  challan_date?: string
+  reference_no?: string
+  job_work_type?: string
+  processing_instructions?: string
+  job_work_priority?: 'normal' | 'high' | 'urgent'
+  responsible_person?: string
+  /** Job Work Inward: the dispatch this receipt was raised against. */
+  reference_outward_document_id?: number
   [key: string]: unknown
 }
 

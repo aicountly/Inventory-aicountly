@@ -1,6 +1,8 @@
 import {
   Activity,
+  ArrowDownToLine,
   ArrowLeftRight,
+  ArrowUpFromLine,
   Barcode,
   BookOpen,
   ChartNoAxesCombined,
@@ -10,6 +12,7 @@ import {
   ClipboardList,
   Cog,
   FilePlus2,
+  Factory,
   FileText,
   FlaskConical,
   Gauge,
@@ -473,6 +476,40 @@ export const SIDEBAR_NAV: readonly SidebarNavItem[] = [
             path: '/documents?status=failed',
             description: 'Documents that could not be posted.',
             icon: ClipboardList,
+          },
+        ],
+      },
+      {
+        /*
+         * Job work is the one workflow in Documents that is two document types
+         * and one position. Until it had a column of its own, both halves were
+         * reachable only through the entry hub's long list, and the quantities
+         * sitting with job workers — the thing the workflow is actually about —
+         * appeared nowhere in the navigation at all.
+         */
+        label: 'Job work',
+        icon: Factory,
+        items: [
+          {
+            label: 'Job Work Inward',
+            path: '/documents/new/job_work_in',
+            description: 'Receive finished goods and settle what is pending with a job worker.',
+            icon: ArrowDownToLine,
+            permissions: ['documents.job_work_in.create', 'documents.create'],
+          },
+          {
+            label: 'Job Work Outward',
+            path: '/documents/new/job_work_out',
+            description: 'Send material out and track it until it is settled.',
+            icon: ArrowUpFromLine,
+            permissions: ['documents.job_work_out.create', 'documents.create'],
+          },
+          {
+            label: 'With job workers',
+            path: '/registers/pending-quantities?kind=job_work',
+            description: 'Every quantity still out on a job-work challan.',
+            icon: Timer,
+            permissions: [P.documentsRead],
           },
         ],
       },
