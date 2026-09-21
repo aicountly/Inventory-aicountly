@@ -41,6 +41,15 @@ export interface StatCardProps {
   /** Makes the whole card a link — the drill-down contract. */
   to?: string
   /**
+   * One extra row under the delta — a progress bar, a share, a second figure.
+   *
+   * Optional and unstyled on purpose: it is for a card that genuinely has a
+   * fourth thing to say (22 of 24 brands are active), not a slot to be filled
+   * on every card because it exists. Cards with and without it keep the same
+   * top three rows, so a strip of them still lines up.
+   */
+  footer?: ReactNode
+  /**
    * `stacked` (the default) is the dashboard tile: tile on top, then the label
    * and the figure. `metric` puts the tile beside them, which reads better in a
    * row of four wide cards over a table — the eye runs down one column of
@@ -138,6 +147,7 @@ export function StatCard({
   invertDelta = false,
   emphasizeNegative = false,
   to,
+  footer,
   layout = 'stacked',
   ornament = false,
   className,
@@ -163,6 +173,16 @@ export function StatCard({
       ? 'text-red-600'
       : 'text-gray-900'
 
+  /*
+   * Decoration yields to content.
+   *
+   * The ornament is pinned to the card's bottom-right corner, which is
+   * exactly where `footer` renders. A card carrying both would draw bars
+   * behind a real control — so a card with a footer simply does not get them.
+   * Nothing is lost: the bars mean nothing by design.
+   */
+  const showOrnament = ornament && !footer
+
   const delta = (
     <>
       {pct != null ? (
@@ -187,9 +207,9 @@ export function StatCard({
         aria-label={to ? `Open ${label}` : undefined}
         padding="sm"
         interactive={Boolean(to)}
-        className={cx(METRIC_SHELL_CLASS, ornament && 'relative overflow-hidden', className)}
+        className={cx(METRIC_SHELL_CLASS, showOrnament && 'relative overflow-hidden', className)}
       >
-        {ornament ? <CardOrnament tone={tone} /> : null}
+        {showOrnament ? <CardOrnament tone={tone} /> : null}
         <IconTile icon={icon} tone={tone} size="lg" />
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
@@ -203,7 +223,8 @@ export function StatCard({
           <p className={cx(METRIC_VALUE_CLASS, valueClass)}>{value}</p>
           {/* The hint truncates against the card edge, which would run it
               under the ornament. Reserve the corner the bars occupy. */}
-          <div className={cx(METRIC_DELTA_ROW_CLASS, ornament && 'pr-12')}>{delta}</div>
+          <div className={cx(METRIC_DELTA_ROW_CLASS, showOrnament && 'pr-12')}>{delta}</div>
+          {footer ? <div className="mt-2">{footer}</div> : null}
         </div>
       </Card>
     )
@@ -235,6 +256,7 @@ export function StatCard({
         </p>
       </div>
       <div className={DELTA_ROW_CLASS}>{delta}</div>
+      {footer ? <div>{footer}</div> : null}
     </Card>
   )
 }

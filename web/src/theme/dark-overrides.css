@@ -198,6 +198,10 @@
 .dark .bg-violet-50 {
   background-color: rgb(76 29 149 / 0.22);
 }
+.dark .bg-violet-50\/70,
+.dark .hover\:bg-violet-50\/70:hover {
+  background-color: rgb(76 29 149 / 0.16);
+}
 .dark .bg-rose-50 {
   background-color: rgb(136 19 55 / 0.22);
 }
@@ -228,7 +232,8 @@
   border-color: rgb(6 95 70 / 0.5);
 }
 .dark .border-amber-200,
-.dark .border-amber-300 {
+.dark .border-amber-300,
+.dark .hover\:border-amber-300:hover {
   border-color: rgb(146 64 14 / 0.5);
 }
 .dark .border-red-100,
@@ -245,13 +250,21 @@
 .dark .hover\:border-sky-300:hover {
   border-color: rgb(7 89 133 / 0.75);
 }
+.dark .border-violet-100,
 .dark .border-violet-200,
-.dark .border-violet-300,
-.dark .hover\:border-violet-300:hover {
+.dark .border-violet-300 {
   border-color: rgb(91 33 182 / 0.5);
+}
+/* A hover border is meant to be visibly brighter than the one it replaces, so
+   this stays its own rule rather than joining the group above. */
+.dark .hover\:border-violet-300:hover {
+  border-color: rgb(109 40 217 / 0.6);
 }
 .dark .border-teal-200 {
   border-color: rgb(17 94 89 / 0.5);
+}
+.dark .border-rose-200 {
+  border-color: rgb(159 18 57 / 0.5);
 }
 .dark .border-indigo-200 {
   border-color: rgb(67 56 202 / 0.5);
@@ -260,7 +273,8 @@
 .dark .text-emerald-600,
 .dark .text-emerald-700,
 .dark .text-emerald-800,
-.dark .text-emerald-900 {
+.dark .text-emerald-900,
+.dark .hover\:text-emerald-800:hover {
   color: rgb(110 231 183);
 }
 .dark .text-amber-600,
@@ -297,7 +311,8 @@
 .dark .hover\:text-violet-700:hover {
   color: rgb(196 181 253);
 }
-.dark .text-rose-600 {
+.dark .text-rose-600,
+.dark .text-rose-700 {
   color: rgb(253 164 175);
 }
 .dark .text-teal-600,
