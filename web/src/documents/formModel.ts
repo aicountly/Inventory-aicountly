@@ -62,6 +62,8 @@ export interface HeaderDraft {
    * Stored as `source_document_no`, which is what the documents register searches on.
    */
   reference: string
+  /** The date on that paperwork. Stored as `source_document_date`. */
+  reference_date: string
   party_ref: string
   party_name: string
   from_warehouse_id: number | null
@@ -134,6 +136,7 @@ export function newHeader(spec: DocumentTypeSpec, today: string): HeaderDraft {
     document_date: today,
     document_no: '',
     reference: '',
+    reference_date: '',
     party_ref: '',
     party_name: '',
     from_warehouse_id: null,
@@ -198,6 +201,7 @@ export function draftFromDocument(doc: InventoryDocument, spec: DocumentTypeSpec
     document_date: doc.document_date?.slice(0, 10) ?? '',
     document_no: doc.document_no ?? '',
     reference: doc.source_document_no ?? '',
+    reference_date: doc.source_document_date?.slice(0, 10) ?? '',
     party_ref: doc.party_ref !== null && doc.party_ref !== undefined ? String(doc.party_ref) : '',
     party_name: doc.party_name ?? '',
     from_warehouse_id: doc.from_warehouse_id,
@@ -291,6 +295,9 @@ export function validateDraft(header: HeaderDraft, lines: LineDraft[], spec: Doc
   }
   if (header.returnable && header.expected_return_date && !/^\d{4}-\d{2}-\d{2}$/.test(header.expected_return_date)) {
     errors.push('Expected return date must be YYYY-MM-DD.')
+  }
+  if (header.reference_date && !/^\d{4}-\d{2}-\d{2}$/.test(header.reference_date)) {
+    errors.push('Reference date must be YYYY-MM-DD.')
   }
   if (spec.formKind === 'inward_challan' && header.stock_effect === 'settle_deferred' && !header.metadata.linked_source_document_id) {
     errors.push('Pick the deferred purchase this inward challan settles.')
@@ -407,6 +414,7 @@ export function toPayload(header: HeaderDraft, lines: LineDraft[], spec: Documen
     document_date: header.document_date,
     document_no: header.document_no.trim() || null,
     source_document_no: header.reference.trim() || null,
+    source_document_date: header.reference_date || null,
     narration: header.narration.trim() || null,
     lines: lines.filter((l) => !isBlankLine(l)).map((l) => lineToPayload(l, spec, header)),
   }

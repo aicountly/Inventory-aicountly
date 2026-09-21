@@ -334,3 +334,42 @@ export function validateItemForm(f: ItemFormState): Record<string, string> {
   })
   return errors
 }
+
+/**
+ * What a duplicate KEEPS and what it must drop — stated once.
+ *
+ * A duplicate keeps everything that makes two items alike: classification,
+ * units and conversions, tax attributes, tracking flags, the reorder policy.
+ * It drops everything that belongs to exactly one item:
+ *
+ *  - the SKU and the barcode, which are identifiers and unique per company.
+ *    Carrying them over either fails on the first save or, worse, succeeds and
+ *    leaves two items answering the same scan.
+ *  - the opening stock, because an opening quantity is a statement about
+ *    physical goods counted on a date. A copied opening is stock that was never
+ *    received, and the valuation engine would faithfully cost it.
+ *
+ * The name gets a suffix so the copy cannot be saved under the original's name
+ * by someone who tabbed straight past the first field.
+ *
+ * One function because there are two ways in — the item form's own Duplicate
+ * action, which copies the draft on screen, and Duplicate on the items list,
+ * which copies a saved record. Two copies of this rule would drift, and the
+ * thing that drifts is which fields are safe to carry.
+ */
+export function duplicateDraft(form: ItemFormState): ItemFormState {
+  return {
+    ...form,
+    item_name: `${form.item_name} (copy)`.trim(),
+    item_sku: '',
+    item_upc: '',
+    openings: [],
+    // Fresh objects: the copy is edited independently of the draft it came from.
+    unitLines: form.unitLines.map((l) => ({ ...l })),
+  }
+}
+
+/** The same rule, entered from a saved item rather than from a draft on screen. */
+export function duplicateItemForm(item: Item): ItemFormState {
+  return duplicateDraft(itemToForm(item, [], 0))
+}
