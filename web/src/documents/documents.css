@@ -82,6 +82,7 @@
 .line-tag {
   display: inline-block;
   margin-top: 0.125rem;
+  margin-left: 0.25rem;
   padding: 0 0.375rem;
   border-radius: 999px;
   background: var(--info-bg);
@@ -90,6 +91,31 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+.line-tag:first-child {
+  margin-left: 0;
+}
+
+.line-tag-warning {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+/* Briefly marks a line just added in bulk (scan, import, copy, add-multiple) so the eye can
+   find it without hunting through the table. Fades on its own; nothing has to remove the class
+   in time for it to look right, only before it would flash a second time. */
+@keyframes line-flash {
+  from {
+    background: var(--info-bg);
+  }
+  to {
+    background: transparent;
+  }
+}
+
+.line-flash td {
+  animation: line-flash 900ms ease-out;
 }
 
 .avail {
