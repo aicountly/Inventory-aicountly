@@ -1,5 +1,5 @@
 import { MasterPage } from '../../masters/MasterPage'
-import { batchesConfig, itemGroupsConfig, warehousesConfig } from '../../masters/configs'
+import { itemGroupsConfig, warehousesConfig } from '../../masters/configs'
 import { UnitsOfMeasurePage } from './uom/UnitsOfMeasurePage'
 
 export { StockCategoriesPage } from './stockCategories/StockCategoriesPage'
@@ -57,6 +57,14 @@ export function WarehousesPage() {
    `pages/masters/locations/LocationsPage`, still reusing `locationsConfig` for
    the form and the API, and the route points straight at it. */
 
-export function BatchesPage() {
-  return <MasterPage config={batchesConfig} breadcrumbs={crumbs} />
-}
+/*
+ * Batches is NOT here.
+ *
+ * Its question is rarely "which batch is this" and almost always "what is about
+ * to go off, where is it, and how much of it is there" — server-counted
+ * figures, derived expiry health, an inspector, labels and an import, none of
+ * which a MasterConfig can describe. It has its own workspace at
+ * `pages/masters/batches`. `batchesConfig` stays in configs.tsx and remains the
+ * single source of truth for the batch FORM and the export columns; that screen
+ * reads it rather than re-declaring the fields.
+ */
