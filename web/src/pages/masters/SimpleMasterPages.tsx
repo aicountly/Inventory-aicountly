@@ -1,7 +1,13 @@
 import { MasterPage } from '../../masters/MasterPage'
-import { batchesConfig, brandsConfig, itemGroupsConfig, locationsConfig, stockCategoriesConfig, uomConfig, warehouseGroupsConfig, warehousesConfig } from '../../masters/configs'
+import { batchesConfig, brandsConfig, itemGroupsConfig, stockCategoriesConfig, uomConfig, warehouseGroupsConfig, warehousesConfig } from '../../masters/configs'
 
-/** Master screens that are entirely described by a config. */
+/**
+ * Master screens that are entirely described by a config.
+ *
+ * Locations is no longer one of them: it has its own workspace in
+ * `pages/masters/locations`, which still reuses `locationsConfig` for the form
+ * and the API. The route points straight at it.
+ */
 
 const crumbs = [{ label: 'Masters', to: '/masters' }]
 
@@ -27,10 +33,6 @@ export function WarehouseGroupsPage() {
 
 export function WarehousesPage() {
   return <MasterPage config={warehousesConfig} breadcrumbs={crumbs} />
-}
-
-export function LocationsPage() {
-  return <MasterPage config={locationsConfig} breadcrumbs={crumbs} />
 }
 
 export function BatchesPage() {
