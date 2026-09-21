@@ -9,6 +9,7 @@ import { Badge } from '../ui/Badge'
 import { BreadcrumbHeader } from '../ui/shell/BreadcrumbHeader'
 import { PageShell } from '../ui/shell/PageShell'
 import { DocumentForm } from './DocumentForm'
+import { BatchAdjustmentPage } from './batch/BatchAdjustmentPage'
 import { DeliveryChallanForm } from './challan/DeliveryChallanForm'
 import { ConsumptionForm } from './consumption/ConsumptionForm'
 import { InwardChallanForm } from './grn/InwardChallanForm'
@@ -101,6 +102,21 @@ export function DocumentFormPage() {
       )
     }
     if (!isEditable(doc.status)) {
+      // The batch workspace reads as well as it writes, so a posted adjustment opens in it
+      // read-only instead of on a dead end with a link.
+      if (spec.code === 'BATCH_ADJUSTMENT') {
+        return (
+          <BatchAdjustmentPage
+            key={doc.document_id}
+            spec={spec}
+            documentId={doc.document_id}
+            documentNo={doc.document_no}
+            initial={draftFromDocument(doc, spec)}
+            readOnly
+            statusLabel={STATUS_LABELS[doc.status as DocumentStatus] ?? doc.status}
+          />
+        )
+      }
       return (
         <PageShell>
           <BreadcrumbHeader
@@ -138,6 +154,19 @@ export function DocumentFormPage() {
           documentId={doc.document_id}
           initial={initial}
           existing={doc}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
+    if (spec.code === 'BATCH_ADJUSTMENT') {
+      return (
+        <BatchAdjustmentPage
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          documentNo={doc.document_no}
+          initial={initial}
+          statusLabel={STATUS_LABELS[doc.status as DocumentStatus] ?? doc.status}
           onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
         />
       )
@@ -226,6 +255,9 @@ export function DocumentFormPage() {
   const s = spec as NonNullable<typeof spec>
   if (s.code === 'STOCK_TRANSFER') {
     return <StockTransferWorkspace key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
+  if (s.code === 'BATCH_ADJUSTMENT') {
+    return <BatchAdjustmentPage key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
   }
   if (s.code === 'CONSUMPTION') {
     return <ConsumptionForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />

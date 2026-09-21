@@ -218,6 +218,9 @@
 
 /* An opacity modifier asks for a weaker wash, so scale the dark one by the same
    fraction rather than letting `/60` fall back to the light pastel. */
+.dark .bg-emerald-50\/60 {
+  background-color: rgb(6 78 59 / 0.13);
+}
 .dark .bg-amber-50\/60 {
   background-color: rgb(120 53 15 / 0.13);
 }
