@@ -39,6 +39,13 @@ Warehouse group fields: `grp_name` (required, unique per company), `grp_code` (o
 
 `GET /v1/brands/sales` → `{available, reason, currency, rows[{brand_id, sales, trend[]|null}]}`. A **relay**, not a store: Inventory holds no turnover for a brand and this endpoint creates none — it asks Books (`integration/inventory/brand-sales`) for the company / FY / branch on screen and hands the answer back. It answers `200` whether or not Books could be reached, with `available:false` and a `reason` of `not_configured` (the relay is switched off), `not_implemented` (Books does not serve the path yet) or `unavailable`. Nothing is written and nothing is cached across requests.
 
+#### Stock categories — two extra reads and a bulk write
+`/v1/item-groups` and `/v1/stock-categories` return `item_count` on every row, counted for the whole page in one grouped query, never a count per row. `GET /v1/stock-categories?sort=item_count&order=desc` ranks by that same count over the whole company rather than over the page that was fetched.
+
+`GET /v1/stock-categories/summary` → `{total, active, inactive, created_this_month, most_used{stock_cat_id, cat_name, item_count}|null, uncategorised_items}`. Counted over the whole company, NOT over the caller's filters: these are the figures above the list, and a reader who searches or turns a page must not watch them move. `most_used` is `null` while nothing is categorised — the endpoint says so rather than naming a category that carries nothing.
+
+`POST /v1/stock-categories/bulk-status {ids:[…], is_active:0|1}` → `{updated, is_active}`. Only rows whose status actually moves are touched, so an unchanged row keeps its `updated_at`, and each row that does move writes its own `stock_category.activate` / `.deactivate` audit entry with before / after.
+
 `POST /v1/bill-of-materials/{id}/explode {production_qty, warehouse_id?, finished_rate?, document_date?, narration?}` → the ready-to-create PRODUCTION payload (component OUT lines scaled by `production_qty / yield_qty` plus scrap %, by-product IN lines, finished IN line at `finished_rate`, `metadata{bom_id, production_qty, finished_rate, warehouse_id}`). Nothing is saved.
 
 ## Availability

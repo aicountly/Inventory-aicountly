@@ -1,6 +1,8 @@
 import { MasterPage } from '../../masters/MasterPage'
-import { batchesConfig, itemGroupsConfig, stockCategoriesConfig, warehousesConfig } from '../../masters/configs'
+import { batchesConfig, itemGroupsConfig, warehousesConfig } from '../../masters/configs'
 import { UnitsOfMeasurePage } from './uom/UnitsOfMeasurePage'
+
+export { StockCategoriesPage } from './stockCategories/StockCategoriesPage'
 
 /** Master screens that are entirely described by a config. */
 
@@ -10,9 +12,15 @@ export function ItemGroupsPage() {
   return <MasterPage config={itemGroupsConfig} breadcrumbs={crumbs} />
 }
 
-export function StockCategoriesPage() {
-  return <MasterPage config={stockCategoriesConfig} breadcrumbs={crumbs} />
-}
+/*
+ * Stock categories is NOT here either.
+ *
+ * Company-wide figures over the list, a usage count per row with the actions
+ * that count implies, and a selection that survives paging are not things a
+ * `MasterConfig` can describe. Its screen lives at
+ * `pages/masters/stockCategories/StockCategoriesPage.tsx` and is re-exported
+ * above, so the router still imports every simple master from one place.
+ */
 
 /*
  * Brands is NOT here.
