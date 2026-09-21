@@ -66,6 +66,8 @@ $routes->group('', ['namespace' => 'App\Controllers\Api', 'filter' => 'cors'], s
         // otherwise be read as ids by the loop's own `uom/(:num)`; the brands pair only matches
         // digits so there is no collision either way, but a literal segment that must win belongs
         // above the placeholder that could one day be widened.
+        $routes->get('stock-categories/summary', 'StockCategoriesController::summary');
+        $routes->post('stock-categories/bulk-status', 'StockCategoriesController::bulkStatus');
         $routes->get('brands/metrics', 'BrandsController::metrics');
         $routes->get('brands/sales', 'BrandsController::sales');
         $routes->get('uom/summary', 'UomController::summary');
@@ -140,6 +142,10 @@ $routes->group('', ['namespace' => 'App\Controllers\Api', 'filter' => 'cors'], s
         $routes->get('inventory-documents/(:num)/print-snapshot', 'DocumentsController::printSnapshot/$1');
         $routes->get('pending-quantities', 'PendingController::index');
         $routes->get('pending-quantities/(:num)', 'PendingController::show/$1');
+        // Job work. The dispatch and the receipt are ordinary documents above;
+        // this is only the aggregate the entry screens read (JobWorkController).
+        $routes->get('job-work/summary', 'JobWorkController::summary');
+        $routes->get('job-work/workers', 'JobWorkController::workers');
         $routes->get('packing-lists', 'PackingController::index');
         $routes->get('packing-lists/(:num)', 'PackingController::show/$1');
         $routes->post('packing-lists/(:num)/unpack', 'PackingController::unpack/$1');

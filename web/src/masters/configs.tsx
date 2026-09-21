@@ -1,6 +1,6 @@
 import { ActiveBadge, StatusBadge, statusBadgeLabel } from '../components/StatusBadge'
-import { batchesApi, itemGroupsApi, locationsApi, stockCategoriesApi, warehouseGroupsApi, warehousesApi, BATCH_STATUSES, LOCATION_TYPES, WAREHOUSE_TYPES } from '../services/masters'
-import type { Batch, ItemGroup, Location, StockCategory, Warehouse } from '../services/masters'
+import { batchesApi, itemGroupsApi, locationsApi, warehouseGroupsApi, warehousesApi, BATCH_STATUSES, LOCATION_TYPES, WAREHOUSE_TYPES } from '../services/masters'
+import type { Batch, ItemGroup, Location, Warehouse } from '../services/masters'
 import { formatDate, formatDateTime, formatInt, formatQty, humanize } from '../utils/format'
 import { isPickedItem } from './formValues'
 import { buildTree, descendantIds } from './tree'
@@ -77,28 +77,15 @@ export const itemGroupsConfig: MasterConfig<ItemGroup> = {
   },
 }
 
-export const stockCategoriesConfig: MasterConfig<StockCategory> = {
-  slug: 'stock-categories',
-  permissionSlug: 'stock_categories',
-  title: 'Stock categories',
-  singular: 'Stock category',
-  idKey: 'stock_cat_id',
-  nameOf: (r) => r.cat_name,
-  api: stockCategoriesApi,
-  defaultSort: 'cat_name',
-  needsFormOptions: false,
-  columns: [
-    { key: 'cat_name', header: 'Category', sortKey: 'cat_name', render: (r) => <strong>{r.cat_name}</strong> },
-    { key: 'cat_alias', header: 'Alias', sortKey: 'cat_alias' },
-    activeColumn<StockCategory>(),
-    updatedAt<StockCategory>(),
-  ],
-  fields: [
-    { name: 'cat_name', label: 'Category name', type: 'text', required: true, maxLength: 255, span: 2 },
-    { name: 'cat_alias', label: 'Alias', type: 'text', maxLength: 64 },
-    { name: 'is_active', label: 'Active', type: 'checkbox' },
-  ],
-}
+/*
+ * No stockCategoriesConfig.
+ *
+ * Stock categories outgrew the generic master screen the same way Brands and
+ * Units of measure did — company-wide figures over the list, a usage count per
+ * row with the actions that count implies, a selection that survives paging —
+ * and is rendered by `pages/masters/stockCategories/StockCategoriesPage.tsx`.
+ * A config left here would be a second, silent definition of that screen.
+ */
 
 /*
  * No brandsConfig.
