@@ -1,6 +1,6 @@
 import { memo, useCallback } from 'react'
 import type { ReactNode } from 'react'
-import { ArrowUpFromLine, Merge, Plus, Trash2, Wand2 } from 'lucide-react'
+import { ArrowUpFromLine, Hash, Merge, Plus, Trash2, Wand2 } from 'lucide-react'
 import type { FormOptionWarehouse } from '../../services/items'
 import type { ItemSearchRow } from '../../services/lookupApi'
 import { Badge } from '../../ui/Badge'
@@ -148,7 +148,19 @@ const ComponentRow = memo(function ComponentRow({
               onChange={(serials) => update({ serials })}
               requiredCount={need}
               disabled={disabled}
-              variant="field"
+              renderTrigger={(open, state) => (
+                <Button
+                  size="xs"
+                  variant={state.mismatch ? 'danger' : 'secondary'}
+                  icon={Hash}
+                  onClick={open}
+                  disabled={disabled}
+                  className="w-full justify-start"
+                >
+                  Serials {state.count}
+                  {state.required > 0 ? ` / ${state.required}` : ''}
+                </Button>
+              )}
             />
           </div>
         ) : null}

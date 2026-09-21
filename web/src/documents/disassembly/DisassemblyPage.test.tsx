@@ -87,6 +87,7 @@ vi.mock('../../services/lookupApi', () => ({
     bom: vi.fn(),
     batches: vi.fn(async () => ({ data: [], meta: {} })),
     serials: vi.fn(async () => ({ data: [], meta: {} })),
+    byBarcode: vi.fn(),
     itemByBarcode: vi.fn(),
   },
 }))

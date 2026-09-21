@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Hash } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { Modal } from '../components/Modal'
-import { Button } from '../ui/Button'
 import { Notice } from '../components/Notice'
 import { errorMessage, isAbortError } from '../services/api'
 import { lookupApi } from '../services/lookupApi'
@@ -21,17 +20,21 @@ interface SerialPickerProps {
   requiredCount: number
   disabled?: boolean
   /**
-   * Which button styling the trigger uses. `legacy` is the `.btn` of components/ui.css the
-   * existing document editors are laid out against; `field` renders the Books-language Button.
+   * Replaces the default trigger button.
+   *
+   * The picker's behaviour — which serials it offers, the registration of new
+   * ones, the count against the line quantity — is the same wherever it is
+   * used; only the button belongs to the grid it sits in. A caller with its own
+   * design language renders that button and calls `open`.
    */
-  variant?: 'legacy' | 'field'
+  renderTrigger?: (open: () => void, state: { count: number; required: number; mismatch: boolean }) => ReactNode
 }
 
 /**
  * Serial numbers for a line. Issues pick from `in_stock` serials at the warehouse; receipts
  * pick registered `expected` serials or register new ones through `POST /v1/serials/bulk`.
  */
-export function SerialPicker({ itemId, itemName, warehouseId, batchId, direction, value, onChange, requiredCount, disabled, variant = 'legacy' }: SerialPickerProps) {
+export function SerialPicker({ itemId, itemName, warehouseId, batchId, direction, value, onChange, requiredCount, disabled, renderTrigger }: SerialPickerProps) {
   const [open, setOpen] = useState(false)
   const [rows, setRows] = useState<SerialRow[]>([])
   const [loading, setLoading] = useState(false)
@@ -104,18 +107,8 @@ export function SerialPicker({ itemId, itemName, warehouseId, batchId, direction
 
   return (
     <>
-      {variant === 'field' ? (
-        <Button
-          size="xs"
-          variant={mismatch ? 'danger' : 'secondary'}
-          icon={Hash}
-          onClick={() => setOpen(true)}
-          disabled={disabled}
-          className="w-full justify-start"
-        >
-          Serials {value.length}
-          {requiredCount > 0 ? ` / ${requiredCount}` : ''}
-        </Button>
+      {renderTrigger ? (
+        renderTrigger(() => setOpen(true), { count: value.length, required: requiredCount, mismatch })
       ) : (
         <button type="button" className={`btn btn-sm${mismatch ? ' btn-danger' : ''}`} onClick={() => setOpen(true)} disabled={disabled}>
           Serials {value.length}

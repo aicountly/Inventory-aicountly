@@ -1,5 +1,5 @@
 import { memo, useCallback } from 'react'
-import { ArrowDownToLine, PackageSearch, Plus, Trash2 } from 'lucide-react'
+import { ArrowDownToLine, Hash, PackageSearch, Plus, Trash2 } from 'lucide-react'
 import type { FormOptionWarehouse } from '../../services/items'
 import type { ItemSearchRow } from '../../services/lookupApi'
 import type { AvailabilityCheckResult } from '../../services/stockApi'
@@ -133,7 +133,19 @@ const FinishedRow = memo(function FinishedRow({
               onChange={(serials) => update({ serials })}
               requiredCount={need}
               disabled={disabled}
-              variant="field"
+              renderTrigger={(open, state) => (
+                <Button
+                  size="xs"
+                  variant={state.mismatch ? 'danger' : 'secondary'}
+                  icon={Hash}
+                  onClick={open}
+                  disabled={disabled}
+                  className="w-full justify-start"
+                >
+                  Serials {state.count}
+                  {state.required > 0 ? ` / ${state.required}` : ''}
+                </Button>
+              )}
             />
           </div>
         ) : null}

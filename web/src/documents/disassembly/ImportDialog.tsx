@@ -67,7 +67,7 @@ export function ImportDialog({ open, onClose, warehouseId, onApply }: ImportDial
     const out: ResolvedImportRow[] = []
     for (const row of parsed) {
       try {
-        const item = await lookupApi.itemByBarcode(row.code, warehouseId)
+        const item = await lookupApi.byBarcode(row.code, { warehouseId })
         out.push({ ...row, status: 'ready', item, note: item.item_name })
         continue
       } catch (err) {

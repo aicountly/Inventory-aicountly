@@ -58,6 +58,24 @@ class InventoryReportService
     public const STOCK_AGEING_SORTABLE = ['item_name', 'total_qty', 'total_value', 'oldest_days', 'newest_days', 'weighted_age_days', 'health_status', 'item_id'];
 
     public const MOVEMENT_CLASSES = ['fast', 'slow', 'non_moving', 'dead'];
+
+    /**
+     * The stock-health vocabulary of the warehouse-stock register, worst first.
+     *
+     * Ordered so a caller that wants "the states worth acting on" can take a prefix, and
+     * so the counts in `summary.health` read down the screen the way the badges do. See
+     * self::stockHealth() for what each one means.
+     */
+    public const STOCK_HEALTH = ['negative', 'out', 'reorder', 'low', 'overstocked', 'healthy'];
+
+    /**
+     * Named sets of stock-health states, for the filter that a reader actually wants.
+     *
+     * "Show me what needs attention" is one question, and answering it with four visits to
+     * a dropdown is four chances to conclude the register is clean because the state that
+     * was checked happened to be empty.
+     */
+    public const STOCK_HEALTH_GROUPS = ['attention' => ['negative', 'out', 'reorder', 'low']];
     public const SERIAL_STOCK_STATUSES = ['in_stock', 'reserved', 'in_transit', 'damaged'];
 
     private const EPS = 0.00005;
@@ -339,16 +357,38 @@ class InventoryReportService
     // ------------------------------------------------------------------ warehouse stock
 
     /**
-     * Closing quantity and value per item per warehouse as at `to`.
+     * Closing quantity and value per item per warehouse as at `to`, with the stock-health
+     * verdict each row earns from the item's own thresholds.
      *
-     * @param array{item_grp_id?:int, stock_cat_id?:int, warehouse_id?:int, item_id?:int, to?:?string, nonzero?:bool, sort?:string, order?:string} $f
+     * Three things are worth knowing before reading a figure off this report:
+     *
+     *  - `closing_qty` / `closing_value` are DATED: opening plus every movement up to `to`,
+     *    valued by the replay at `method`. They answer "what did we hold that evening".
+     *  - `reserved_qty` / `available_qty` are NOT dated. They come from inv_stock_balances,
+     *    which is the position as it stands and carries no date dimension at all, so they
+     *    are filled in only when the register is read as at today or later and are null
+     *    otherwise. `available_qty` is the same expression the stock balance register and
+     *    the replenishment report use — free to promise, not "closing minus reserved".
+     *  - `stock_health` compares the ITEM's position across the rows this query returned
+     *    (one warehouse when one is filtered, the company otherwise) against the item's
+     *    thresholds, because a reorder point is a property of the item and not of a shelf.
+     *    Negative and out-of-stock are per row, being facts about that row alone.
+     *
+     * `summary.health` counts every state over the set matching every filter EXCEPT
+     * `health`, so the KPI card that offers to filter by it can say what it would find.
+     *
+     * @param array{item_grp_id?:int, stock_cat_id?:int, warehouse_id?:int, item_id?:int, to?:?string, nonzero?:bool, method?:string, health?:?string, sort?:string, order?:string} $f
      * @return array{rows: list<array<string, mixed>>, total: int, summary: array<string, mixed>}
      */
     public function warehouseStock(int $cmpId, int $fyId, int $boId, array $f, int $limit, int $offset): array
     {
-        $to = $f['to'] ?? null ?: date('Y-m-d');
+        $today = date('Y-m-d');
+        $to = $f['to'] ?? null ?: $today;
         $itemId = (int) ($f['item_id'] ?? 0) ?: null;
         $wh = (int) ($f['warehouse_id'] ?? 0) ?: null;
+        $method = (string) ($f['method'] ?? '') ?: 'AS_PER_MASTER';
+        $health = strtolower(trim((string) ($f['health'] ?? '')));
+        $wanted = self::stockHealthFilterSet($health);
         $qtyRows = $this->balances->closingQuantities($cmpId, $fyId, $boId, null, $to, $itemId, $wh);
         if (!empty($f['nonzero'])) {
             $qtyRows = array_filter($qtyRows, static fn ($r) => abs($r['closing_qty']) > self::EPS);
@@ -368,22 +408,30 @@ class InventoryReportService
                 $byWh[(int) ($r['warehouse_id'] ?? 0)][] = (int) $r['item_id'];
             }
             foreach ($byWh as $w => $whItems) {
-                $costs[$w] = $this->valuation->unitCostsForItems($cmpId, $fyId, $whItems, $to, 'AS_PER_MASTER', $boId, $w > 0 ? $w : null);
+                $costs[$w] = $this->valuation->unitCostsForItems($cmpId, $fyId, $whItems, $to, $method, $boId, $w > 0 ? $w : null);
             }
         } else {
-            $company = $this->valuation->unitCostsForItems($cmpId, $fyId, $ids, $to, 'AS_PER_MASTER', $boId, $wh);
+            $company = $this->valuation->unitCostsForItems($cmpId, $fyId, $ids, $to, $method, $boId, $wh);
             $costs = ['*' => $company];
         }
 
-        $rows = [];
-        $summary = ['rows' => 0, 'closing_qty' => 0.0, 'closing_value' => 0.0, 'by_warehouse' => [], 'to' => $to];
+        // The live buckets belong to today's shelf, so they are asked for only when the
+        // register is being read as at today. A back-dated read leaves them null rather
+        // than printing this morning's reservations against last March's closing stock.
+        $liveBuckets = $to >= $today;
+        $buckets = $liveBuckets ? $this->liveStockBuckets($cmpId, $boId, $itemId, $wh) : [];
+
+        // Pass one: the row's own arithmetic, plus the item's position across the rows
+        // this query returned — which is what a threshold is compared against.
+        $draft = [];
+        $itemQty = [];
         foreach ($qtyRows as $r) {
             $id = (int) $r['item_id'];
             $w = (int) ($r['warehouse_id'] ?? 0);
             $c = $costs['*'][$id] ?? $costs[$w][$id] ?? ['unit_cost' => 0.0, 'method' => null];
             $cost = round((float) $c['unit_cost'], 4);
-            $value = round($r['closing_qty'] * $cost, 4);
-            $rows[] = $this->itemColumns($items[$id] ?? null, $id) + [
+            $bucket = $buckets[$id . ':' . $w] ?? null;
+            $draft[] = $this->itemColumns($items[$id] ?? null, $id) + [
                 'warehouse_id'   => $w > 0 ? $w : null,
                 'warehouse_name' => $warehouses[$w]['warehouse_name'] ?? ($w > 0 ? null : '(no warehouse)'),
                 'warehouse_code' => $warehouses[$w]['warehouse_code'] ?? null,
@@ -391,23 +439,232 @@ class InventoryReportService
                 'in_qty'         => $r['in_qty'],
                 'out_qty'        => $r['out_qty'],
                 'closing_qty'    => $r['closing_qty'],
+                'reserved_qty'   => $liveBuckets ? (float) ($bucket['reserved'] ?? 0.0) : null,
+                'available_qty'  => $liveBuckets ? (float) ($bucket['available'] ?? 0.0) : null,
                 'unit_cost'      => $cost,
-                'closing_value'  => $value,
+                'closing_value'  => round($r['closing_qty'] * $cost, 4),
                 'valuation_method_applied' => $c['method'] ?? null,
-            ];
-            $summary['rows']++;
-            $summary['closing_qty'] += $r['closing_qty'];
-            $summary['closing_value'] += $value;
-            $summary['by_warehouse'][$w] ??= ['warehouse_id' => $w > 0 ? $w : null, 'warehouse_name' => $warehouses[$w]['warehouse_name'] ?? null, 'closing_qty' => 0.0, 'closing_value' => 0.0];
-            $summary['by_warehouse'][$w]['closing_qty'] = round($summary['by_warehouse'][$w]['closing_qty'] + $r['closing_qty'], 4);
-            $summary['by_warehouse'][$w]['closing_value'] = round($summary['by_warehouse'][$w]['closing_value'] + $value, 4);
+            ] + self::itemStockLevels($items[$id] ?? null);
+            $itemQty[$id] = round(($itemQty[$id] ?? 0.0) + $r['closing_qty'], 4);
         }
-        $summary['closing_qty'] = round($summary['closing_qty'], 4);
-        $summary['closing_value'] = round($summary['closing_value'], 4);
+
+        // Pass two: the verdict, the health filter, and the aggregates over what survives.
+        $rows = [];
+        $counts = array_fill_keys(self::STOCK_HEALTH, 0);
+        // Rows AND items: a badge is per row, but "eight items to reorder" is the
+        // sentence a buyer acts on, and one item short in three warehouses is one
+        // purchase order. An item can appear under two states — negative is a fact
+        // about one shelf while reorder is a fact about the item — so the item counts
+        // do not add up to the item total, and are not meant to.
+        $countItems = array_fill_keys(self::STOCK_HEALTH, []);
+        $summary = [
+            'rows' => 0, 'items' => 0, 'warehouses' => 0,
+            'closing_qty' => 0.0, 'closing_value' => 0.0,
+            'reserved_qty' => $liveBuckets ? 0.0 : null, 'available_qty' => $liveBuckets ? 0.0 : null,
+            'by_warehouse' => [], 'to' => $to,
+        ];
+        $seenItems = [];
+        $seenWarehouses = [];
+        foreach ($draft as $row) {
+            $id = (int) $row['item_id'];
+            $verdict = self::stockHealth((float) $row['closing_qty'], $itemQty[$id] ?? 0.0, $row);
+            $counts[$verdict]++;
+            $countItems[$verdict][$id] = true;
+            if ($wanted !== null && !in_array($verdict, $wanted, true)) {
+                continue;
+            }
+            $row['stock_health'] = $verdict;
+            $rows[] = $row;
+            $w = (int) ($row['warehouse_id'] ?? 0);
+            $seenItems[$id] = true;
+            $seenWarehouses[$w] = true;
+            $summary['rows']++;
+            $summary['closing_qty'] += $row['closing_qty'];
+            $summary['closing_value'] += $row['closing_value'];
+            if ($liveBuckets) {
+                $summary['reserved_qty'] += (float) $row['reserved_qty'];
+                $summary['available_qty'] += (float) $row['available_qty'];
+            }
+            $summary['by_warehouse'][$w] ??= ['warehouse_id' => $w > 0 ? $w : null, 'warehouse_name' => $warehouses[$w]['warehouse_name'] ?? null, 'closing_qty' => 0.0, 'closing_value' => 0.0, 'items' => 0];
+            $summary['by_warehouse'][$w]['closing_qty'] = round($summary['by_warehouse'][$w]['closing_qty'] + $row['closing_qty'], 4);
+            $summary['by_warehouse'][$w]['closing_value'] = round($summary['by_warehouse'][$w]['closing_value'] + $row['closing_value'], 4);
+            $summary['by_warehouse'][$w]['items']++;
+        }
+        foreach (['closing_qty', 'closing_value', 'reserved_qty', 'available_qty'] as $k) {
+            $summary[$k] = $summary[$k] === null ? null : round((float) $summary[$k], 4);
+        }
+        $summary['items'] = count($seenItems);
+        $summary['warehouses'] = count($seenWarehouses);
         $summary['by_warehouse'] = array_values($summary['by_warehouse']);
-        self::sortRows($rows, $f['sort'] ?? 'item_name', $f['order'] ?? 'ASC', ['item_name', 'warehouse_name', 'closing_qty', 'closing_value', 'item_id'], 'warehouse_name');
+        // Warehouses the company operates, not the ones this filter happened to reach: the
+        // card reads "Active warehouses", and three of four standing empty is the news.
+        $summary['active_warehouses'] = count(array_filter(
+            $warehouses,
+            static fn ($w) => (int) ($w['is_active'] ?? 0) === 1 && ($boId <= 0 || (int) ($w['bo_id'] ?? 0) === 0 || (int) ($w['bo_id'] ?? 0) === $boId),
+        ));
+        $summary['health'] = $counts;
+        $summary['health_items'] = array_map('count', $countItems);
+        $summary['health_filter'] = $health !== '' ? $health : null;
+        $summary['method'] = $method;
+        $summary['live_buckets'] = $liveBuckets;
+        $summary['currency'] = $this->baseCurrency($cmpId);
+        if (($f['sort'] ?? '') === 'stock_health') {
+            // Alphabetical on the token would read healthy, low, negative, out… — the one
+            // order nobody sorting a health column is asking for. STOCK_HEALTH is already
+            // worst-first, so the rank in it IS the sort.
+            $rank = array_flip(self::STOCK_HEALTH);
+            $dir = strtoupper((string) ($f['order'] ?? 'ASC')) === 'DESC' ? -1 : 1;
+            usort($rows, static function ($a, $b) use ($rank, $dir) {
+                $c = ($rank[$a['stock_health']] ?? 99) <=> ($rank[$b['stock_health']] ?? 99);
+
+                return $c !== 0 ? $dir * $c : strcasecmp((string) $a['item_name'], (string) $b['item_name']);
+            });
+        } else {
+            self::sortRows($rows, $f['sort'] ?? 'item_name', $f['order'] ?? 'ASC', ['item_name', 'item_sku', 'warehouse_name', 'closing_qty', 'reserved_qty', 'available_qty', 'unit_cost', 'closing_value', 'item_id'], 'warehouse_name');
+        }
 
         return ['rows' => array_slice($rows, $offset, $limit), 'total' => count($rows), 'summary' => $summary];
+    }
+
+    /**
+     * The item's stock thresholds, as the register carries them.
+     *
+     * Passed through to the client so a status badge can say WHY a row is amber without
+     * a second request per row, and so the CSV a buyer works from carries the number the
+     * verdict was reached against.
+     *
+     * @param array<string, mixed>|null $meta
+     * @return array<string, float|null>
+     */
+    private static function itemStockLevels(?array $meta): array
+    {
+        $num = static fn ($v) => $v === null || $v === '' ? null : round((float) $v, 4);
+
+        return [
+            'min_stock_qty'     => $num($meta['min_stock_qty'] ?? null),
+            'max_stock_qty'     => $num($meta['max_stock_qty'] ?? null),
+            'reorder_point_qty' => $num($meta['reorder_point_qty'] ?? null),
+            'safety_stock_qty'  => $num($meta['safety_stock_qty'] ?? null),
+        ];
+    }
+
+    /**
+     * Reserved and free-to-promise quantity per item x warehouse, from the materialised
+     * balances.
+     *
+     * `available` is the expression StockBalanceService::list and the replenishment report
+     * already use, so "free to promise" means one thing everywhere in Inventory. There is
+     * no bo_id on inv_stock_balances, so a branch is scoped through its warehouses exactly
+     * as batch stock and serial stock scope theirs.
+     *
+     * @return array<string, array{reserved: float, available: float}> keyed "item:warehouse"
+     */
+    private function liveStockBuckets(int $cmpId, int $boId, ?int $itemId, ?int $wh): array
+    {
+        $where = 'b.cmp_id = ?';
+        $binds = [$cmpId];
+        $this->appendIntFilter($where, $binds, 'b.item_id', $itemId);
+        $this->appendIntFilter($where, $binds, 'b.warehouse_id', $wh);
+        $this->appendBranchFilter($where, $binds, $boId);
+        $sql = 'SELECT b.item_id, COALESCE(b.warehouse_id, 0) AS wh, SUM(b.reserved_qty) AS reserved,'
+            . ' SUM(b.on_hand_qty - b.reserved_qty - b.packed_qty - b.quality_hold_qty - b.damaged_qty - b.blocked_qty) AS available'
+            . ' FROM inv_stock_balances b'
+            . ($boId > 0 ? ' LEFT JOIN inv_warehouses w ON w.warehouse_id = b.warehouse_id' : '')
+            . ' WHERE ' . $where
+            . ' GROUP BY b.item_id, COALESCE(b.warehouse_id, 0)';
+        $out = [];
+        foreach (\Config\Database::connect()->query($sql, $binds)->getResultArray() as $r) {
+            $out[(int) $r['item_id'] . ':' . (int) $r['wh']] = [
+                'reserved'  => round((float) $r['reserved'], 4),
+                'available' => round((float) $r['available'], 4),
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * The states a `health` filter value selects, or null when nothing was asked for.
+     *
+     * @return list<string>|null
+     */
+    public static function stockHealthFilterSet(string $health): ?array
+    {
+        $h = strtolower(trim($health));
+        if ($h === '') {
+            return null;
+        }
+        if (isset(self::STOCK_HEALTH_GROUPS[$h])) {
+            return self::STOCK_HEALTH_GROUPS[$h];
+        }
+        if (in_array($h, self::STOCK_HEALTH, true)) {
+            return [$h];
+        }
+        $allowed = array_merge(self::STOCK_HEALTH, array_keys(self::STOCK_HEALTH_GROUPS));
+
+        throw InventoryException::validation('health must be one of ' . implode(', ', $allowed), ['allowed' => $allowed]);
+    }
+
+    /**
+     * What a warehouse-stock row's quantity says about the state of that item.
+     *
+     * `$rowQty` is the one warehouse's closing quantity and `$itemQty` the item's position
+     * across every row the same query returned. The split is deliberate: a warehouse can
+     * be short or below zero on its own, but a reorder point is a property of the item and
+     * comparing one shelf against it would raise a purchase order for stock already
+     * standing in the next building.
+     *
+     * Order matters — an item under its safety stock is usually under its reorder point as
+     * well, and "reorder" is the more actionable of the two. No threshold is invented: an
+     * item with none set can only read negative, out or healthy.
+     *
+     * @param array{min_stock_qty?:float|null, max_stock_qty?:float|null, reorder_point_qty?:float|null, safety_stock_qty?:float|null}|null $levels
+     */
+    public static function stockHealth(float $rowQty, float $itemQty, ?array $levels): string
+    {
+        if ($rowQty < -self::EPS) {
+            return 'negative';
+        }
+        if (abs($rowQty) <= self::EPS) {
+            return 'out';
+        }
+        $reorder = (float) ($levels['reorder_point_qty'] ?? 0);
+        if ($reorder > 0 && $itemQty <= $reorder) {
+            return 'reorder';
+        }
+        $safety = (float) ($levels['safety_stock_qty'] ?? 0);
+        $min = (float) ($levels['min_stock_qty'] ?? 0);
+        if (($safety > 0 && $itemQty < $safety) || ($min > 0 && $itemQty < $min)) {
+            return 'low';
+        }
+        $max = (float) ($levels['max_stock_qty'] ?? 0);
+        if ($max > 0 && $itemQty > $max) {
+            return 'overstocked';
+        }
+
+        return 'healthy';
+    }
+
+    /**
+     * The company's base currency, read only.
+     *
+     * The register stamps a currency symbol on one figure — closing value — and the screen
+     * must not have to guess it from a separately-fetched setting, which on a company
+     * switch would print the previous company's symbol for as long as that request was in
+     * flight. Read-only on purpose: InventorySettingsService::get() creates the settings
+     * row when it is missing, and a GET must not write.
+     */
+    private function baseCurrency(int $cmpId): string
+    {
+        $db = \Config\Database::connect();
+        if (!SchemaCache::tableExists($db, 'inv_company_settings')) {
+            return 'INR';
+        }
+        $res = $db->table('inv_company_settings')->select('base_currency_code')->where('cmp_id', $cmpId)->get();
+        $row = $res === false ? null : $res->getRowArray();
+        $code = strtoupper(trim((string) ($row['base_currency_code'] ?? '')));
+
+        return $code !== '' ? $code : 'INR';
     }
 
     // ------------------------------------------------------------------ batch stock
@@ -1392,7 +1649,7 @@ class InventoryReportService
         $db = \Config\Database::connect();
         foreach (array_chunk($ids, 500) as $chunk) {
             $rows = $db->table('inv_items i')
-                ->select('i.item_id, i.item_name, i.item_alias, i.item_sku, i.item_upc, i.hsn_sac, i.unit_id, u.unit_symbol, i.item_grp_id, g.grp_name, i.stock_cat_id, c.cat_name, i.brand_id, b.brand_name, i.valuation_method, i.track_batch, i.track_serial, i.track_expiry, i.is_active, i.deleted_at')
+                ->select('i.item_id, i.item_name, i.item_alias, i.item_sku, i.item_upc, i.hsn_sac, i.unit_id, u.unit_symbol, i.item_grp_id, g.grp_name, i.stock_cat_id, c.cat_name, i.brand_id, b.brand_name, i.valuation_method, i.track_batch, i.track_serial, i.track_expiry, i.min_stock_qty, i.max_stock_qty, i.reorder_point_qty, i.safety_stock_qty, i.is_active, i.deleted_at')
                 ->join('inv_uom u', 'u.unit_id = i.unit_id', 'left')
                 ->join('inv_brands b', 'b.brand_id = i.brand_id', 'left')
                 ->join('inv_item_groups g', 'g.item_grp_id = i.item_grp_id', 'left')

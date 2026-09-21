@@ -76,7 +76,7 @@ export function ScanDialog({ open, onClose, warehouseId, onScanned, hasFinished 
     setBusy(true)
     setChoices([])
     try {
-      const item = await lookupApi.itemByBarcode(value, warehouseId)
+      const item = await lookupApi.byBarcode(value, { warehouseId })
       accept(item, value)
       setCode('')
     } catch (err) {
