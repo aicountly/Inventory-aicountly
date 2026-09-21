@@ -102,6 +102,12 @@ $routes->group('', ['namespace' => 'App\Controllers\Api', 'filter' => 'cors'], s
         $routes->post('serials/bulk', 'SerialsController::bulkCreate');
         $routes->post('serials/bulk-update', 'SerialsController::bulkUpdate');
         $routes->post('bill-of-materials/(:num)/explode', 'BomController::explode/$1');
+        // Registered as literals, so they are never read as a {id} — `(:num)`
+        // above cannot match `summary`, and these carry their own verbs.
+        $routes->get('bill-of-materials/summary', 'BomController::summary');
+        $routes->post('bill-of-materials/cost-preview', 'BomController::costPreview');
+        $routes->get('bill-of-materials/(:num)/cost', 'BomController::cost/$1');
+        $routes->post('bill-of-materials/(:num)/duplicate', 'BomController::duplicate/$1');
         $routes->get('items/form-options', 'ItemsController::formOptions');
         $routes->get('items/summary', 'ItemsController::summary');
         $routes->get('items/search', 'ItemsController::search');
