@@ -314,6 +314,9 @@
 .dark .hover\:bg-amber-100:hover {
   background-color: rgb(120 53 15 / 0.32);
 }
+.dark .hover\:bg-emerald-100:hover {
+  background-color: rgb(6 78 59 / 0.32);
+}
 
 .dark .border-emerald-100,
 .dark .border-emerald-200,

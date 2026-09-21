@@ -24,6 +24,7 @@ import { MaterialReceiptForm } from './receipt/MaterialReceiptForm'
 import { SerialAdjustmentPage } from './serialAdjustment/SerialAdjustmentPage'
 import { draftFromDocument as serialDraftFromDocument } from './serialAdjustment/model'
 import { PhysicalStockCountPage } from './physicalCount/PhysicalStockCountPage'
+import { StockJournalPage } from './stockJournal/StockJournalPage'
 import { StockTransferWorkspace } from './transfer/StockTransferWorkspace'
 import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS, statusTone } from './actions'
 import type { StatusTone } from './actions'
@@ -235,6 +236,18 @@ export function DocumentFormPage() {
         />
       )
     }
+    if (spec.code === 'STOCK_JOURNAL') {
+      return (
+        <StockJournalPage
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          existing={doc}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
     if (spec.code === 'BATCH_ADJUSTMENT') {
       return (
         <BatchAdjustmentPage
@@ -403,6 +416,9 @@ export function DocumentFormPage() {
   }
   if (s.code === 'STOCK_TRANSFER') {
     return <StockTransferWorkspace key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
+  if (s.code === 'STOCK_JOURNAL') {
+    return <StockJournalPage key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
   }
   if (s.code === 'BATCH_ADJUSTMENT') {
     return <BatchAdjustmentPage key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />

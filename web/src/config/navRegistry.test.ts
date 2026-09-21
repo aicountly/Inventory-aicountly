@@ -9,6 +9,7 @@ import {
 } from './navRegistry'
 import { MASTER_PERMISSION_SLUGS, P } from '../services/access'
 import { REPORT_CONFIGS } from '../reports/configs'
+import { HIDDEN_FROM_NEW_MENU, specForSlug, UNAVAILABLE_TYPES } from '../documents/registry'
 
 const allow = () => true
 const deny = () => false
@@ -82,6 +83,31 @@ describe('SIDEBAR_NAV', () => {
     for (const pair of sameScreen) {
       const doors = pair.filter((p) => reachable.has(p))
       expect(doors.length, `${pair.join(' and ')} are both in the nav`).toBe(1)
+    }
+  })
+
+  /**
+   * The Documents flyout links a handful of entry forms directly. Each one is a
+   * `/documents/new/<slug>` URL built by hand, so a slug that stops matching the
+   * registry would render a nav item leading to "Unknown document type" — the
+   * exact dead end the entry hub was built to remove.
+   */
+  it('points every document shortcut at a type that can actually be created', () => {
+    const documents = SIDEBAR_NAV.find((i) => i.key === 'documents')!
+    const shortcuts = documents
+      .megaMenu!.flatMap((c) => c.items)
+      .filter((leaf) => leaf.path?.startsWith('/documents/new/'))
+    expect(shortcuts.length).toBeGreaterThan(0)
+
+    for (const leaf of shortcuts) {
+      const slug = leaf.path!.replace('/documents/new/', '')
+      const spec = specForSlug(slug)
+      expect(spec, `${slug} is not a native document type`).not.toBeNull()
+      expect(UNAVAILABLE_TYPES.has(spec!.code), `${slug} cannot be created`).toBe(false)
+      expect(HIDDEN_FROM_NEW_MENU.has(spec!.code), `${slug} is hidden from entry`).toBe(false)
+      // The server checks `documents.<slug>.create`, with `documents.create` as
+      // the blanket grant; the nav must ask for exactly that pair.
+      expect(leaf.permissions).toEqual([`documents.${slug}.create`, 'documents.create'])
     }
   })
 
