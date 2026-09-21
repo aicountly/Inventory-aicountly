@@ -224,7 +224,7 @@ class DocumentPostingService
             // sits on this company's receipts" counts an amount that is no longer there.
             // Only the rows this document WROTE (document_id = itself). A LANDED_COST document's
             // own rows are not touched from here and cannot be: reverse() refuses that type above.
-            $this->writeLandedCostAllocation($db, $cmpId, $documentId, $documentId, []);
+            $this->writeLandedCostAllocation($db, $cmpId, $documentId, []);
             // 3. Status buckets and pending quantities.
             $this->status->reverseForDocument($cmpId, $documentId, $documentId);
             $this->packing->releaseConsumedBy($cmpId, $documentId, $actor);
@@ -401,7 +401,11 @@ class DocumentPostingService
         // the same document. Written even when there is nothing to write, so a draft that was
         // edited to drop its freight and posted again leaves no orphaned detail behind.
         if ($valuesLines && $movesStock && $type !== 'LANDED_COST') {
-            $this->writeLandedCostAllocation($db, $cmpId, $documentId, $documentId, $landedShares);
+            // A landed cost that arrived WITH the receipt: the receipt is its own target.
+            foreach ($landedShares as $i => $share) {
+                $landedShares[$i]['target_document_id'] = $documentId;
+            }
+            $this->writeLandedCostAllocation($db, $cmpId, $documentId, $landedShares);
         }
 
         // A sale raised against a packing list closes that list, so the next invoice naming it is
@@ -1114,9 +1118,15 @@ class DocumentPostingService
      * landed_cost_not_absorbed for the caller to expense. Anyone totalling these rows is reading
      * what was allocated; the capitalised figure is inv_document_lines.landed_cost_amount.
      *
-     * @param list<array{cost_type: string, allocation_basis: string, line_id: int, base_qty: float, amount: float, books_acc_ref?: ?int}> $shares
+     * A share names the receipt its line belongs to, and the parent rows are grouped by
+     * (cost type, receipt): inv_landed_costs.target_document_id is one column, so a freight charge
+     * spread over two receipts is two parent rows that sum to the charge, not one row filed against
+     * whichever receipt happened to be first. That keeps idx_inv_landed_costs_target answering
+     * "what has been loaded onto this receipt?" with the amount that actually reached it.
+     *
+     * @param list<array{cost_type: string, allocation_basis: string, line_id: int, target_document_id: int, base_qty: float, amount: float, books_acc_ref?: ?int}> $shares
      */
-    private function writeLandedCostAllocation($db, int $cmpId, int $documentId, int $targetDocumentId, array $shares): void
+    private function writeLandedCostAllocation($db, int $cmpId, int $documentId, array $shares): void
     {
         $db->table('inv_landed_cost_lines')->where('cmp_id', $cmpId)
             ->whereIn('landed_cost_id', static fn ($sub) => $sub->select('landed_cost_id')->from('inv_landed_costs')->where('cmp_id', $cmpId)->where('document_id', $documentId))
@@ -1128,14 +1138,20 @@ class DocumentPostingService
         // One row per (cost type, target line): a charge named twice for the same line is one share
         // of that charge on that line, not two rows that each look like the whole thing.
         $byType = [];
+        $groupTarget = [];
+        $groupCostType = [];
         foreach ($shares as $share) {
             $costType = (string) $share['cost_type'];
+            $targetId = (int) ($share['target_document_id'] ?? 0);
+            $group = $costType . '#' . $targetId;
+            $groupTarget[$group] = $targetId;
+            $groupCostType[$group] = $costType;
             $lineId = (int) $share['line_id'];
-            if (isset($byType[$costType][$lineId])) {
-                $byType[$costType][$lineId]['amount'] = round($byType[$costType][$lineId]['amount'] + (float) $share['amount'], 4);
+            if (isset($byType[$group][$lineId])) {
+                $byType[$group][$lineId]['amount'] = round($byType[$group][$lineId]['amount'] + (float) $share['amount'], 4);
                 continue;
             }
-            $byType[$costType][$lineId] = [
+            $byType[$group][$lineId] = [
                 'allocation_basis' => (string) $share['allocation_basis'],
                 'base_qty'         => (float) $share['base_qty'],
                 'amount'           => round((float) $share['amount'], 4),
@@ -1143,7 +1159,8 @@ class DocumentPostingService
             ];
         }
         $now = date('Y-m-d H:i:s');
-        foreach ($byType as $costType => $rows) {
+        foreach ($byType as $group => $rows) {
+            $costType = $groupCostType[$group];
             $total = 0.0;
             $bases = [];
             $accRef = null;
@@ -1158,7 +1175,7 @@ class DocumentPostingService
             DatabaseInsertHelper::insert($db, 'inv_landed_costs', [
                 'cmp_id'             => $cmpId,
                 'document_id'        => $documentId,
-                'target_document_id' => $targetDocumentId,
+                'target_document_id' => $groupTarget[$group],
                 'cost_type'          => $costType,
                 'amount'             => $total,
                 'allocation_basis'   => count($bases) === 1 ? (string) array_key_first($bases) : 'manual',
@@ -1222,7 +1239,7 @@ class DocumentPostingService
     {
         $documentId = (int) $doc['document_id'];
         $meta = is_array($doc['metadata'] ?? null) ? $doc['metadata'] : [];
-        $targetId = DocumentService::landedCostTarget($meta);
+        $targetIds = DocumentService::landedCostTargets($meta);
         $charges = DocumentService::landedCostCharges($meta);
         // Intake point two for the company's capitalisation policy: the charges a LANDED_COST
         // document carries. Entry refused an excluded type when the draft was saved; this asks the
@@ -1234,11 +1251,23 @@ class DocumentPostingService
         foreach ($charges as $i => $charge) {
             DocumentService::assertCostTypeCapitalisable((string) $charge['cost_type'], $capitalisable, 'Charge ' . ($i + 1));
         }
-        if ($targetId === $documentId) {
+        if (in_array($documentId, $targetIds, true)) {
             throw InventoryException::validation('A landed cost allocation cannot load itself');
         }
-        $target = $this->landedCostTargetDocument($db, $cmpId, $targetId);
-        $targetLines = $this->landedCostTargetLines($db, $cmpId, $targetId);
+        // Every receipt is cleared BEFORE any of them is written to. A consignment that arrived
+        // over two GRNs is one bill, and a run that raised the first receipt's cost and then found
+        // the second one locked would leave half a bill capitalised — the transaction rolls that
+        // back, but only because nothing between here and the commit is allowed to be partial.
+        $targets = [];
+        $targetLines = [];
+        $lineTarget = [];
+        foreach ($targetIds as $targetId) {
+            $targets[$targetId] = $this->landedCostTargetDocument($db, $cmpId, $targetId);
+            foreach ($this->landedCostTargetLines($db, $cmpId, $targetId) as $lineId => $line) {
+                $targetLines[$lineId] = $line;
+                $lineTarget[$lineId] = $targetId;
+            }
+        }
 
         // Per target line: how much of each charge it takes.
         $shares = [];
@@ -1253,12 +1282,13 @@ class DocumentPostingService
                 }
                 $perLineTotal[$lineId] = round(($perLineTotal[$lineId] ?? 0) + $amount, 4);
                 $shares[] = [
-                    'cost_type'        => $charge['cost_type'],
-                    'allocation_basis' => $charge['allocation_basis'],
-                    'line_id'          => $lineId,
-                    'base_qty'         => (float) $targetLines[$lineId]['base_qty'],
-                    'amount'           => $amount,
-                    'books_acc_ref'    => $charge['books_acc_ref'],
+                    'cost_type'          => $charge['cost_type'],
+                    'allocation_basis'   => $charge['allocation_basis'],
+                    'line_id'            => $lineId,
+                    'target_document_id' => $lineTarget[$lineId],
+                    'base_qty'           => (float) $targetLines[$lineId]['base_qty'],
+                    'amount'             => $amount,
+                    'books_acc_ref'      => $charge['books_acc_ref'],
                 ];
             }
         }
@@ -1298,22 +1328,39 @@ class DocumentPostingService
             ]);
         }
 
-        $this->writeLandedCostAllocation($db, $cmpId, $documentId, $targetId, $shares);
+        $this->writeLandedCostAllocation($db, $cmpId, $documentId, $shares);
 
+        $targetNos = [];
+        foreach ($targets as $id => $row) {
+            $targetNos[$id] = $row['document_no'] ?? ('#' . $id);
+        }
         $unabsorbed = round($chargeTotal - $absorbedTotal, 4);
         if ($unabsorbed > 0.01) {
             $warnings[] = [
                 'code'    => 'landed_cost_not_absorbed',
                 'message' => sprintf(
-                    '%s of the %s allocated was not absorbed by stock still on hand: that much of the receipt has already been issued, and this allocation does not retro-cost what was already sold. Expense the remainder.',
+                    '%s of the %s allocated was not absorbed by stock still on hand: that much of %s has already been issued, and this allocation does not retro-cost what was already sold. Expense the remainder.',
                     number_format($unabsorbed, 2, '.', ''),
                     number_format($chargeTotal, 2, '.', ''),
+                    count($targetNos) === 1 ? 'the receipt' : 'the receipts loaded',
                 ),
-                'details' => ['target_document_id' => $targetId, 'charge_total' => $chargeTotal, 'absorbed' => $absorbedTotal, 'unabsorbed' => $unabsorbed],
+                'details' => [
+                    'target_document_id'  => $targetIds[0],
+                    'target_document_ids' => $targetIds,
+                    'charge_total'        => $chargeTotal,
+                    'absorbed'            => $absorbedTotal,
+                    'unabsorbed'          => $unabsorbed,
+                ],
             ];
         }
         $this->audit->log($cmpId, 'document', $documentId, 'document.landed_cost', $actor, [
-            'target_document_id' => $targetId, 'target_document_no' => $target['document_no'] ?? null,
+            // Both shapes: the singular keys are what every reader written against the
+            // one-receipt allocation looks for, and dropping them would blank the audit trail of
+            // an allocation that is still, in the overwhelming majority, against one receipt.
+            'target_document_id'   => $targetIds[0],
+            'target_document_no'   => $targetNos[$targetIds[0]] ?? null,
+            'target_document_ids'  => $targetIds,
+            'target_document_nos'  => array_values($targetNos),
             'charge_total' => $chargeTotal, 'absorbed' => $absorbedTotal, 'unabsorbed' => max(0.0, $unabsorbed),
         ]);
 
@@ -1426,6 +1473,7 @@ class DocumentPostingService
      *          does not hold; on an ordinary purchase the two are the same number, and where they
      *          differ the cost of the goods is the only basis this side can compute honestly.
      * qty   -> base quantity.
+     * equal -> the same share to every line, whatever it is worth or how much of it there is.
      * manual / direct -> the amounts the user gave, with the residual settled so they tie exactly.
      *
      * @param array{cost_type: string, amount: float, allocation_basis: string, lines: array<int, float>} $charge
@@ -1439,7 +1487,7 @@ class DocumentPostingService
             foreach ($charge['lines'] as $lineId => $amount) {
                 if (!isset($targetLines[$lineId])) {
                     throw InventoryException::validation(
-                        $where . ': line #' . $lineId . ' is not a valued inward line of the receipt being loaded',
+                        $where . ': line #' . $lineId . ' is not a valued inward line of any receipt being loaded',
                         ['line_id' => $lineId],
                     );
                 }
@@ -1453,7 +1501,15 @@ class DocumentPostingService
         }
         $weights = [];
         foreach ($targetLines as $lineId => $line) {
-            $weights[$lineId] = $charge['allocation_basis'] === 'qty' ? (float) $line['base_qty'] : (float) $line['valuation_amount'];
+            $weights[$lineId] = match ($charge['allocation_basis']) {
+                'qty' => (float) $line['base_qty'],
+                // Every line weighs the same, so the split is even and the residual rule still puts
+                // the last paisa somewhere rather than dropping it. A weight of 1 rather than a
+                // division here keeps one allocator, one rounding rule and one residual placement
+                // for every basis.
+                'equal' => 1.0,
+                default => (float) $line['valuation_amount'],
+            };
         }
 
         return self::allocateCharge($charge['amount'], $weights, $charge['cost_type'] . ' charge');
