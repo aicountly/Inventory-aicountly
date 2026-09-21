@@ -19,6 +19,8 @@ import { JobWorkPage } from './jobwork/JobWorkPage'
 import { MaterialIssuePage } from './materialIssue/MaterialIssuePage'
 import { ProductionWorkspace } from './production/ProductionWorkspace'
 import { MaterialReceiptForm } from './receipt/MaterialReceiptForm'
+import { SerialAdjustmentPage } from './serialAdjustment/SerialAdjustmentPage'
+import { draftFromDocument as serialDraftFromDocument } from './serialAdjustment/model'
 import { PhysicalStockCountPage } from './physicalCount/PhysicalStockCountPage'
 import { StockTransferWorkspace } from './transfer/StockTransferWorkspace'
 import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS, statusTone } from './actions'
@@ -175,6 +177,19 @@ export function DocumentFormPage() {
     // A revaluation has its own screen; the gates above (type, status, permission) have already run.
     if (spec.formKind === 'revaluation') {
       return <StockRevaluationPage key={doc.document_id} spec={spec} documentId={doc.document_id} initial={revaluationDraftFromDocument(doc)} existing={doc} />
+    }
+    // So does a serial adjustment, which expands the stored lines back into one row per serial.
+    if (spec.code === 'SERIAL_ADJUSTMENT') {
+      return (
+        <SerialAdjustmentPage
+          key={doc.document_id}
+          documentId={doc.document_id}
+          initial={serialDraftFromDocument(doc)}
+          status={doc.status}
+          documentNo={doc.document_no}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
     }
     const initial = draftFromDocument(doc, spec)
     const reapproval = doc.status === 'APPROVED' || doc.status === 'PENDING_APPROVAL'
@@ -393,6 +408,14 @@ export function DocumentFormPage() {
   if (isReceipt) return <MaterialReceiptForm key={s.code} spec={s} />
   if (s.formKind === 'physical_count') {
     return <PhysicalStockCountPage key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
+  /*
+   * A serial adjustment is entered serial-first: the operator has the number on the label and is
+   * asking Inventory which item, warehouse and batch it belongs to, which is the opposite of the
+   * item-first order the generic editor imposes. Same route, spec, payload and lifecycle.
+   */
+  if (s.code === 'SERIAL_ADJUSTMENT') {
+    return <SerialAdjustmentPage key={s.code} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
   }
   return (
     <PageShell paddingBottom>
