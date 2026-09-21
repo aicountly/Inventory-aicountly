@@ -47,7 +47,13 @@ export function PageHeader({
         className,
       )}
     >
-      <div className="min-w-0 flex-1 basis-72 flex items-start gap-3">
+      {/*
+        `md:basis-72`, not a bare `basis-72`: flex-basis sizes the MAIN axis,
+        and below md this container is a column — so the unqualified class was
+        giving the title block an 18rem HEIGHT and leaving a blank half-screen
+        between the description and the actions on every phone-width page.
+      */}
+      <div className="min-w-0 flex-1 md:basis-72 flex items-start gap-3">
         {backTo ? (
           // `shrink-0` and `whitespace-nowrap` are load-bearing, not polish.
           // Without them this link is the only shrinkable thing in a row that
@@ -83,7 +89,13 @@ export function PageHeader({
         </div>
       ) : null}
       {actions ? (
-        <div className="flex items-center flex-wrap gap-2 shrink-0 print:hidden">{actions}</div>
+        // `min-w-0` rather than `shrink-0`, for the reason BreadcrumbHeader's
+        // compact row already records: a shrink-proof row cannot fall below its
+        // max-content width, so a header carrying five or six buttons never
+        // wraps them and scrolls the whole page sideways on a tablet instead.
+        // Letting it shrink costs nothing where there is room — the row is
+        // max-content anyway.
+        <div className="flex items-center flex-wrap gap-2 min-w-0 print:hidden">{actions}</div>
       ) : null}
     </div>
   )

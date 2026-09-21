@@ -171,6 +171,22 @@
 .dark .bg-amber-50 {
   background-color: rgb(120 53 15 / 0.22);
 }
+/* The -100 step of each ramp: a touch stronger than the -50 wash, the same way
+   emerald-100 is above — used by the insight severity dots and by the quick-link
+   tiles, whose hover is a deepening of their own tint rather than a grey. */
+.dark .bg-amber-100,
+.dark .hover\:bg-amber-100:hover {
+  background-color: rgb(120 53 15 / 0.3);
+}
+.dark .bg-red-100 {
+  background-color: rgb(127 29 29 / 0.3);
+}
+.dark .hover\:bg-sky-100:hover {
+  background-color: rgb(12 74 110 / 0.3);
+}
+.dark .hover\:bg-violet-100:hover {
+  background-color: rgb(76 29 149 / 0.3);
+}
 .dark .bg-red-50,
 .dark .hover\:bg-red-50:hover,
 .dark .focus\:bg-red-50:focus {
@@ -226,7 +242,9 @@
 .dark .border-sky-200 {
   border-color: rgb(7 89 133 / 0.5);
 }
-.dark .border-violet-200 {
+.dark .border-violet-200,
+.dark .border-violet-300,
+.dark .hover\:border-violet-300:hover {
   border-color: rgb(91 33 182 / 0.5);
 }
 .dark .border-teal-200 {
@@ -248,20 +266,32 @@
 .dark .text-amber-900 {
   color: rgb(252 211 77);
 }
+/* The ageing register's 91-180 band. Orange sits between amber and rose and is the
+   only tint that keeps the five ageing bands distinguishable; like every accent here
+   it moves to its 300 shade so it reads as ink on a dark card. */
+.dark .text-orange-600,
+.dark .text-orange-700 {
+  color: rgb(253 186 116);
+}
 .dark .text-red-600,
 .dark .text-red-600\/80,
 .dark .text-red-600\/90,
 .dark .text-red-700,
+.dark .text-red-800,
 .dark .hover\:text-red-600:hover,
 .dark .hover\:text-red-700:hover {
   color: rgb(252 165 165);
 }
 .dark .text-sky-600,
-.dark .text-sky-700 {
+.dark .text-sky-700,
+.dark .text-sky-800,
+.dark .hover\:text-sky-700:hover,
+.dark .hover\:text-sky-900:hover {
   color: rgb(125 211 252);
 }
 .dark .text-violet-600,
-.dark .text-violet-700 {
+.dark .text-violet-700,
+.dark .hover\:text-violet-700:hover {
   color: rgb(196 181 253);
 }
 .dark .text-rose-600 {

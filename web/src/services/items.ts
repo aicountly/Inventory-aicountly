@@ -99,6 +99,9 @@ export interface Item extends ItemListRow {
   default_warehouse_id: number | null
   standard_cost: number | string | null
   version?: number
+  /** From `i.*` on the detail endpoint; the list projection does not carry them. */
+  created_by?: string | null
+  updated_by?: string | null
   attributes: Record<string, unknown> | null
   variant_attributes: Record<string, unknown> | null
   unit_lines: ItemUnitLine[]
