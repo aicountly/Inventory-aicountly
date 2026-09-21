@@ -27,6 +27,9 @@ export function FormSectionCard({
   bodyClassName,
 }: FormSectionCardProps) {
   const hasHeader = Boolean(title || description || action || Icon)
+  // The header row wraps, and the title block claims a minimum width: a card whose action is a pair
+  // of buttons squeezed the heading to a few characters at phone width and wrapped its description
+  // one word per line. Above that width nothing wraps and nothing moves.
   return (
     <Card padding={padding} className={className}>
       {hasHeader ? (
