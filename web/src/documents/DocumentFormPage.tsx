@@ -6,11 +6,22 @@ import { useQuery } from '../hooks/useQuery'
 import { errorMessage } from '../services/api'
 import { documentsApi } from '../services/documentsApi'
 import { DocumentForm } from './DocumentForm'
+import { StockTransferWorkspace } from './transfer/StockTransferWorkspace'
 import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS } from './actions'
 import { draftFromDocument } from './formModel'
 import { specForCode, specForSlug, UNAVAILABLE_TYPES } from './registry'
 import type { DocumentStatus } from './types'
 import './documents.css'
+
+/**
+ * The one native type with its own screen.
+ *
+ * A transfer is the only document with two warehouses on the header and a route
+ * per line, and the only one whose mistakes (stock that is not there, a batch
+ * that expired, serials that do not add up) are worth catching while it is typed
+ * rather than when the API refuses it. Every other type keeps `DocumentForm`.
+ */
+const STOCK_TRANSFER = 'STOCK_TRANSFER'
 
 /** `/documents/new/:slug` and `/documents/:id/edit`. */
 export function DocumentFormPage() {
@@ -93,6 +104,18 @@ export function DocumentFormPage() {
       )
     }
     const initial = draftFromDocument(doc, spec)
+    if (spec.code === STOCK_TRANSFER) {
+      return (
+        <StockTransferWorkspace
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          existing={doc}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
     return (
       <div className="page">
         <PageHeader title={`Edit ${spec.label.toLowerCase()} ${doc.document_no ?? `#${doc.document_id}`}`} subtitle={`Version ${doc.version} · ${STATUS_LABELS[doc.status as DocumentStatus] ?? doc.status}`} breadcrumbs={[...crumbs, { label: doc.document_no ?? `#${doc.document_id}`, to: `/documents/${doc.document_id}` }]} />
@@ -103,6 +126,9 @@ export function DocumentFormPage() {
   }
 
   const s = spec as NonNullable<typeof spec>
+  if (s.code === STOCK_TRANSFER) {
+    return <StockTransferWorkspace key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
   return (
     <div className="page">
       <PageHeader title={`New ${s.label.toLowerCase()}`} breadcrumbs={crumbs} />
