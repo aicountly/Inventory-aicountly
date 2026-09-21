@@ -94,19 +94,19 @@ export function DocumentFormPage() {
     }
     const initial = draftFromDocument(doc, spec)
     return (
-      <div className="page">
-        <PageHeader title={`Edit ${spec.label.toLowerCase()} ${doc.document_no ?? `#${doc.document_id}`}`} subtitle={`Version ${doc.version} · ${STATUS_LABELS[doc.status as DocumentStatus] ?? doc.status}`} breadcrumbs={[...crumbs, { label: doc.document_no ?? `#${doc.document_id}`, to: `/documents/${doc.document_id}` }]} />
-        {doc.status === 'APPROVED' || doc.status === 'PENDING_APPROVAL' ? <Notice kind="info">Saving changes returns the document to draft; it will need approval again.</Notice> : null}
-        <DocumentForm key={doc.document_id} spec={spec} documentId={doc.document_id} initial={initial} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
-      </div>
+      <DocumentForm
+        key={doc.document_id}
+        spec={spec}
+        documentId={doc.document_id}
+        documentStatus={doc.status}
+        documentVersion={doc.version}
+        initial={initial}
+        topNotice={doc.status === 'APPROVED' || doc.status === 'PENDING_APPROVAL' ? <Notice kind="info">Saving changes returns the document to draft; it will need approval again.</Notice> : undefined}
+        onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+      />
     )
   }
 
   const s = spec as NonNullable<typeof spec>
-  return (
-    <div className="page">
-      <PageHeader title={`New ${s.label.toLowerCase()}`} breadcrumbs={crumbs} />
-      <DocumentForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
-    </div>
-  )
+  return <DocumentForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
 }

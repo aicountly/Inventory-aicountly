@@ -1,3 +1,4 @@
+import { Copy, Trash2 } from 'lucide-react'
 import type { FormOptionWarehouse } from '../services/items'
 import type { ItemSearchRow, ItemUnitRow } from '../services/lookupApi'
 import type { AvailabilityCheckResult } from '../services/stockApi'
@@ -7,7 +8,7 @@ import { BatchPicker } from './BatchPicker'
 import { LineItemPicker } from './LineItemPicker'
 import { SerialPicker } from './SerialPicker'
 import { WarehouseSelect } from './WarehouseSelect'
-import { countDifference, draftTotals, lineAmount, lineBaseQty, newLine } from './formModel'
+import { countDifference, draftTotals, lineAmount, lineBaseQty, newLine, nextLineKey } from './formModel'
 import type { HeaderDraft, LineDraft, UnitOption } from './formModel'
 import type { DocumentTypeSpec } from './registry'
 
@@ -57,6 +58,13 @@ export function LineEditor({ spec, header, lines, onChange, warehouses, availabi
   const update = (key: string, patch: Partial<LineDraft>) => onChange(lines.map((l) => (l.key === key ? { ...l, ...patch } : l)))
   const remove = (key: string) => onChange(lines.filter((l) => l.key !== key))
   const add = () => onChange([...lines, newLine(spec, { warehouse_id: isTransfer ? null : header.default_warehouse_id })])
+  /** Serials are unique physical identifiers, so a duplicated line starts with none picked. */
+  const duplicate = (key: string) => {
+    const idx = lines.findIndex((l) => l.key === key)
+    if (idx === -1) return
+    const copy: LineDraft = { ...lines[idx], key: nextLineKey(), serials: [], origin: 'manual' }
+    onChange([...lines.slice(0, idx + 1), copy, ...lines.slice(idx + 1)])
+  }
 
   const pick = (line: LineDraft, row: ItemSearchRow) => {
     const units = unitOptionsFrom(row)
@@ -134,7 +142,7 @@ export function LineEditor({ spec, header, lines, onChange, warehouses, availabi
             {showValuation ? <th className="align-right">{valuationLabel(spec)}</th> : null}
             <th>Serials</th>
             {showAvailability ? <th>Availability</th> : null}
-            <th aria-label="Remove" />
+            <th className="align-right">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -235,9 +243,14 @@ export function LineEditor({ spec, header, lines, onChange, warehouses, availabi
                 </td>
                 {showAvailability ? <td>{availabilityCell(line)}</td> : null}
                 <td className="action">
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => remove(line.key)} disabled={disabled} aria-label={`Remove line ${i + 1}`}>
-                    ×
-                  </button>
+                  <span className="row-actions">
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => duplicate(line.key)} disabled={disabled} title="Duplicate line" aria-label={`Duplicate line ${i + 1}`}>
+                      <Copy className="w-3.5 h-3.5" aria-hidden />
+                    </button>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => remove(line.key)} disabled={disabled} title="Delete line" aria-label={`Delete line ${i + 1}`}>
+                      <Trash2 className="w-3.5 h-3.5" aria-hidden />
+                    </button>
+                  </span>
                 </td>
               </tr>
             )
