@@ -10,15 +10,32 @@ import { BreadcrumbHeader } from '../ui/shell/BreadcrumbHeader'
 import { PageShell } from '../ui/shell/PageShell'
 import { DocumentForm } from './DocumentForm'
 import { ConsumptionForm } from './consumption/ConsumptionForm'
+import { JobWorkPage } from './jobwork/JobWorkPage'
 import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS, statusTone } from './actions'
 import type { StatusTone } from './actions'
 import { documentTypeGlyph } from './documentTypeIcon'
 import { draftFromDocument } from './formModel'
 import { specForCode, specForSlug, UNAVAILABLE_TYPES } from './registry'
+import type { FormKind } from './registry'
 import type { DocumentStatus } from './types'
 import './documents.css'
 
 const STATUS_BADGE_TONE: Record<StatusTone, BadgeTone> = { neutral: 'neutral', info: 'info', success: 'success', warning: 'warning', danger: 'danger' }
+
+/**
+ * Job work has its own screen.
+ *
+ * The generic editor renders every native type from one spec, which is right
+ * for the types whose entry is "a header and some lines". A job-work document
+ * is not one of those: it is half of a two-document workflow, and what an
+ * operator needs in front of them — what is still with the worker, how late it
+ * is, what this receipt settles — has no place in a form every other type
+ * shares. Consumption below is here for the same reason.
+ * See documents/jobwork/JobWorkPage.
+ */
+function isJobWork(formKind: FormKind): boolean {
+  return formKind === 'job_work_in' || formKind === 'job_work_out'
+}
 
 /** `/documents/new/:slug` and `/documents/:id/edit`. */
 export function DocumentFormPage() {
@@ -123,6 +140,18 @@ export function DocumentFormPage() {
         />
       )
     }
+    if (isJobWork(spec.formKind)) {
+      return (
+        <JobWorkPage
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          existing={doc}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
     return (
       <PageShell paddingBottom>
         <BreadcrumbHeader
@@ -143,6 +172,9 @@ export function DocumentFormPage() {
   const s = spec as NonNullable<typeof spec>
   if (s.code === 'CONSUMPTION') {
     return <ConsumptionForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
+  if (isJobWork(s.formKind)) {
+    return <JobWorkPage key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
   }
   return (
     <PageShell paddingBottom>

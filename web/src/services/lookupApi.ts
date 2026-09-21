@@ -3,7 +3,7 @@
  * serials and bills of materials.
  */
 
-import { api } from './api'
+import { api, isApiError } from './api'
 import type { ItemResponse, ListQuery, ListResponse } from './api'
 import type { BomHeader } from '../documents/bom'
 import type { CreateDocumentPayload } from '../documents/types'
@@ -94,6 +94,23 @@ export const lookupApi = {
       signal: options.signal,
     })
     return res.data
+  },
+
+  /**
+   * One item by the exact barcode a scanner typed (`GET /v1/items/by-barcode/{code}`).
+   * Null when nothing carries that code — a scan of an unknown label must say
+   * so rather than silently add the wrong row.
+   */
+  async itemByBarcode(code: string, signal?: AbortSignal): Promise<ItemSearchRow | null> {
+    const trimmed = code.trim()
+    if (trimmed === '') return null
+    try {
+      const res = await api.get<ItemResponse<ItemSearchRow>>(`v1/items/by-barcode/${encodeURIComponent(trimmed)}`, { signal })
+      return res.data ?? null
+    } catch (err) {
+      if (isApiError(err) && err.status === 404) return null
+      throw err
+    }
   },
 
   async itemsByIds(ids: number[], signal?: AbortSignal): Promise<ItemSearchRow[]> {

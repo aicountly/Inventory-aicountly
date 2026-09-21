@@ -135,6 +135,10 @@ $routes->group('', ['namespace' => 'App\Controllers\Api', 'filter' => 'cors'], s
         $routes->get('inventory-documents/(:num)/print-snapshot', 'DocumentsController::printSnapshot/$1');
         $routes->get('pending-quantities', 'PendingController::index');
         $routes->get('pending-quantities/(:num)', 'PendingController::show/$1');
+        // Job work. The dispatch and the receipt are ordinary documents above;
+        // this is only the aggregate the entry screens read (JobWorkController).
+        $routes->get('job-work/summary', 'JobWorkController::summary');
+        $routes->get('job-work/workers', 'JobWorkController::workers');
         $routes->get('packing-lists', 'PackingController::index');
         $routes->get('packing-lists/(:num)', 'PackingController::show/$1');
         $routes->post('packing-lists/(:num)/unpack', 'PackingController::unpack/$1');
