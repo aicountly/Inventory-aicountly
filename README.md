@@ -76,6 +76,12 @@ Manage through the API's read-only relay (`/api/manage/...`).
   directions, with the position still out with job workers, what is late, a
   settlement panel that turns open dispatch quantities into lines, live
   availability on a dispatch, and batch / serial allocation per line.
+  **Physical Stock Count** has a counting workspace
+  (`src/documents/physicalCount`): a batched book-quantity snapshot, live
+  variance and progress figures, deterministic variance / serial / batch
+  checks, handheld scanning and CSV import, serial and batch drawers, and a
+  posting-readiness gate over the same draft shape, validation, payload and
+  endpoints every other document type uses.
 - **Stock** — balances by item × warehouse × batch with every bucket, the
   stock ledger of an item with running quantity and value, and the movement
   list.
