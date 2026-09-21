@@ -1,24 +1,17 @@
 import { useEffect, useState } from 'react'
 
 /**
- * Whether a CSS media query currently matches, as state.
+ * `true` while the media query matches.
  *
- * For the cases where a layout choice has to be made in JavaScript rather than
- * in CSS — that is, where the two layouts must not BOTH exist. Tailwind's
- * `hidden md:block` is the right tool when one of the alternatives is cheap;
- * it is the wrong one when each alternative is a hundred rows, because
- * `display:none` hides a subtree from the eye while leaving every node in the
- * document, doubling the DOM and making a screen reader read the whole list
- * twice.
- *
- * `fallback` is the answer before the first paint and wherever `matchMedia` is
- * missing (jsdom, an old browser). It defaults to false — the narrow layout —
- * because that is the safe one: a card list on a wide screen looks roomy, a
- * 15-column table on a phone is unusable.
+ * Defensive about `matchMedia` for the same reason AppSidebar is: the DOM the
+ * tests run in (happy-dom) does not implement it, and a layout hook that throws
+ * there would take every render test on the page down with it. The fallback is
+ * the caller's `initial`, which should be the state that needs no special
+ * handling — the desktop one, normally.
  */
-export function useMediaQuery(query: string, fallback = false): boolean {
+export function useMediaQuery(query: string, initial = false): boolean {
   const [matches, setMatches] = useState(() => {
-    if (typeof window === 'undefined' || !window.matchMedia) return fallback
+    if (typeof window === 'undefined' || !window.matchMedia) return initial
     return window.matchMedia(query).matches
   })
 
@@ -34,8 +27,20 @@ export function useMediaQuery(query: string, fallback = false): boolean {
   return matches
 }
 
-/** Tailwind's `md` breakpoint — where the item table becomes readable. */
+export default useMediaQuery
+
+/*
+ * Breakpoints named rather than retyped.
+ *
+ * These are Tailwind's own `md` and `xl`, so a component that mounts one layout
+ * or the other in JavaScript stays in step with the `md:` / `xl:` classes
+ * beside it. A hand-typed "(min-width: 768px)" in one file and "(min-width:
+ * 767px)" in the next is a one-pixel band where the page renders neither
+ * layout, and nobody finds it on purpose.
+ */
+
+/** Tailwind `md` — where the item table becomes readable at all. */
 export const MD_UP = '(min-width: 768px)'
 
-/** Tailwind's `xl` breakpoint — where a dense table has room for every column. */
+/** Tailwind `xl` — where a dense table has room for every column. */
 export const XL_UP = '(min-width: 1280px)'
