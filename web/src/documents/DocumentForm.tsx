@@ -1,14 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
+import { Barcode, Download, ListPlus, Upload } from 'lucide-react'
 import { useAccess } from '../access/AccessContext'
 import { FormField } from '../components/FormField'
 import { Notice } from '../components/Notice'
+import { useKeyboardScope } from '../keyboard/useKeyboardScope'
 import { errorMessage, isApiError } from '../services/api'
 import { documentsApi } from '../services/documentsApi'
 import { lookupApi } from '../services/lookupApi'
 import type { AvailabilityCheckLine } from '../services/stockApi'
+import { Button } from '../ui/Button'
+import { FormGrid, FormSectionCard } from '../ui/shell/FormSectionCard'
+import { StickyActionBar } from '../ui/shell/StickyActionBar'
+import { csvFilename, downloadCsv } from '../utils/csv'
 import { formatQty, todayIso, toNumber } from '../utils/format'
 import { LineEditor, unitOptionsFrom } from './LineEditor'
+import { AddMultipleItemsModal } from './AddMultipleItemsModal'
+import { ImportLinesModal } from './ImportLinesModal'
+import { CopyStockModal } from './openingStock/CopyStockModal'
+import { OpeningStockHeaderExtras } from './openingStock/OpeningStockHeaderExtras'
+import { OpeningStockQuickActions } from './openingStock/OpeningStockQuickActions'
+import { ValidationDrawer } from './openingStock/ValidationDrawer'
+import { buildImportTemplateCsv, buildValidationReport, findDuplicateLineKeys } from './openingStock/openingStockHelpers'
+import type { CopySource, ValidationReport } from './openingStock/openingStockHelpers'
 import { PartyFields } from './PartyFields'
 import { WarehouseSelect } from './WarehouseSelect'
 import { canCreate, permissionKeysFor } from './actions'
@@ -35,6 +49,8 @@ export interface DocumentFormProps {
   onSaved: (doc: InventoryDocument, posted: boolean) => void
 }
 
+const EMPTY_REPORT: ValidationReport = { errors: [], warnings: [], suggestions: [] }
+
 function describeError(err: unknown): string {
   if (isApiError(err)) {
     const field = err.field
@@ -51,6 +67,7 @@ function describeError(err: unknown): string {
  * on posting leaves a saved draft (status FAILED) that can be posted with an override.
  */
 export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFormProps) {
+  const navigate = useNavigate()
   const { warehouses, defaultWarehouseId, loading: refLoading, error: refError } = useReferenceData()
   const { can } = useAccess()
   const [header, setHeader] = useState<HeaderDraft>(() => initial?.header ?? newHeader(spec, todayIso()))
@@ -66,6 +83,9 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
   const canOverride = can('stock.negative_override')
   const canPost = can(permissionKeysFor('post', spec.code))
   const canSave = savedId ? can(permissionKeysFor('edit', spec.code)) : canCreate(spec.code, can)
+  const disabled = busy !== null
+  const isTransfer = spec.lineMode === 'transfer'
+  const showItemsToolbar = spec.formKind !== 'landed_cost'
 
   // Pre-fill the default warehouse once reference data is known (new documents only).
   useEffect(() => {
@@ -144,8 +164,50 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
   const { results: availability, checking } = useAvailability(entries, spec.movesStock || ['job_work_out', 'packing', 'delivery_challan'].includes(spec.formKind))
 
   const offending = useMemo(() => new Set(negative ? offendingDraftKeys(lines, negative) : []), [negative, lines])
+  const duplicateKeys = useMemo(() => findDuplicateLineKeys(lines), [lines])
+  const existingItemIds = useMemo(() => new Set(lines.map((l) => l.item_id).filter((id): id is number => id !== null)), [lines])
+  const validationReport = useMemo(() => (spec.code === 'OPENING_STOCK' ? buildValidationReport(header, lines, spec, warehouses) : EMPTY_REPORT), [header, lines, spec, warehouses])
   const savedSettlements = useMemo(() => (header.metadata.job_work_settlements ?? []) as JobWorkSettlement[], [header.metadata.job_work_settlements])
   const totals = draftTotals(lines, spec)
+
+  // ---- Opening Stock workspace: bulk-add flows (scan / add multiple / import / copy) ----------
+  const [flashKeys, setFlashKeys] = useState<ReadonlySet<string>>(new Set())
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [scanFocusKey, setScanFocusKey] = useState<string | null>(null)
+  const [addMultipleOpen, setAddMultipleOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
+  const [copySource, setCopySource] = useState<CopySource | null>(null)
+  const [validationOpen, setValidationOpen] = useState(false)
+
+  useEffect(() => () => {
+    if (flashTimer.current) clearTimeout(flashTimer.current)
+  }, [])
+
+  const flashLines = (keys: string[]) => {
+    if (keys.length === 0) return
+    setFlashKeys(new Set(keys))
+    if (flashTimer.current) clearTimeout(flashTimer.current)
+    flashTimer.current = setTimeout(() => setFlashKeys(new Set()), 900)
+  }
+
+  const appendLines = (added: LineDraft[]) => {
+    if (added.length === 0) return
+    setLines((ls) => [...ls.filter((l) => !isBlankLine(l)), ...added])
+    flashLines(added.map((l) => l.key))
+  }
+
+  const addBlankLineAndFocus = () => {
+    const line = newLine(spec, { warehouse_id: isTransfer ? null : header.default_warehouse_id })
+    setLines((ls) => [...ls, line])
+    setScanFocusKey(line.key)
+    flashLines([line.key])
+  }
+
+  const downloadImportTemplate = () => downloadCsv(csvFilename(`${spec.slug}-import-template`), buildImportTemplateCsv())
+
+  // A modal or drawer covers the page; its own inputs should get the keystroke, not the form
+  // behind it (Modal / Drawer both mark their overlay this way — see components/Modal.tsx).
+  const overlayOpen = () => document.querySelector('[data-keyboard-overlay="true"]') !== null
 
   const submit = async (post: boolean) => {
     setErrors([])
@@ -187,23 +249,46 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
     }
   }
 
-  const disabled = busy !== null
-  const isTransfer = spec.lineMode === 'transfer'
+  useKeyboardScope(
+    'form',
+    {
+      'ctrl+s': (e) => {
+        if (disabled || overlayOpen()) return
+        e.preventDefault()
+        void submit(false)
+      },
+      'ctrl+enter': (e) => {
+        if (disabled || overlayOpen()) return
+        e.preventDefault()
+        addBlankLineAndFocus()
+      },
+      'alt+p': (e) => {
+        if (disabled || !canPost || overlayOpen()) return
+        e.preventDefault()
+        void submit(true)
+      },
+    },
+    { allowInInput: true },
+  )
+
   const stockEffectHint = spec.stockEffects.find((s) => s.value === header.stock_effect)?.hint
 
   return (
     <form
-      className="page"
+      className="flex flex-1 flex-col gap-4"
       onSubmit={(e) => {
         e.preventDefault()
         void submit(false)
       }}
     >
       {refError ? <Notice kind="warning">{refError}</Notice> : null}
-      <section className="form-section">
-        <h2 className="form-section-title">{spec.label}</h2>
-        <p className="form-section-subtitle">{spec.description}</p>
-        <div className="form-grid">
+
+      {spec.code === 'OPENING_STOCK' ? (
+        <OpeningStockHeaderExtras totals={totals} onOpenImport={() => setImportOpen(true)} onOpenCopy={(source) => setCopySource(source)} />
+      ) : null}
+
+      <FormSectionCard title={spec.label} description={spec.description}>
+        <FormGrid cols={4}>
           <FormField label="Document date" htmlFor="document_date" required>
             <input id="document_date" type="date" className="input" value={header.document_date} disabled={disabled} onChange={(e) => patchHeader({ document_date: e.target.value })} />
           </FormField>
@@ -266,11 +351,11 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
               <textarea id="box_marks" className="textarea" value={(header.metadata.box_marks ?? []).join('\n')} disabled={disabled} onChange={(e) => patchHeader({ metadata: { ...header.metadata, box_marks: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean) } })} />
             </FormField>
           ) : null}
-          <FormField label="Narration" htmlFor="narration" className="span-all">
-            <textarea id="narration" className="textarea" value={header.narration} disabled={disabled} onChange={(e) => patchHeader({ narration: e.target.value })} />
+          <FormField label="Narration" htmlFor="narration" className="md:col-span-2 lg:col-span-4">
+            <textarea id="narration" className="textarea" value={header.narration} disabled={disabled} onChange={(e) => patchHeader({ narration: e.target.value })} placeholder={spec.code === 'OPENING_STOCK' ? `E.g. Opening stock as on ${header.document_date || todayIso()}` : undefined} />
           </FormField>
-        </div>
-      </section>
+        </FormGrid>
+      </FormSectionCard>
 
       {spec.formKind === 'production' ? (
         <ProductionPanel
@@ -323,16 +408,57 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
         />
       ) : null}
 
-      {/* A landed cost allocation has no item lines: a freight bill names no item and no quantity.
-          What it carries is the receipt it loads and the charges, which the panel above collects. */}
+      {/* A landed cost allocation has no item lines: a freight bill names no item and no
+          quantity. What it carries is the receipt it loads and the charges, which the panel above collects. */}
       {spec.formKind === 'landed_cost' ? null : (
-        <section className="form-section">
-          <h2 className="form-section-title">Lines</h2>
-          {spec.formKind === 'revaluation' ? <p className="form-section-subtitle">Quantity is informational; the new unit cost re-prices every layer still holding the item in that warehouse.</p> : null}
+        <FormSectionCard
+          title="Items"
+          description={spec.formKind === 'revaluation' ? 'Quantity is informational; the new unit cost re-prices every layer still holding the item in that warehouse.' : spec.code === 'OPENING_STOCK' ? 'Add items with their opening quantity and value.' : 'Add the items this document moves.'}
+          action={
+            showItemsToolbar ? (
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <Button type="button" variant="secondary" size="sm" icon={Barcode} onClick={addBlankLineAndFocus} disabled={disabled}>
+                  Scan barcode
+                </Button>
+                <Button type="button" variant="secondary" size="sm" icon={ListPlus} onClick={() => setAddMultipleOpen(true)} disabled={disabled}>
+                  Add multiple items
+                </Button>
+                <Button type="button" variant="secondary" size="sm" icon={Upload} onClick={() => setImportOpen(true)} disabled={disabled}>
+                  Import CSV
+                </Button>
+                <Button type="button" variant="secondary" size="sm" icon={Download} onClick={downloadImportTemplate}>
+                  Download template
+                </Button>
+              </div>
+            ) : null
+          }
+        >
           {refLoading && warehouses.length === 0 ? <span className="hint">Loading warehouses…</span> : null}
-          <LineEditor spec={spec} header={header} lines={lines} onChange={setLines} warehouses={warehouses} availability={availability} checking={checking} offendingKeys={offending} disabled={disabled} />
-        </section>
+          <LineEditor
+            spec={spec}
+            header={header}
+            lines={lines}
+            onChange={setLines}
+            warehouses={warehouses}
+            availability={availability}
+            checking={checking}
+            offendingKeys={offending}
+            disabled={disabled}
+            autoFocusKey={scanFocusKey}
+            flashKeys={flashKeys}
+            duplicateKeys={duplicateKeys}
+          />
+        </FormSectionCard>
       )}
+
+      {spec.code === 'OPENING_STOCK' ? (
+        <OpeningStockQuickActions
+          onOpenImport={() => setImportOpen(true)}
+          onOpenCopy={(source) => setCopySource(source)}
+          onValidate={() => setValidationOpen(true)}
+          issueCount={validationReport.errors.length + validationReport.warnings.length}
+        />
+      ) : null}
 
       {errors.length > 0 ? (
         <Notice kind="error" title="Please fix before saving">
@@ -375,24 +501,32 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
         </Notice>
       ) : null}
 
-      <div className="form-actions">
-        <span className="muted" style={{ fontSize: '0.8125rem' }}>
-          {totals.lines} line{totals.lines === 1 ? '' : 's'}
-          {savedId ? ` · draft #${savedId}` : ''}
-        </span>
-        <span className="spacer" />
-        <Link className="btn" to={savedId ? `/documents/${savedId}` : '/documents'}>
+      <StickyActionBar status={<span>{totals.lines} line{totals.lines === 1 ? '' : 's'}{savedId ? ` · draft #${savedId}` : ''}</span>}>
+        <Button type="button" variant="secondary" onClick={() => navigate(savedId ? `/documents/${savedId}` : '/documents')}>
           Cancel
-        </Link>
-        <button type="submit" className="btn" disabled={disabled || !canSave}>
-          {busy === 'save' ? 'Saving…' : savedId ? 'Save changes' : 'Save draft'}
-        </button>
+        </Button>
+        <Button type="submit" variant="secondary" loading={busy === 'save'} disabled={disabled || !canSave}>
+          {savedId ? 'Save changes' : 'Save draft'}
+        </Button>
         {canPost ? (
-          <button type="button" className="btn btn-primary" onClick={() => void submit(true)} disabled={disabled || (!canSave && !savedId)}>
-            {busy === 'post' ? 'Posting…' : negative && override ? 'Post with override' : 'Save & post'}
-          </button>
+          <Button type="button" variant="primary" loading={busy === 'post'} onClick={() => void submit(true)} disabled={disabled || (!canSave && !savedId)} kbd="Alt+P">
+            {negative && override ? 'Post with override' : 'Save & post'}
+          </Button>
         ) : null}
-      </div>
+      </StickyActionBar>
+
+      {showItemsToolbar ? (
+        <>
+          <AddMultipleItemsModal open={addMultipleOpen} onClose={() => setAddMultipleOpen(false)} spec={spec} defaultWarehouseId={header.default_warehouse_id} existingItemIds={existingItemIds} onConfirm={appendLines} />
+          <ImportLinesModal open={importOpen} onClose={() => setImportOpen(false)} spec={spec} warehouses={warehouses} defaultWarehouseId={header.default_warehouse_id} onConfirm={appendLines} />
+        </>
+      ) : null}
+      {spec.code === 'OPENING_STOCK' ? (
+        <>
+          <CopyStockModal open={copySource !== null} initialSource={copySource ?? 'previous_document'} onClose={() => setCopySource(null)} spec={spec} warehouses={warehouses} onConfirm={appendLines} />
+          <ValidationDrawer open={validationOpen} onClose={() => setValidationOpen(false)} report={validationReport} />
+        </>
+      ) : null}
     </form>
   )
 }

@@ -98,4 +98,47 @@ export function LiveDataBadge({ fetchedAt, refreshing = false, stale = false, cl
   )
 }
 
+/**
+ * The "● Live data" pill beside the register's title.
+ *
+ * The same claim as the badge above, in the smallest form that still has to be
+ * true: it appears only once a response has actually landed, and it says
+ * something different when the last refresh failed. A pill hard-wired into the
+ * heading would assert freshness on a screen showing figures from before a
+ * network outage, which is the one moment the reader most needs to be told
+ * otherwise. No timestamp here — that is the badge's job, and repeating it
+ * beside the title would age twice on one screen.
+ */
+export function LiveDataPill({
+  fetchedAt,
+  refreshing = false,
+  stale = false,
+  className,
+}: Omit<LiveDataBadgeProps, 'className'> & { className?: string }) {
+  if (fetchedAt == null) return null
+
+  const label = refreshing ? 'Refreshing' : stale ? 'Last good data' : 'Live data'
+
+  return (
+    <span
+      className={cx(
+        AIC,
+        'inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold print:hidden',
+        stale ? 'bg-amber-50 text-amber-700' : 'bg-primary-light text-primary',
+        className,
+      )}
+    >
+      <span
+        className={cx(
+          'h-1.5 w-1.5 shrink-0 rounded-full',
+          stale ? 'bg-amber-500 ring-4 ring-amber-500/10' : 'bg-primary ring-4 ring-primary/10',
+          refreshing && 'animate-pulse',
+        )}
+        aria-hidden
+      />
+      {label}
+    </span>
+  )
+}
+
 export default LiveDataBadge

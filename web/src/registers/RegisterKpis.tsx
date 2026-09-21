@@ -42,6 +42,10 @@ export function RegisterKpis({
           invertDelta={card.invertDelta}
           sparkline={card.sparkline}
           emphasizeNegative={card.emphasizeNegative}
+          // Panel registers only: the wide card has a corner to spare, the
+          // dashboard's stacked tile does not. Fixed decoration, never a plot
+          // — see StatCard's CardOrnament.
+          ornament={layout === 'metric'}
         />
       ))}
     </>
