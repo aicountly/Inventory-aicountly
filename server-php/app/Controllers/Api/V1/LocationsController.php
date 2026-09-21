@@ -18,10 +18,31 @@ class LocationsController extends MasterController
     protected ?string $parentColumn = 'parent_location_id';
     protected array $deleteGuards = [['table' => 'inv_document_lines', 'column' => 'location_id', 'label' => 'document line(s)']];
 
+    /**
+     * warehouse_id, location_type and parent_location_id.
+     *
+     * The last two are here so the list screen's Type and Parent controls
+     * narrow the query the count and the pager are built from. Filtering either
+     * of them in the browser instead would have paged over rows the server had
+     * already excluded: "1-50 of 431" above 12 visible rows.
+     *
+     * parent_location_id takes the literal `root` for "top level only", because
+     * an absent parent is NULL and no id can stand for it.
+     */
     protected function applyIndexFilters($builder): void
     {
         if ($wh = (int) $this->request->getGet('warehouse_id')) {
             $builder->where('warehouse_id', $wh);
+        }
+        $type = strtolower(trim((string) ($this->request->getGet('location_type') ?? '')));
+        if (in_array($type, ['zone', 'rack', 'shelf', 'bin'], true)) {
+            $builder->where('location_type', $type);
+        }
+        $parent = trim((string) ($this->request->getGet('parent_location_id') ?? ''));
+        if ($parent === 'root') {
+            $builder->where('parent_location_id', null);
+        } elseif ((int) $parent > 0) {
+            $builder->where('parent_location_id', (int) $parent);
         }
     }
 

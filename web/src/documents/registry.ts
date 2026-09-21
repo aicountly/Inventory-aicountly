@@ -85,7 +85,11 @@ export const NATIVE_DOCUMENT_TYPES: DocumentTypeSpec[] = [
   spec({ code: 'WRITE_IN', label: 'Stock Write-In / Excess', description: 'Bring found or excess stock in at a cost.', lineMode: 'fixed_in', formKind: 'lines', valuation: true, cogs: false, reason: true, rate: true }),
   spec({ code: 'CONSUMPTION', label: 'Consumption', description: 'Consume stock internally (COGS).', lineMode: 'fixed_out', formKind: 'lines', valuation: true, cogs: true, reason: true }),
   spec({ code: 'MATERIAL_ISSUE', label: 'Material Issue', description: 'Issue material out of stores (COGS).', lineMode: 'fixed_out', formKind: 'lines', valuation: true, cogs: true, reason: true }),
-  spec({ code: 'MATERIAL_RECEIPT', label: 'Material Receipt', description: 'Receive material into stores at a cost.', lineMode: 'fixed_in', formKind: 'lines', valuation: true, cogs: false, rate: true }),
+  // party: the supplier the goods came from. Optional — the server has never
+  // required one on a receipt and still does not — but inv_documents carries
+  // party_ref / party_name for every type, so the name and the Books ledger id
+  // are stored, not thrown away, and the register can be filtered by supplier.
+  spec({ code: 'MATERIAL_RECEIPT', label: 'Material Receipt', description: 'Receive material into stores at a cost.', lineMode: 'fixed_in', formKind: 'lines', valuation: true, cogs: false, rate: true, party: 'supplier' }),
   spec({ code: 'PRODUCTION', label: 'Production', description: 'Consume components from a bill of materials and receive finished goods.', lineMode: 'by_line', formKind: 'production', valuation: true, cogs: true, valuationRate: true }),
   spec({ code: 'ASSEMBLY', label: 'Assembly', description: 'Assemble a kit: components out, assembled item in.', lineMode: 'by_line', formKind: 'lines', valuation: true, cogs: false, valuationRate: true }),
   spec({ code: 'DISASSEMBLY', label: 'Disassembly', description: 'Break a kit back into its components.', lineMode: 'by_line', formKind: 'lines', valuation: true, cogs: false, valuationRate: true }),

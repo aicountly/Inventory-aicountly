@@ -228,27 +228,23 @@ export interface ResolvedCode {
 /**
  * Resolve a barcode / SKU to an item, exactly as the scanner endpoint does (it matches
  * `item_upc` or `item_sku`), falling back to the typeahead for a single unambiguous name match.
+ *
+ * `itemByBarcode` answers null for "not one of ours" and throws for anything else, which is the
+ * distinction this needs: a code that does not exist is a row to report, and a network failure is
+ * not — reporting 200 rows as "no such item" because the request never landed would be a lie.
  */
 export async function resolveItemCode(code: string, warehouseId: number | null, signal?: AbortSignal): Promise<ResolvedCode> {
   const trimmed = code.trim()
   if (!trimmed) return { code, item: null, reason: 'Empty code.' }
-  try {
-    const item = await lookupApi.byBarcode(trimmed, { warehouseId, signal })
-    return { code: trimmed, item, reason: null }
-  } catch (err) {
-    if (isAbortError(err)) throw err
-    // Not a barcode or SKU — try the name typeahead, but only accept it when it is unambiguous.
-    try {
-      const rows = await lookupApi.searchItems(trimmed, { warehouseId, limit: 5, signal })
-      const exact = rows.filter((r) => [r.item_name, r.print_name, r.item_alias, r.item_sku, r.item_upc].some((v) => typeof v === 'string' && v.trim().toLowerCase() === trimmed.toLowerCase()))
-      if (exact.length === 1) return { code: trimmed, item: exact[0], reason: null }
-      if (rows.length === 1) return { code: trimmed, item: rows[0], reason: null }
-      if (rows.length > 1) return { code: trimmed, item: null, reason: 'Matches more than one item.' }
-    } catch (searchErr) {
-      if (isAbortError(searchErr)) throw searchErr
-    }
-    return { code: trimmed, item: null, reason: 'No item with that SKU or barcode.' }
-  }
+  const scanned = await lookupApi.itemByBarcode(trimmed, { warehouseId, signal })
+  if (scanned) return { code: trimmed, item: scanned, reason: null }
+  // Not a barcode or a SKU — try the name typeahead, but only accept it when it is unambiguous.
+  const rows = await lookupApi.searchItems(trimmed, { warehouseId, limit: 5, signal })
+  const exact = rows.filter((r) => [r.item_name, r.print_name, r.item_alias, r.item_sku, r.item_upc].some((v) => typeof v === 'string' && v.trim().toLowerCase() === trimmed.toLowerCase()))
+  if (exact.length === 1) return { code: trimmed, item: exact[0], reason: null }
+  if (rows.length === 1) return { code: trimmed, item: rows[0], reason: null }
+  if (rows.length > 1) return { code: trimmed, item: null, reason: 'Matches more than one item.' }
+  return { code: trimmed, item: null, reason: 'No item with that SKU or barcode.' }
 }
 
 /** Resolve many codes without opening one connection per row. */
