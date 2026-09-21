@@ -44,14 +44,24 @@ Manage through the API's read-only relay (`/api/manage/...`).
   alternate units and conversions, tracking flags, stock levels and opening
   stock per warehouse (`/v1/items/{id}/openings`); soft delete.
 - **Masters** — item groups (tree), stock categories, brands, units of measure,
-  warehouse groups (tree), warehouses, locations, bills of materials
+  warehouse groups, warehouses, locations, bills of materials
   (components, by-products, scrap) and serial numbers (single and bulk
-  registration). **Batches** has its own workspace: server-counted figures
-  (`/v1/batches/summary`), derived expiry health (expired / expiring / healthy,
-  computed per request and never stored), filters on status, item, warehouse,
-  expiry window, group, category, lot and on-hand — all in the URL — a detail
-  drawer with per-warehouse balances and recent movements, CSV import, Code 39
-  labels, and a bulk status change (`POST /v1/batches/bulk-update`).
+  registration). **Brands** has its own workspace: company-wide figures
+  from `/v1/brands/metrics`, search across name / alias / code / description,
+  status, period and item-linkage filters, item counts that open the filtered
+  item list, bulk activate / deactivate / delete, CSV import with a validation
+  preview, and a contextual rail whose suggestions apply real filters. Per-brand
+  turnover is read live from Books through `/v1/brands/sales` and is simply not
+  shown until that service is connected — nothing of Books' is stored here.
+  **Warehouse groups** have a screen of their own too
+  (`src/masters/warehouseGroups`): list, tree and card views over one load, live
+  counts, a contextual structure panel and deterministic insights.
+  **Batches** has one as well: server-counted figures (`/v1/batches/summary`),
+  derived expiry health (expired / expiring / healthy, computed per request and
+  never stored), filters on status, item, warehouse, expiry window, group,
+  category, lot and on-hand — all in the URL — a detail drawer with
+  per-warehouse balances and recent movements, CSV import, Code 39 labels, and a
+  bulk status change (`POST /v1/batches/bulk-update`).
 
 - **Documents** — list, detail (lines with valuation, accounting effects,
   approvals, print snapshot) and create / edit forms for every native type;
@@ -61,7 +71,14 @@ Manage through the API's read-only relay (`/api/manage/...`).
   list.
 - **Valuation** — the valuation snapshot at any method, cost layers with the
   issues that consumed them, back-dated recalculation jobs (dry run or live)
-  and the COGS revisions Books acknowledges.
+  and the COGS revisions Books acknowledges. The revisions screen carries its
+  own workspace: KPI cards, a filter panel (Books state, item, warehouse,
+  source document, movement, value threshold, date range), bulk
+  acknowledgement behind a confirmation that states what is being claimed, a
+  detail drawer showing the Books handover, and a timeline / source split /
+  acknowledgement progress band. Every figure on it is a server aggregate over
+  the same filters as the table (`GET /v1/valuation/revisions/summary`), never
+  a sum of the page on screen.
 - **Reports** — stock summary, warehouse stock, batch stock, serial numbers,
   stock ageing, movement analysis, near expiry and replenishment, each with
   URL-persisted filters and CSV export (`src/reports/configs`).

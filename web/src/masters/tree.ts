@@ -26,7 +26,7 @@ function toId(v: unknown): number | null {
  * (filtered out, deleted) become roots so nothing silently disappears; cycles
  * are broken at the first repeated id.
  */
-export function buildTree<T>(rows: T[], opts: TreeOptions<T>): TreeNode<T>[] {
+export function buildTree<T>(rows: readonly T[], opts: TreeOptions<T>): TreeNode<T>[] {
   const byId = new Map<number, TreeNode<T>>()
   for (const row of rows) {
     const id = toId((row as Record<string, unknown>)[opts.idKey])

@@ -188,14 +188,27 @@ const summaries: Record<string, unknown> = {
     total_qty: 9,
     total_value: 90,
     buckets: {
-      '0_30': { qty: 1, value: 10 },
-      '31_60': { qty: 2, value: 20 },
-      '61_90': { qty: 2, value: 20 },
-      '91_180': { qty: 2, value: 20 },
-      '180_plus': { qty: 2, value: 20 },
+      '0_30': { qty: 1, value: 10, items: 1 },
+      '31_60': { qty: 2, value: 20, items: 2 },
+      '61_90': { qty: 2, value: 20, items: 2 },
+      '91_180': { qty: 2, value: 20, items: 1 },
+      '180_plus': { qty: 2, value: 20, items: 1 },
     },
     bucket_labels: {},
     as_of: '2026-09-14',
+    weighted_age_days: 74,
+    oldest_days: 300,
+    value_over_90: 40,
+    value_over_180: 20,
+    qty_over_90: 4,
+    qty_over_180: 2,
+    by_health: { fresh: 1, healthy: 0, watch: 1, slow: 0, obsolete: 1 },
+    health_score: 63,
+    health_band: 'watch',
+    age_bucket: null,
+    health_status: null,
+    warehouses: [],
+    item_groups: [],
   },
 }
 
@@ -254,7 +267,8 @@ describe('sort headers match what the endpoint can order by', () => {
     'stock-balances': ['Services/StockBalanceService.php', 'SORTABLE'],
     valuation: ['Controllers/Api/V1/ValuationController.php', 'SNAPSHOT_SORTABLE'],
     reservations: ['Controllers/Api/V1/ReservationsController.php', 'SORTABLE'],
-    'pending-quantities': ['Services/PendingQuantityService.php', 'SORTABLE'],
+    // The register's read side; PendingQuantityService owns the write lifecycle.
+    'pending-quantities': ['Services/PendingRegisterQuery.php', 'SORTABLE'],
     'reconciliation-runs': ['Controllers/Api/V1/ReconciliationController.php', 'SORTABLE'],
   }
 
@@ -271,6 +285,42 @@ describe('sort headers match what the endpoint can order by', () => {
         expect(sortable.has(col.sortKey), `${config.path}: "${col.key}" sorts by ${col.sortKey}, which ${constName} has no entry for`).toBe(true)
       }
       expect(sortable.has(config.defaultSort ?? ''), `${config.path}: defaultSort ${config.defaultSort} is not sortable`).toBe(true)
+    })
+  }
+})
+
+/**
+ * The same guard for the report-backed registers whose service declares a named
+ * whitelist. Only the ones that do can be checked; the rest order in PHP through an
+ * inline list, and a test that copied it would drift the moment the endpoint changed.
+ */
+describe('report registers sort by columns their service can order by', () => {
+  const REPORT_SORTABLE: Record<string, [string, string]> = {
+    'stock-ageing': ['Services/InventoryReportService.php', 'STOCK_AGEING_SORTABLE'],
+  }
+
+  for (const [path, [file, constName]] of Object.entries(REPORT_SORTABLE)) {
+    it(`${path} offers no header its service would ignore`, () => {
+      const php = readFileSync(
+        new URL('../../../../server-php/app/' + file, import.meta.url).pathname,
+        'utf8',
+      )
+      const start = php.indexOf(`const ${constName} = [`)
+      expect(start, `${file} no longer declares ${constName}`).toBeGreaterThan(-1)
+      const body = php.slice(start + `const ${constName} = [`.length, php.indexOf('];', start))
+      const sortable = new Set([...body.matchAll(/'([^']+)'/g)].map((m) => m[1]))
+      expect(sortable.size, `${constName} parsed empty`).toBeGreaterThan(0)
+
+      const config = registerByPath(path)!
+      expect(config, `${path} is not a register`).toBeTruthy()
+      for (const col of config.columns) {
+        if (col.sortKey === undefined) continue
+        expect(
+          sortable.has(col.sortKey),
+          `${path}: "${col.key}" sorts by ${col.sortKey}, which ${constName} has no entry for`,
+        ).toBe(true)
+      }
+      expect(sortable.has(config.defaultSort ?? ''), `${path}: defaultSort is not sortable`).toBe(true)
     })
   }
 })

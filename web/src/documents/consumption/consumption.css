@@ -1,0 +1,211 @@
+/*
+ * Scoped restyle of the legacy `documents.css` / `components/ui.css` primitives
+ * (WarehouseSelect, BatchPicker, SerialPicker, LineItemPicker) so they read as part of
+ * the premium Consumption page — every rule is scoped under `.consumption-premium` so
+ * nothing here leaks into the ~20 other document types that still render these same
+ * shared components unstyled. The components themselves are untouched.
+ *
+ * Values are drawn from theme/tokens.css custom properties, so dark mode and any accent
+ * theme keep working without a second copy of this file.
+ */
+
+.consumption-premium .input,
+.consumption-premium .select,
+.consumption-premium .typeahead input,
+.consumption-premium .inline-select {
+  height: 2.25rem;
+  padding: 0 0.625rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgb(var(--color-border));
+  background: rgb(var(--color-surface));
+  color: rgb(var(--color-fg));
+  font-size: 0.8125rem;
+  transition: border-color 160ms cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.consumption-premium .input:focus,
+.consumption-premium .select:focus,
+.consumption-premium .typeahead input:focus {
+  outline: none;
+  border-color: rgb(var(--color-primary));
+  box-shadow: 0 0 0 3px rgb(var(--color-primary) / 0.16);
+}
+
+.consumption-premium .input:disabled,
+.consumption-premium .select:disabled {
+  background: rgb(var(--color-surface-2));
+  color: rgb(var(--color-fg-muted));
+  cursor: not-allowed;
+}
+
+.consumption-premium .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  height: 2rem;
+  padding: 0 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgb(var(--color-border-strong));
+  background: rgb(var(--color-surface));
+  color: rgb(var(--color-fg));
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.consumption-premium .btn:hover:not(:disabled) {
+  border-color: rgb(var(--color-primary) / 0.5);
+  background: rgb(var(--color-primary-light));
+  color: rgb(var(--color-primary));
+}
+
+.consumption-premium .btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.consumption-premium .btn-primary {
+  border-color: rgb(var(--color-primary));
+  background: rgb(var(--color-primary));
+  color: #fff;
+}
+
+.consumption-premium .btn-primary:hover:not(:disabled) {
+  border-color: rgb(var(--color-primary-hover));
+  background: rgb(var(--color-primary-hover));
+  color: #fff;
+}
+
+.consumption-premium .btn-danger {
+  border-color: transparent;
+  background: transparent;
+  color: rgb(220 38 38);
+}
+
+.consumption-premium .btn-danger:hover:not(:disabled) {
+  background: rgb(254 242 242);
+  color: rgb(220 38 38);
+}
+
+.consumption-premium .btn-ghost {
+  border-color: transparent;
+  background: transparent;
+}
+
+.consumption-premium .btn-ghost:hover:not(:disabled) {
+  background: rgb(var(--color-surface-2));
+  color: rgb(var(--color-fg));
+}
+
+.consumption-premium .btn-sm {
+  height: 1.75rem;
+  padding: 0 0.5rem;
+  font-size: 0.6875rem;
+}
+
+.consumption-premium .btn-link {
+  height: auto;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: rgb(var(--color-primary));
+  font-weight: 600;
+}
+
+.consumption-premium .typeahead {
+  position: relative;
+}
+
+.consumption-premium .typeahead-selected {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-height: 2.25rem;
+  padding: 0.25rem 0.625rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgb(var(--color-border));
+  background: rgb(var(--color-surface));
+  font-size: 0.8125rem;
+}
+
+.consumption-premium .typeahead-list {
+  position: absolute;
+  z-index: 30;
+  left: 0;
+  right: 0;
+  margin-top: 0.25rem;
+  min-width: 18rem;
+  max-height: 16rem;
+  overflow-y: auto;
+  border-radius: 0.625rem;
+  border: 1px solid rgb(var(--color-border));
+  background: rgb(var(--color-surface));
+  box-shadow: var(--shadow-overlay);
+  padding: 0.25rem;
+}
+
+.consumption-premium .typeahead-option {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  border-radius: 0.5rem;
+  padding: 0.375rem 0.625rem;
+  cursor: pointer;
+  font-size: 0.8125rem;
+}
+
+.consumption-premium .typeahead-option.active,
+.consumption-premium .typeahead-option:hover {
+  background: rgb(var(--color-primary-light));
+}
+
+.consumption-premium .typeahead-option .meta {
+  font-size: 0.6875rem;
+  color: rgb(var(--color-fg-muted));
+}
+
+.consumption-premium .typeahead-empty {
+  padding: 0.5rem 0.625rem;
+  font-size: 0.75rem;
+  color: rgb(var(--color-fg-muted));
+}
+
+.consumption-premium .stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.consumption-premium .field-error {
+  font-size: 0.6875rem;
+  color: rgb(220 38 38);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .consumption-premium * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+/* "Save & Post + Print": an on-screen overlay so the sheet is visible while the print dialog is
+   still loading, reset to normal flow for the print itself so multi-page snapshots paginate
+   correctly instead of clipping to one viewport. */
+.consumption-print-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  overflow: auto;
+  background: #fff;
+}
+
+@media print {
+  .consumption-print-overlay {
+    position: static;
+    overflow: visible;
+  }
+}

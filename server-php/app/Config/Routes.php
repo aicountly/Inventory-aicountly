@@ -48,6 +48,9 @@ $routes->group('', ['namespace' => 'App\Controllers\Api', 'filter' => 'cors'], s
         $routes->post('settings/period-locks', 'SettingsController::lockPeriod');
         $routes->delete('settings/period-locks/(:num)', 'SettingsController::releasePeriodLock/$1');
         $routes->get('document-types', 'SettingsController::documentTypes');
+        // The parties Inventory's documents reference, for register filters. A
+        // picker over inv_documents.party_ref — never a party master.
+        $routes->get('document-parties', 'SettingsController::documentParties');
         $routes->get('dashboard', 'DashboardController::index');
         // The four dashboards the overview counters do not answer. Registered
         // BEFORE the bare 'dashboard' segment would ever be matched as an id,
@@ -58,6 +61,16 @@ $routes->group('', ['namespace' => 'App\Controllers\Api', 'filter' => 'cors'], s
         $routes->get('dashboard/controls', 'DashboardController::controls');
 
         // Masters
+        //
+        // Registered before the generic master loop below. `uom/summary` and `uom/uqc-codes` would
+        // otherwise be read as ids by the loop's own `uom/(:num)`; the brands pair only matches
+        // digits so there is no collision either way, but a literal segment that must win belongs
+        // above the placeholder that could one day be widened.
+        $routes->get('brands/metrics', 'BrandsController::metrics');
+        $routes->get('brands/sales', 'BrandsController::sales');
+        $routes->get('uom/summary', 'UomController::summary');
+        $routes->get('uom/uqc-codes', 'UomController::uqcCodes');
+        $routes->get('uom/(:num)/usage', 'UomController::usage/$1');
         foreach ([
             'item-groups'      => 'ItemGroupsController',
             'stock-categories' => 'StockCategoriesController',
@@ -140,9 +153,13 @@ $routes->group('', ['namespace' => 'App\Controllers\Api', 'filter' => 'cors'], s
         $routes->get('valuation/cost-layers', 'ValuationController::costLayers');
         $routes->get('valuation/recalculations', 'ValuationController::recalcJobs');
         $routes->post('valuation/recalculations', 'ValuationController::enqueueRecalc');
+        // Before the (:num) route so the literal segment cannot be read as an id.
+        $routes->get('valuation/recalculations/summary', 'ValuationController::recalcSummary');
         $routes->get('valuation/recalculations/(:num)', 'ValuationController::recalcJob/$1');
         $routes->post('valuation/recalculations/(:num)/run', 'ValuationController::runRecalc/$1');
+        $routes->post('valuation/recalculations/(:num)/cancel', 'ValuationController::cancelRecalc/$1');
         $routes->get('valuation/revisions', 'ValuationController::revisions');
+        $routes->get('valuation/revisions/summary', 'ValuationController::revisionsSummary');
         $routes->post('valuation/revisions/ack', 'ValuationController::ackRevisions');
         $routes->get('valuation/carry-forward', 'ValuationController::carryForwardPreview');
         $routes->post('valuation/carry-forward', 'ValuationController::carryForward');

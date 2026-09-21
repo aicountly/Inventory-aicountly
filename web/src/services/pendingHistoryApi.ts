@@ -2,7 +2,7 @@
 
 import { api } from './api'
 import type { ItemResponse } from './api'
-import type { PendingKind } from './stockApi'
+import type { PendingPolicy, PendingRow } from './stockApi'
 
 export interface PendingSettlement {
   settlement_id: number
@@ -20,35 +20,22 @@ export interface PendingSettlement {
   source_document_no: string | null
 }
 
-export interface PendingDetail {
-  pending_id: number
-  cmp_id: number
-  fy_id: number
-  document_id: number
-  line_id: number | null
-  pending_kind: PendingKind | string
-  direction: 'in' | 'out' | string
-  item_id: number
-  item_name: string | null
-  item_sku: string | null
-  unit_id: number | null
-  unit_symbol: string | null
-  warehouse_id: number | null
-  warehouse_name: string | null
-  party_ref: number | null
-  party_name: string | null
-  qty_original: number
-  qty_settled: number
-  qty_open: number
-  status: 'open' | 'partial' | 'settled' | 'cancelled' | string
-  document_no: string | null
-  document_date: string | null
-  document_type: string
-  document_type_label?: string
-  document_status: string | null
-  created_at?: string | null
-  updated_at?: string | null
+/**
+ * The drawer's row.
+ *
+ * Deliberately `PendingRow` plus the trail rather than a parallel shape: the
+ * endpoint answers it from the same SQL the table is built from, so a line's
+ * ageing, status and priority read identically in the drawer and in the row it
+ * was opened from. A second declaration here would be a second set of rules
+ * waiting to drift.
+ *
+ * `Partial` on the derived half is not laziness — a pending line whose document
+ * was deleted outright rather than reversed cannot carry a document date, and the
+ * endpoint falls back to the plain row for it. The drawer renders what is there.
+ */
+export interface PendingDetail extends Omit<PendingRow, 'status' | 'priority'>, Partial<Pick<PendingRow, 'status' | 'priority'>> {
   settlements: PendingSettlement[]
+  policy?: PendingPolicy
 }
 
 export const pendingHistoryApi = {
