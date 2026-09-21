@@ -256,6 +256,36 @@ describe('CostLayersPage', () => {
     expect(screen.getByRole('button', { name: /retry/i })).toBeTruthy()
   })
 
+  it('dates the figures from the last good fetch, and says so when one fails', async () => {
+    renderAt('/valuation/cost-layers?item_id=12')
+    await waitFor(() => expect(screen.getByText('Live data')).toBeTruthy())
+    expect(screen.getByText(/last updated/i)).toBeTruthy()
+  })
+
+  it('marks the grid stale rather than current when a RELOAD fails', async () => {
+    /*
+     * The page keeps the previous rows on screen when a request dies, which is
+     * right — but a stale grid that still reads "Live data" is the one state
+     * this badge exists to prevent.
+     *
+     * It has to be a reload, not a first load: with nothing ever fetched there
+     * is no "last good data" to be showing, and the badge correctly renders
+     * nothing at all.
+     */
+    renderAt('/valuation/cost-layers?item_id=12')
+    await waitFor(() => expect(screen.getByText('Live data')).toBeTruthy())
+
+    costLayers.mockImplementation(async () => {
+      throw new Error('boom')
+    })
+    fireEvent.click(screen.getByRole('button', { name: /refresh/i }))
+
+    await waitFor(() => expect(screen.getByText('Showing last good data')).toBeTruthy())
+    // The stamp must not move on a failure, or the badge dates the new empty
+    // screen by the old fetch.
+    expect(screen.getByText(/last updated/i)).toBeTruthy()
+  })
+
   it('splits the distribution over every layer state, not the filtered page', async () => {
     renderAt('/valuation/cost-layers?item_id=12&status=open')
     await waitFor(() => expect(screen.getByText('Cost layer distribution')).toBeTruthy())

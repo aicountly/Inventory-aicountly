@@ -37,6 +37,7 @@ import { Card } from '../../ui/Card'
 import { EmptyState } from '../../ui/EmptyState'
 import { Skeleton } from '../../ui/Skeleton'
 import { BreadcrumbHeader } from '../../ui/shell/BreadcrumbHeader'
+import { LiveDataBadge } from '../../ui/shell/LiveDataBadge'
 import { PageShell } from '../../ui/shell/PageShell'
 import { cx } from '../../ui/cx'
 import { formatDate, formatInt, formatMoney, formatQty, todayIso } from '../../utils/format'
@@ -529,6 +530,29 @@ export function CostLayersPage() {
         description="Pick an item to see the receipt layers its valuation is built from and which issues consumed them."
         icon={Layers3}
         meta={<span className="text-[11px] text-gray-500">{scopeLabel}</span>}
+        /*
+         * How old the figures are, from the last SUCCESSFUL fetch.
+         *
+         * This screen is read to decide whether to re-cost a period, and it
+         * keeps the previous rows on screen while the next query runs and when
+         * a reload fails — which is right, but it means a stale grid is
+         * indistinguishable from a fresh one. The badge reads `fetchedAt`,
+         * which useQuery deliberately does not move on a failure, so a page
+         * whose last request died says "Showing last good data" instead of
+         * looking current.
+         *
+         * `aside` only renders at 1536px and up, so it costs no room on the
+         * laptop width the header is already tight at.
+         */
+        aside={
+          hasItem ? (
+            <LiveDataBadge
+              fetchedAt={layers.fetchedAt}
+              refreshing={layers.loading}
+              stale={layers.error !== null}
+            />
+          ) : null
+        }
         actions={headerActions}
       />
 
