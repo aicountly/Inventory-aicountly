@@ -72,6 +72,10 @@ Manage through the API's read-only relay (`/api/manage/...`).
   and a pinned action bar. Its purchase-order, invoice-reading and attachment
   workflows read other products over live APIs and stay visible-but-disabled
   until the matching relay exists (`VITE_FEATURE_RECEIPT_*` in `.env.example`).
+  **Job work** has one too (`src/documents/jobwork`): a single screen for both
+  directions, with the position still out with job workers, what is late, a
+  settlement panel that turns open dispatch quantities into lines, live
+  availability on a dispatch, and batch / serial allocation per line.
   **Physical Stock Count** has a counting workspace
   (`src/documents/physicalCount`): a batched book-quantity snapshot, live
   variance and progress figures, deterministic variance / serial / batch
