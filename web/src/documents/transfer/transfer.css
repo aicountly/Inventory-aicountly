@@ -1,0 +1,89 @@
+/*
+ * Stock transfer workspace — the few rules Tailwind cannot reach.
+ *
+ * The item typeahead, the batch select and the serial picker are the SHARED
+ * document pickers (documents/LineItemPicker, BatchPicker, SerialPicker). They
+ * carry the hand-written classes from components/ui.css because twenty other
+ * screens render them, and forking them for one screen would leave two
+ * implementations of the same control to keep in step.
+ *
+ * So their metrics are nudged into line with the Tailwind controls beside them,
+ * scoped to this grid alone. Everything is expressed through the existing theme
+ * variables, so dark mode needs nothing extra here.
+ */
+
+.st-workspace .st-grid .input,
+.st-workspace .st-grid .select {
+  min-height: 2rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.5rem;
+  font-size: 0.8125rem;
+}
+
+/*
+ * A chosen item reads as the item's name, not as a filled-in text box: the row
+ * is dense and the box around a value the user cannot type into is noise. The
+ * border returns on hover so the "Change" affordance stays discoverable.
+ */
+.st-workspace .st-grid .typeahead-selected {
+  min-height: 2rem;
+  padding: 0.125rem 0.25rem 0.125rem 0;
+  border-color: transparent;
+  border-radius: 0.5rem;
+  background: transparent;
+  font-size: 0.8125rem;
+}
+
+.st-workspace .st-grid .typeahead-selected:hover,
+.st-workspace .st-grid .typeahead-selected:focus-within {
+  padding-left: 0.5rem;
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.st-workspace .st-grid .btn-sm {
+  min-height: 2rem;
+  border-radius: 0.5rem;
+}
+
+/* "Change" sits beside the item name in a 13rem column; at its default size it
+   takes a third of it and the name wraps to three lines. */
+.st-workspace .st-grid .typeahead-selected .btn-sm {
+  min-height: 1.5rem;
+  padding: 0 0.375rem;
+  font-size: 0.6875rem;
+  color: var(--muted);
+}
+
+.st-workspace .st-grid .typeahead-selected > span {
+  min-width: 0;
+}
+
+/*
+ * The grid is `table-fixed`, so the columns are already immune to a long item
+ * name — this only decides where the name breaks inside the column it is given.
+ * `break-word` rather than `anywhere`: it wraps at the spaces first and only
+ * splits a word that would not fit on a line of its own, so a narrow phone shows
+ * "Laptop / Dell / Inspiron / 15" instead of "Lapto / p Dell / Inspir / on 15".
+ */
+.st-workspace .st-grid .typeahead-selected strong,
+.st-workspace .st-grid .st-item-name {
+  overflow-wrap: break-word;
+}
+
+.st-workspace .st-grid .stack {
+  gap: 0.25rem;
+}
+
+/* The batch "+ New batch" link never applies here (a transfer only issues
+   existing stock), so the select is the whole control and should fill the cell. */
+.st-workspace .st-grid .stack > .select {
+  width: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .st-workspace * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

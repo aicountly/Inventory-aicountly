@@ -11,6 +11,7 @@ import { PageShell } from '../ui/shell/PageShell'
 import { DocumentForm } from './DocumentForm'
 import { ConsumptionForm } from './consumption/ConsumptionForm'
 import { MaterialIssuePage } from './materialIssue/MaterialIssuePage'
+import { StockTransferWorkspace } from './transfer/StockTransferWorkspace'
 import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS, statusTone } from './actions'
 import type { StatusTone } from './actions'
 import { documentTypeGlyph } from './documentTypeIcon'
@@ -18,6 +19,16 @@ import { draftFromDocument } from './formModel'
 import { specForCode, specForSlug, UNAVAILABLE_TYPES } from './registry'
 import type { DocumentStatus } from './types'
 import './documents.css'
+
+/*
+ * Three native types have a screen of their own; every other one keeps the
+ * shared `DocumentForm`. A type earns one when the generic editor cannot say
+ * what it needs to say while the document is being typed — a transfer has two
+ * warehouses on the header and a route per line, a consumption has to settle
+ * batches and serials before it can be saved at all, a material issue has to
+ * show what is on hand where each line posts — and the alternative is finding
+ * out when the API refuses it.
+ */
 
 const STATUS_BADGE_TONE: Record<StatusTone, BadgeTone> = { neutral: 'neutral', info: 'info', success: 'success', warning: 'warning', danger: 'danger' }
 
@@ -114,6 +125,18 @@ export function DocumentFormPage() {
     const reapproval = doc.status === 'APPROVED' || doc.status === 'PENDING_APPROVAL'
       ? <Notice kind="info">Saving changes returns the document to draft; it will need approval again.</Notice>
       : null
+    if (spec.code === 'STOCK_TRANSFER') {
+      return (
+        <StockTransferWorkspace
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          existing={doc}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
     if (spec.code === 'CONSUMPTION') {
       return (
         <ConsumptionForm
@@ -159,6 +182,9 @@ export function DocumentFormPage() {
   }
 
   const s = spec as NonNullable<typeof spec>
+  if (s.code === 'STOCK_TRANSFER') {
+    return <StockTransferWorkspace key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
   if (s.code === 'CONSUMPTION') {
     return <ConsumptionForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
   }

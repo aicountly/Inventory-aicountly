@@ -44,11 +44,27 @@ export interface ValuationSnapshotResponse extends ListResponse<ValuationSnapsho
   summary: ValuationSnapshotSummary
 }
 
+/**
+ * The side of zero a snapshot is narrowed to.
+ *
+ * Absent means the whole snapshot, which is already only the items holding
+ * stock — the replay drops anything under 0.0001 before it costs a single item,
+ * so there is no "on hand only" to ask for.
+ */
+export type SnapshotQtySign = 'positive' | 'negative'
+
 export interface SnapshotQuery extends ListQuery {
   as_of?: string
   method?: ReportMethod | string
   item_id?: number | string
   warehouse_id?: number | string
+  /**
+   * Narrows the rows AND the summary computed over them (see
+   * ValuationController::filterSnapshotByQtySign). Sending it is the only way
+   * to get a total that speaks for the subset: filtering the served page in the
+   * browser would leave the summary speaking for the whole company.
+   */
+  qty_sign?: SnapshotQtySign
 }
 
 // ---- unit costs --------------------------------------------------------------------------------
