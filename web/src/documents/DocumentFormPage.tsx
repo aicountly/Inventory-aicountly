@@ -6,6 +6,7 @@ import { useQuery } from '../hooks/useQuery'
 import { errorMessage } from '../services/api'
 import { documentsApi } from '../services/documentsApi'
 import { DocumentForm } from './DocumentForm'
+import { ConsumptionForm } from './consumption/ConsumptionForm'
 import { StockTransferWorkspace } from './transfer/StockTransferWorkspace'
 import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS } from './actions'
 import { draftFromDocument } from './formModel'
@@ -13,15 +14,14 @@ import { specForCode, specForSlug, UNAVAILABLE_TYPES } from './registry'
 import type { DocumentStatus } from './types'
 import './documents.css'
 
-/**
- * The one native type with its own screen.
- *
- * A transfer is the only document with two warehouses on the header and a route
- * per line, and the only one whose mistakes (stock that is not there, a batch
- * that expired, serials that do not add up) are worth catching while it is typed
- * rather than when the API refuses it. Every other type keeps `DocumentForm`.
+/*
+ * Two native types have a screen of their own; every other one keeps the shared
+ * `DocumentForm`. A type earns one when the generic editor cannot say what it
+ * needs to say while the document is being typed — a transfer has two
+ * warehouses on the header and a route per line, a consumption has to settle
+ * batches and serials before it can be saved at all — and the alternative is
+ * finding out when the API refuses it.
  */
-const STOCK_TRANSFER = 'STOCK_TRANSFER'
 
 /** `/documents/new/:slug` and `/documents/:id/edit`. */
 export function DocumentFormPage() {
@@ -104,7 +104,7 @@ export function DocumentFormPage() {
       )
     }
     const initial = draftFromDocument(doc, spec)
-    if (spec.code === STOCK_TRANSFER) {
+    if (spec.code === 'STOCK_TRANSFER') {
       return (
         <StockTransferWorkspace
           key={doc.document_id}
@@ -112,6 +112,19 @@ export function DocumentFormPage() {
           documentId={doc.document_id}
           initial={initial}
           existing={doc}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
+    if (spec.code === 'CONSUMPTION') {
+      return (
+        <ConsumptionForm
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          existingStatus={doc.status}
+          existingVersion={doc.version}
           onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
         />
       )
@@ -126,8 +139,11 @@ export function DocumentFormPage() {
   }
 
   const s = spec as NonNullable<typeof spec>
-  if (s.code === STOCK_TRANSFER) {
+  if (s.code === 'STOCK_TRANSFER') {
     return <StockTransferWorkspace key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
+  if (s.code === 'CONSUMPTION') {
+    return <ConsumptionForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
   }
   return (
     <div className="page">
