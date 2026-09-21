@@ -249,6 +249,26 @@ export interface ChallanSettlement {
   warehouse_id?: number | null
 }
 
+/** Packing header metadata.package_info — box/shipment physical details, all optional. */
+export interface PackagePackingInfo {
+  boxes?: number
+  total_weight_kg?: number
+  /** Free text, e.g. "40 x 30 x 20" — printed as entered, parsed loosely for the volume estimate. */
+  dimensions_cm?: string
+  transport_mode?: string
+}
+
+/** Packing header metadata.additional — logistics detail beyond the core fields. */
+export interface PackingAdditionalInfo {
+  carrier?: string
+  vehicle_no?: string
+  lr_awb_no?: string
+  dispatch_date?: string
+  expected_delivery?: string
+  contact_person?: string
+  contact_mobile?: string
+}
+
 export interface DocumentMetadata {
   bom_id?: number
   /** Workflow labels the user picked on the entry screen (Direct GRN, Sample Goods…). */
@@ -263,6 +283,16 @@ export interface DocumentMetadata {
   challan_settlements?: ChallanSettlement[]
   linked_source_document_id?: number
   box_marks?: string[]
+  /** Packing: free-form reference (Sales Order / DC / customer PO / internal). */
+  reference?: string
+  /** Packing: delivery address text. */
+  delivery_address?: string
+  /** Packing: box/package physical details. */
+  package_info?: PackagePackingInfo
+  /** Packing: selected handling-instruction chips (Fragile, Keep dry, …). */
+  handling_instructions?: string[]
+  /** Packing: carrier / dispatch / contact detail. */
+  additional?: PackingAdditionalInfo
   /*
    * Job work paperwork. These are the details a job-work challan carries and
    * inv_documents has no column for — the transporter's number, the job worker's

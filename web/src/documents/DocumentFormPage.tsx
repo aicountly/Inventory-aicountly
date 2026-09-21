@@ -179,6 +179,16 @@ export function DocumentFormPage() {
     const reapproval = doc.status === 'APPROVED' || doc.status === 'PENDING_APPROVAL'
       ? <Notice kind="info">Saving changes returns the document to draft; it will need approval again.</Notice>
       : null
+    // Packing renders its own full-width breadcrumb/title/actions (PackingFormView) —
+    // the legacy PageHeader below would just duplicate it.
+    if (spec.formKind === 'packing') {
+      return (
+        <>
+          {reapproval ? <div className="aic mx-auto max-w-screen-2xl">{reapproval}</div> : null}
+          <DocumentForm key={doc.document_id} spec={spec} documentId={doc.document_id} initial={initial} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+        </>
+      )
+    }
     // Some types have a screen of their own — transfer, consumption, receiving, issue, production.
     // Each brings its own page shell, breadcrumbs and header, so it is returned whole rather than
     // wrapped by the one below. Every other native type still uses the shared DocumentForm.
@@ -329,6 +339,9 @@ export function DocumentFormPage() {
   }
 
   const s = spec as NonNullable<typeof spec>
+  if (s.formKind === 'packing') {
+    return <DocumentForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
   if (s.formKind === 'revaluation') {
     return <StockRevaluationPage key={s.code} spec={s} />
   }
