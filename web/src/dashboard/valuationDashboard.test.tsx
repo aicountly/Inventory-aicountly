@@ -337,10 +337,16 @@ describe('a failed request', () => {
     await mount()
     // The bridge, ageing and warehouse cards do not depend on the stock
     // summary and must still render their own figures.
+    // Each card is fed by its own request, so awaiting one of them says nothing
+    // about whether the others have rendered. Asserting on the bridge and then
+    // reading the warehouse and ageing cards synchronously passes on a machine
+    // where all three settle in the same tick and fails on a loaded CI runner
+    // where they do not — which is how this test went red on main while passing
+    // locally five runs out of five. Each assertion now waits for its own card.
     await screen.findByText('Inventory value bridge')
     // Also an <option> in the warehouse filter, hence the plural query.
-    expect(screen.getAllByText('Main Warehouse').length).toBeGreaterThan(0)
-    expect(screen.getByText('Fast moving')).toBeTruthy()
+    expect((await screen.findAllByText('Main Warehouse')).length).toBeGreaterThan(0)
+    expect(await screen.findByText('Fast moving')).toBeTruthy()
   })
 })
 

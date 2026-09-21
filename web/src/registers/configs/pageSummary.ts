@@ -1,15 +1,21 @@
 /**
  * Page-scoped totals, labelled as such.
  *
- * `/v1/stock-movements`, `/v1/stock-balances`, `/v1/reservations` and
- * `/v1/reconciliation` send rows and a count, and nothing else — no aggregate
- * over the filtered set. A register still wants a footer, so these registers
- * total the rows they were served and say "(this page)" on every figure.
+ * `/v1/stock-balances`, `/v1/reservations` and `/v1/reconciliation` send rows
+ * and a count, and nothing else — no aggregate over the filtered set. A
+ * register still wants a footer, so these registers total the rows they were
+ * served and say "(this page)" on every figure.
  *
  * That is the honest option. Presenting a page sum as the register's total
  * would be a wrong number in a footer, which is exactly the kind of thing a
- * reader trusts without checking. Raise a server task to add real summaries to
- * these four endpoints; until then the label carries the caveat.
+ * reader trusts without checking.
+ *
+ * `/v1/stock-movements` was the fourth and is not any more: it answers a real
+ * aggregate under `summary=1` (see StockMovementsController and
+ * registers/movement/movementSummary.ts), which is what lets the movement
+ * register's cards and footer speak for every matching row rather than for the
+ * twenty-five on screen. The same is worth doing to the three above; until
+ * then the label here carries the caveat.
  */
 
 import { sumColumns } from '../registerTotals'

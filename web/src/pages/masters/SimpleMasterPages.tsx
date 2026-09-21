@@ -1,5 +1,5 @@
 import { MasterPage } from '../../masters/MasterPage'
-import { itemGroupsConfig, locationsConfig, stockCategoriesConfig, warehousesConfig } from '../../masters/configs'
+import { itemGroupsConfig, stockCategoriesConfig, warehousesConfig } from '../../masters/configs'
 import { UnitsOfMeasurePage } from './uom/UnitsOfMeasurePage'
 
 /** Master screens that are entirely described by a config. */
@@ -43,12 +43,14 @@ export function WarehousesPage() {
   return <MasterPage config={warehousesConfig} breadcrumbs={crumbs} />
 }
 
-export function LocationsPage() {
-  return <MasterPage config={locationsConfig} breadcrumbs={crumbs} />
-}
+/* Locations is NOT here either: the bin master grew a KPI strip counted over
+   the whole company, a contextual column, bulk actions and a table that
+   resolves warehouse and parent to names. It lives in
+   `pages/masters/locations/LocationsPage`, still reusing `locationsConfig` for
+   the form and the API, and the route points straight at it. */
 
 /*
- * Batches is NOT here either.
+ * Batches is NOT here.
  *
  * Its question is rarely "which batch is this" and almost always "what is about
  * to go off, where is it, and how much of it is there" — server-counted
