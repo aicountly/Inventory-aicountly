@@ -10,6 +10,7 @@ import {
   Package,
   RefreshCw,
   Scale,
+  Sparkles,
   TriangleAlert,
   Warehouse,
 } from 'lucide-react'
@@ -26,7 +27,7 @@ import type {
 import type { LedgerQuery } from '../../services/stockViewsApi'
 import { EmptyState } from '../../ui/EmptyState'
 import { StatusBadge } from '../../ui/StatusBadge'
-import { formatDate, formatInt, formatMoney, formatQty } from '../../utils/format'
+import { formatDate, formatInt, formatMoney, formatQty, toNumber } from '../../utils/format'
 import {
   DASH,
   batchFilter,
@@ -43,6 +44,7 @@ import {
   warehouseFilter,
 } from '../../reports/configs/common'
 import { StockBalanceRowActions } from '../StockBalanceRowActions'
+import { StockBalanceSelectionActions } from '../StockBalanceSelectionActions'
 import { MovementHeaderActions } from '../movement/MovementHeaderActions'
 import { MovementRowActions } from '../movement/MovementRowActions'
 import { MovementSelectionActions } from '../movement/MovementSelectionActions'
@@ -65,8 +67,7 @@ import {
 import type { MovementRegisterSummary } from '../movement/movementSummary'
 import { buildTotalsRow, totalsLabel } from '../registerTotals'
 import { defineRegister } from '../RegisterConfig'
-import type { RegisterGrouping } from '../RegisterConfig'
-import type { ReportColumn } from '../../reports/types'
+import type { RegisterGrouping, ReportColumn } from '../RegisterConfig'
 import { pageHint, summaryOverRows, withPageSummary } from './pageSummary'
 import type { PageSummary } from './pageSummary'
 
@@ -85,24 +86,116 @@ function documentCell(id: number | null | undefined, no: string | null | undefin
   )
 }
 
+/**
+ * The item a row is about, linked to its ledger.
+ *
+ * `avatar` is opt-in rather than the default because it costs a line of row
+ * height: it puts the SKU under the name instead of after it. That is the
+ * right trade on the balance register, where the item IS the row and there is
+ * one row per item/warehouse/batch — and the wrong one on the movement
+ * register, where the item is one of fourteen columns and every row would grow
+ * to carry a second line nobody came to read.
+ *
+ * The tile is a generic package glyph, not an item image: Inventory's item
+ * master has no image field, and a coloured square is honest about being a
+ * placeholder in a way a broken <img> is not.
+ */
 function itemCell(
   itemId: number,
   name: string | null | undefined,
   sku?: string | null,
   warehouseId?: number | null,
+  opts: { avatar?: boolean } = {},
 ) {
   const qs = new URLSearchParams({ item_id: String(itemId) })
   if (warehouseId) qs.set('warehouse_id', String(warehouseId))
+  const label = name ?? `Item #${itemId}`
+
+  if (!opts.avatar) {
+    return (
+      <Link
+        to={`/registers/stock-ledger?${qs.toString()}`}
+        className="text-gray-900 hover:text-primary"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <strong className="font-semibold">{label}</strong>
+        {sku ? <span className="text-gray-400"> · {sku}</span> : null}
+      </Link>
+    )
+  }
+
   return (
     <Link
       to={`/registers/stock-ledger?${qs.toString()}`}
-      className="text-gray-900 hover:text-primary"
+      className="flex min-w-0 items-center gap-2.5 text-gray-900 hover:text-primary"
       onClick={(e) => e.stopPropagation()}
     >
-      <strong className="font-semibold">{name ?? `Item #${itemId}`}</strong>
-      {sku ? <span className="text-gray-400"> · {sku}</span> : null}
+      <span
+        className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-sky-50 text-sky-600"
+        aria-hidden
+      >
+        <Package className="h-3.5 w-3.5" strokeWidth={1.75} />
+      </span>
+      <span className="min-w-0">
+        <strong className="block truncate font-semibold">{label}</strong>
+        {sku ? <span className="block truncate text-[11px] text-gray-400">{sku}</span> : null}
+      </span>
     </Link>
   )
+}
+
+/** Warehouse name behind the glyph the KPI card and the strip already use. */
+function warehouseCell(name: string | null | undefined) {
+  if (!name) return <span className="text-gray-400">(none)</span>
+  return (
+    <span className="inline-flex min-w-0 items-center gap-2">
+      <Warehouse className="h-3.5 w-3.5 shrink-0 text-gray-400" strokeWidth={1.75} aria-hidden />
+      <span className="truncate">{name}</span>
+    </span>
+  )
+}
+
+/**
+ * A quantity column that says when its figure is below zero.
+ *
+ * Only `render` is overridden, so `format: 'qty'` and the CSV resolver are the
+ * ones `qtyColumn` built: the spreadsheet and the printed sheet carry the same
+ * plain number they always did, and the pill exists on screen only.
+ *
+ * The colour is not the signal. A red pill and nothing else fails anyone who
+ * cannot see red, so the cue is threefold: the minus sign is in the figure
+ * itself, the cell carries a title, and screen readers get "below zero" in the
+ * text. The row is left alone — a register where three of eleven columns are
+ * negative would otherwise be a wall of red with nothing standing out in it.
+ */
+function balanceQtyColumn(
+  key: keyof StockBalanceGridRow & string,
+  header: string,
+  opts: { strong?: boolean } = {},
+) {
+  const base = qtyColumn<StockBalanceGridRow>(key, header, opts)
+  return {
+    ...base,
+    render: (r: StockBalanceGridRow) => {
+      const n = toNumber(r[key])
+      if (n !== null && n < 0) {
+        return (
+          <span
+            className="inline-flex min-w-[2.75rem] items-center justify-center rounded-md bg-red-50 px-2 py-0.5 font-semibold text-red-600"
+            title={`${header} is below zero`}
+          >
+            {formatQty(r[key])}
+            <span className="sr-only"> (below zero)</span>
+          </span>
+        )
+      }
+      return opts.strong ? (
+        <strong className="font-semibold text-gray-900">{formatQty(r[key])}</strong>
+      ) : (
+        formatQty(r[key])
+      )
+    },
+  }
 }
 
 function movementKindCell(kind: string) {
@@ -800,6 +893,15 @@ function plural(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`
 }
 
+/** Quantity held back from `available` — reserved, packed, or at a job worker. */
+function heldQty(row: StockBalanceGridRow): number {
+  return (
+    (toNumber(row.reserved_qty) ?? 0) +
+    (toNumber(row.packed_qty) ?? 0) +
+    (toNumber(row.job_worker_qty) ?? 0)
+  )
+}
+
 const BALANCE_SUM_KEYS = [
   'on_hand_qty',
   'reserved_qty',
@@ -818,6 +920,46 @@ const BALANCE_SUM_KEYS = [
  * Item × warehouse × batch, with every bucket that makes up "on hand" and what
  * is actually available to promise.
  */
+/**
+ * The balance grid's columns, hoisted to a const.
+ *
+ * Declared out here rather than inline because the selection's export needs
+ * the same list: a file of ticked rows that carried different columns from the
+ * table they were ticked in would be a second answer to one question.
+ */
+const BALANCE_COLUMNS: ReportColumn<StockBalanceGridRow>[] = [
+    {
+      key: 'item_name',
+      header: 'Item',
+      sortKey: 'item_name',
+      alwaysVisible: true,
+      minWidth: 200,
+      // The item IS the row here, so it earns the tile and a second line.
+      render: (r) => itemCell(r.item_id, r.item_name, r.item_sku, r.warehouse_id, { avatar: true }),
+      csv: (r) => r.item_name ?? `Item #${r.item_id}`,
+    },
+    {
+      key: 'warehouse_name',
+      header: 'Warehouse',
+      sortKey: 'warehouse_id',
+      render: (r) => warehouseCell(r.warehouse_name),
+      csv: (r) => r.warehouse_name ?? '',
+    },
+    textColumn<StockBalanceGridRow>('batch_no', 'Batch', false),
+    balanceQtyColumn('on_hand_qty', 'On hand', { strong: true }),
+    balanceQtyColumn('reserved_qty', 'Reserved'),
+    { ...balanceQtyColumn('committed_qty', 'Committed'), defaultVisible: false },
+    balanceQtyColumn('packed_qty', 'Packed'),
+    { ...balanceQtyColumn('in_transit_qty', 'In transit'), defaultVisible: false },
+    balanceQtyColumn('job_worker_qty', 'Job worker'),
+    { ...balanceQtyColumn('quality_hold_qty', 'On hold'), defaultVisible: false },
+    { ...balanceQtyColumn('damaged_qty', 'Damaged'), defaultVisible: false },
+    { ...balanceQtyColumn('blocked_qty', 'Blocked'), defaultVisible: false },
+    { ...balanceQtyColumn('expected_qty', 'Expected'), defaultVisible: false },
+    { ...balanceQtyColumn('available_qty', 'Available', { strong: true }), alwaysVisible: true },
+    dateTimeColumn<StockBalanceGridRow>('last_movement_at', 'Last movement'),
+]
+
 export const stockBalanceRegister = defineRegister<StockBalanceGridRow, PageSummary>({
   slug: 'warehouse_stock',
   path: 'stock-balances',
@@ -854,41 +996,27 @@ export const stockBalanceRegister = defineRegister<StockBalanceGridRow, PageSumm
     // tolerance (StockBalanceService::NEGATIVE_ON_HAND_EPSILON).
     { key: 'negative', kind: 'toggle', label: 'Below zero only', defaultOn: false },
   ],
-  columns: [
-    {
-      key: 'item_name',
-      header: 'Item',
-      sortKey: 'item_name',
-      alwaysVisible: true,
-      minWidth: 200,
-      render: (r) => itemCell(r.item_id, r.item_name, r.item_sku, r.warehouse_id),
-      csv: (r) => r.item_name ?? `Item #${r.item_id}`,
-    },
-    {
-      key: 'warehouse_name',
-      header: 'Warehouse',
-      sortKey: 'warehouse_id',
-      render: (r) => r.warehouse_name ?? <span className="text-gray-400">(none)</span>,
-      csv: (r) => r.warehouse_name ?? '',
-    },
-    textColumn<StockBalanceGridRow>('batch_no', 'Batch', false),
-    qtyColumn<StockBalanceGridRow>('on_hand_qty', 'On hand', { strong: true }),
-    qtyColumn<StockBalanceGridRow>('reserved_qty', 'Reserved'),
-    { ...qtyColumn<StockBalanceGridRow>('committed_qty', 'Committed'), defaultVisible: false },
-    qtyColumn<StockBalanceGridRow>('packed_qty', 'Packed'),
-    { ...qtyColumn<StockBalanceGridRow>('in_transit_qty', 'In transit'), defaultVisible: false },
-    qtyColumn<StockBalanceGridRow>('job_worker_qty', 'Job worker'),
-    { ...qtyColumn<StockBalanceGridRow>('quality_hold_qty', 'On hold'), defaultVisible: false },
-    { ...qtyColumn<StockBalanceGridRow>('damaged_qty', 'Damaged'), defaultVisible: false },
-    { ...qtyColumn<StockBalanceGridRow>('blocked_qty', 'Blocked'), defaultVisible: false },
-    { ...qtyColumn<StockBalanceGridRow>('expected_qty', 'Expected'), defaultVisible: false },
-    { ...qtyColumn<StockBalanceGridRow>('available_qty', 'Available', { strong: true }), alwaysVisible: true },
-    dateTimeColumn<StockBalanceGridRow>('last_movement_at', 'Last movement'),
-  ],
+  columns: BALANCE_COLUMNS,
   rowKey: (r) => r.balance_id,
   drillTo: (r) =>
     `/registers/stock-ledger?item_id=${r.item_id}${r.warehouse_id ? `&warehouse_id=${r.warehouse_id}` : ''}`,
   rowActions: (r) => <StockBalanceRowActions row={r} />,
+  /*
+   * Ticking rows is for a subtotal of a shortlist and a file of exactly those
+   * rows — see StockBalanceSelectionActions, which is also where the reason
+   * this deliberately states no percentage of the register is written down.
+   *
+   * `balance_id` and not item_id: the grid is item × warehouse × batch, so one
+   * item is legitimately several rows and ticking "Ballpoint Pens" in Main
+   * must not silently also tick it in Overflow.
+   */
+  selectable: {
+    idOf: (r) => r.balance_id,
+    label: 'Select balance',
+    actions: (selected, _clear, summary) => (
+      <StockBalanceSelectionActions rows={selected} summary={summary} columns={BALANCE_COLUMNS} />
+    ),
+  },
   groupBy: [
     {
       key: 'warehouse',
@@ -962,7 +1090,8 @@ export const stockBalanceRegister = defineRegister<StockBalanceGridRow, PageSumm
     { label: 'Reserved', value: formatQty(s.sums.reserved_qty), hint: pageHint(s) },
     { label: 'Available', value: formatQty(s.sums.available_qty), hint: pageHint(s), tone: 'good' },
   ],
-  emptyMessage: 'Try changing your item, warehouse, batch or stock filters.',
+  emptyTitle: 'No stock balances found',
+  emptyMessage: 'Try changing the selected item, warehouse, batch or stock filters.',
   filterPanel: {
     description: 'Refine your view of stock balances',
     // Six controls, all of them worth a column on this register — nothing is
@@ -1030,8 +1159,32 @@ export const stockBalanceRegister = defineRegister<StockBalanceGridRow, PageSumm
           icon: RefreshCw,
           tone: 'teal',
         },
+        /*
+         * "Insights", and deliberately not "AI insights".
+         *
+         * Aicountly Inventory has no insights service, so there is nothing to
+         * call and nothing that analysed anything. What this states is counted
+         * from the rows in `res.data` — the same rows the table is showing —
+         * and it is additive to the four tiles beside it rather than a fifth
+         * phrasing of the negative count. Labelling a `filter().length` as
+         * machine intelligence would be the one claim on this screen that no
+         * amount of reading the code could verify.
+         */
+        {
+          key: 'insights',
+          label: 'Insights',
+          hint: (() => {
+            const held = rows.filter((r) => heldQty(r) > 0).length
+            const finding =
+              held > 0
+                ? `${plural(held, 'row')} reserved, packed or at a job worker`
+                : 'No additional issues detected'
+            return whole ? finding : `${finding} · this page`
+          })(),
+          icon: Sparkles,
+          tone: 'violet',
+        },
       ],
-      note: whole && negatives === 0 && rows.length > 0 ? 'Your inventory. In perfect balance.' : undefined,
     }
   },
 })

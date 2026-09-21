@@ -49,7 +49,7 @@ import {
 import { Button } from '../ui/Button'
 import { Card } from '../ui/Card'
 import { SegmentedControl } from '../ui/SegmentedControl'
-import { LiveDataBadge } from '../ui/shell/LiveDataBadge'
+import { LiveDataBadge, LiveDataPill } from '../ui/shell/LiveDataBadge'
 import { isApiError } from '../services/api'
 import type { IconTone } from '../ui/IconTile'
 import { todayIso } from '../utils/format'
@@ -671,13 +671,15 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
     </>
   )
 
+  // Same control, two arrangements — the toolbar sizes it to its own content,
+  // the panel gives it a grid cell like the filters beside it.
   const groupByControl = config.groupBy?.length ? (
-    <FilterField label="Group by">
+    <FilterField label="Group by" stacked={panel} className={panel ? 'min-w-0 w-full' : undefined}>
       <Select
         value={groupKey}
         onChange={(e) => setGroupKey(e.target.value)}
         aria-label="Group by"
-        className="w-auto min-w-[9rem]"
+        className={panel ? 'w-full' : 'w-auto min-w-[9rem]'}
       >
         <option value="">No grouping</option>
         {config.groupBy.map((g) => (
@@ -767,6 +769,18 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
       description={headerDescription}
       icon={config.icon ?? FileSearch}
       headerVariant={panel ? 'page' : 'compact'}
+      // The same freshness truth the badge states, in the smallest form that
+      // fits beside a heading. Panel layout only: the compact header puts the
+      // trail where the title would be, and there is nothing to pin it to.
+      headerBadge={
+        panel ? (
+          <LiveDataPill
+            fetchedAt={result.fetchedAt}
+            refreshing={result.loading}
+            stale={Boolean(result.error) && result.data !== null}
+          />
+        ) : undefined
+      }
       // A chart band and a viewport-locked table cannot share one flex column:
       // the band takes its height and the table's `flex-1` resolves to nothing.
       fill={!analyticsBand}
@@ -808,6 +822,10 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
             ctx={ctx}
             searchInputRef={searchInputRef}
             scope={scopeLabel}
+            // In the panel the grouping control takes the grid cell its label
+            // and height were designed for, instead of a row of its own
+            // between the filters and the KPI cards.
+            trailing={groupByControl}
           />
         ) : (
           <RegisterFilterBar
@@ -839,11 +857,9 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
               Clear selection
             </button>
           </div>
-        ) : panel && groupByControl ? (
-          // The panel has no trailing slot, so the grouping control — a view of
-          // the rows rather than a filter — sits on its own row above the table.
-          <div className="flex flex-wrap items-center justify-end gap-2">{groupByControl}</div>
         ) : undefined
+        // The panel renders the grouping control in its own grid (see
+        // `trailing` above), so there is no longer a row here to hold it.
       }
       summary={
         // First load only. A refresh keeps the figures and dims them instead of
@@ -940,7 +956,7 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
             empty={
               emptyUnfiltered ?? (
                 <EmptyState
-                  title="No rows match these filters"
+                  title={config.emptyTitle ?? 'No rows match these filters'}
                   description={
                     activeView?.emptyMessage ??
                     config.emptyMessage ??
