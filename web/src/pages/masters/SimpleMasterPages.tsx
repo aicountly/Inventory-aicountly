@@ -1,5 +1,5 @@
 import { MasterPage } from '../../masters/MasterPage'
-import { batchesConfig, itemGroupsConfig, locationsConfig, stockCategoriesConfig, warehousesConfig } from '../../masters/configs'
+import { itemGroupsConfig, locationsConfig, stockCategoriesConfig, warehousesConfig } from '../../masters/configs'
 import { UnitsOfMeasurePage } from './uom/UnitsOfMeasurePage'
 
 /** Master screens that are entirely described by a config. */
@@ -47,6 +47,14 @@ export function LocationsPage() {
   return <MasterPage config={locationsConfig} breadcrumbs={crumbs} />
 }
 
-export function BatchesPage() {
-  return <MasterPage config={batchesConfig} breadcrumbs={crumbs} />
-}
+/*
+ * Batches is NOT here either.
+ *
+ * Its question is rarely "which batch is this" and almost always "what is about
+ * to go off, where is it, and how much of it is there" — server-counted
+ * figures, derived expiry health, an inspector, labels and an import, none of
+ * which a MasterConfig can describe. It has its own workspace at
+ * `pages/masters/batches`. `batchesConfig` stays in configs.tsx and remains the
+ * single source of truth for the batch FORM and the export columns; that screen
+ * reads it rather than re-declaring the fields.
+ */

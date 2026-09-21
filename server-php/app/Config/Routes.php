@@ -89,6 +89,10 @@ $routes->group('', ['namespace' => 'App\Controllers\Api', 'filter' => 'cors'], s
             $routes->put($slug . '/(:num)', $ctrl . '::update/$1');
             $routes->delete($slug . '/(:num)', $ctrl . '::delete/$1');
         }
+        // Registered after the CRUD loop above: `batches/(:num)` cannot match
+        // either of these, so the literal segments resolve to their own actions.
+        $routes->get('batches/summary', 'BatchesController::summary');
+        $routes->post('batches/bulk-update', 'BatchesController::bulkUpdate');
         $routes->post('serials/bulk', 'SerialsController::bulkCreate');
         $routes->post('bill-of-materials/(:num)/explode', 'BomController::explode/$1');
         $routes->get('items/form-options', 'ItemsController::formOptions');
