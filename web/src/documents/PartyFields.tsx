@@ -1,4 +1,5 @@
 import { FormField } from '../components/FormField'
+import { Input } from '../ui/Input'
 import type { PartyRole } from './registry'
 
 const LABELS: Record<PartyRole, string> = {
@@ -26,10 +27,10 @@ export function PartyFields({ role, partyRef, partyName, onChange, disabled }: P
   return (
     <>
       <FormField label={`${label} name`} htmlFor="party_name">
-        <input id="party_name" className="input" value={partyName} disabled={disabled} onChange={(e) => onChange({ party_name: e.target.value })} placeholder={`${label} as printed`} />
+        <Input id="party_name" value={partyName} disabled={disabled} onChange={(e) => onChange({ party_name: e.target.value })} placeholder={`${label} as printed`} />
       </FormField>
       <FormField label={`${label} ledger id`} htmlFor="party_ref" help="Books account id (acc_id). Pending quantities are matched on it.">
-        <input id="party_ref" className="input" inputMode="numeric" value={partyRef} disabled={disabled} onChange={(e) => onChange({ party_ref: e.target.value.replace(/[^\d]/g, '') })} placeholder="e.g. 1042" />
+        <Input id="party_ref" inputMode="numeric" value={partyRef} disabled={disabled} onChange={(e) => onChange({ party_ref: e.target.value.replace(/[^\d]/g, '') })} placeholder="e.g. 1042" />
       </FormField>
     </>
   )

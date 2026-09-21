@@ -31,12 +31,21 @@
 .dark .bg-gray-50,
 .dark .bg-slate-50,
 .dark .bg-gray-50\/40,
+/* MultiItemDrawer's zebra stripe. */
+.dark .bg-gray-50\/50,
 .dark .bg-gray-50\/60,
+/* The table-footer band. SmartTable's group subtotal row has always used it and
+   stayed a pale strip on a dark card, with its emerald and red totals painted
+   dark-on-light inside — the tone utilities on top ARE remapped, so the band was
+   the only thing left light. */
+.dark .bg-gray-50\/70,
 .dark .bg-gray-50\/80,
 .dark .bg-gray-50\/95 {
   background-color: rgb(var(--color-surface-2));
 }
 .dark .bg-gray-100,
+/* SmartTable's group header row, light for the same reason the subtotal band was. */
+.dark .bg-gray-100\/80,
 .dark .bg-slate-100 {
   background-color: rgb(var(--color-surface-2));
 }
@@ -47,7 +56,13 @@
 .dark .hover\:bg-white:hover,
 .dark .hover\:bg-gray-50:hover,
 .dark .hover\:bg-slate-50:hover,
-.dark .hover\:bg-gray-50\/60:hover {
+.dark .hover\:bg-gray-50\/60:hover,
+/* The line-row hover in ChallanLines / JobWorkLines. */
+.dark .hover\:bg-gray-50\/70:hover,
+/* The keyboard half of the menu-item highlight. Without it, arrowing down a menu
+   in dark mode painted the focused row white while hovering the same row did the
+   right thing. */
+.dark .focus\:bg-gray-50:focus {
   background-color: rgb(var(--color-surface-2));
 }
 .dark .hover\:bg-gray-100:hover,
@@ -377,6 +392,10 @@
 }
 .dark .text-sky-600,
 .dark .text-sky-700,
+/* -800 / -900 are the ink INSIDE a sky wash (an info strip), the same way
+   emerald-900 and amber-900 above are. Without a step here they stayed the
+   near-black Tailwind ships and became unreadable the moment the wash under
+   them was repainted for dark. */
 .dark .text-sky-800,
 .dark .text-sky-900,
 .dark .hover\:text-sky-700:hover,

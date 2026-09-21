@@ -1,0 +1,66 @@
+/*
+ * Landed cost allocation — the few things Tailwind utilities cannot express.
+ *
+ * Scoped to `.lca-*` so nothing here can reach another screen. Everything that CAN be a utility is
+ * one; this file is for the categorical series colours (which need a light and a dark step apiece
+ * and are consumed as `currentColor` by both an SVG arc and a legend swatch) and for the two
+ * scroll containers whose sticky headers need a real stylesheet.
+ *
+ * The series steps are the validated palette — see chargePalette.ts for how they were chosen and
+ * checked. Dark is SELECTED, not an automatic flip: each hue is re-stepped for the dark surface.
+ */
+
+.lca-series-1 { color: #2a78d6; }
+.lca-series-2 { color: #eb6834; }
+.lca-series-3 { color: #1baf7a; }
+.lca-series-4 { color: #eda100; }
+.lca-series-5 { color: #e87ba4; }
+.lca-series-6 { color: #4a3aa7; }
+
+.dark .lca-series-1 { color: #3987e5; }
+.dark .lca-series-2 { color: #d95926; }
+.dark .lca-series-3 { color: #199e70; }
+.dark .lca-series-4 { color: #c98500; }
+.dark .lca-series-5 { color: #d55181; }
+.dark .lca-series-6 { color: #9085e9; }
+
+/* The review table keeps its header while the body scrolls. `position: sticky` on a <th> needs the
+   background painted on the cell itself — a background on <thead> is not painted over scrolled
+   content — and a border on a sticky cell scrolls away with the row, so the rule is a shadow. */
+.lca-sticky-head th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: rgb(var(--color-surface-2));
+  box-shadow: 0 1px 0 0 rgb(var(--color-border));
+}
+
+/* The first column of the review table stays put while the twelve money columns scroll sideways,
+   so a row is never a line of figures with nothing to say which item they belong to. */
+.lca-sticky-col {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: rgb(var(--color-surface));
+}
+
+.lca-sticky-head th.lca-sticky-col {
+  z-index: 3;
+  background: rgb(var(--color-surface-2));
+}
+
+/* Rows that are hovered or striped need the sticky cell to follow, or it floats over the row in the
+   wrong colour. Inherit means one rule instead of one per state. */
+.lca-review-row:hover .lca-sticky-col {
+  background: rgb(var(--color-surface-2));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lca-donut-slice {
+    transition: none;
+  }
+}
+
+.lca-donut-slice {
+  transition: opacity 120ms ease;
+}

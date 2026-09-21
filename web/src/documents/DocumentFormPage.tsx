@@ -16,6 +16,7 @@ import { ConsumptionForm } from './consumption/ConsumptionForm'
 import { DisassemblyPage } from './disassembly/DisassemblyPage'
 import { InwardChallanForm } from './grn/InwardChallanForm'
 import { JobWorkPage } from './jobwork/JobWorkPage'
+import { LandedCostAllocationPage } from './landedCost/LandedCostAllocationPage'
 import { MaterialIssuePage } from './materialIssue/MaterialIssuePage'
 import { ProductionWorkspace } from './production/ProductionWorkspace'
 import { MaterialReceiptForm } from './receipt/MaterialReceiptForm'
@@ -264,6 +265,11 @@ export function DocumentFormPage() {
     if (spec.formKind === 'disassembly') {
       return <DisassemblyPage key={doc.document_id} spec={spec} documentId={doc.document_id} initial={initial} document={doc} />
     }
+    // A landed cost allocation is another: five steps, several receipts, a per-line valuation
+    // preview and a readiness gate, with its own header and action bar.
+    if (spec.formKind === 'landed_cost') {
+      return <LandedCostAllocationPage key={doc.document_id} spec={spec} documentId={doc.document_id} initial={initial} />
+    }
     if (spec.code === 'MATERIAL_ISSUE') {
       return (
         <MaterialIssuePage
@@ -391,6 +397,7 @@ export function DocumentFormPage() {
     return <ConsumptionForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
   }
   if (s.formKind === 'disassembly') return <DisassemblyPage spec={s} />
+  if (s.formKind === 'landed_cost') return <LandedCostAllocationPage key={s.code} spec={s} />
   if (s.code === 'MATERIAL_ISSUE') {
     return <MaterialIssuePage key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
   }
