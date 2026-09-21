@@ -44,9 +44,11 @@ Manage through the API's read-only relay (`/api/manage/...`).
   alternate units and conversions, tracking flags, stock levels and opening
   stock per warehouse (`/v1/items/{id}/openings`); soft delete.
 - **Masters** — item groups (tree), stock categories, brands, units of measure,
-  warehouse groups (tree), warehouses, locations, bills of materials
+  warehouse groups, warehouses, locations, bills of materials
   (components, by-products, scrap), batches and serial numbers (single and
-  bulk registration).
+  bulk registration). Warehouse groups have a screen of their own
+  (`src/masters/warehouseGroups`): list, tree and card views over one load, live
+  counts, a contextual structure panel and deterministic insights.
 
 - **Documents** — list, detail (lines with valuation, accounting effects,
   approvals, print snapshot) and create / edit forms for every native type;

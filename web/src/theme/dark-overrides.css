@@ -242,6 +242,9 @@
 .dark .border-sky-200 {
   border-color: rgb(7 89 133 / 0.5);
 }
+.dark .hover\:border-sky-300:hover {
+  border-color: rgb(7 89 133 / 0.75);
+}
 .dark .border-violet-200,
 .dark .border-violet-300,
 .dark .hover\:border-violet-300:hover {
