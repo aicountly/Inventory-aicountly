@@ -6,6 +6,7 @@ import { useQuery } from '../hooks/useQuery'
 import { errorMessage } from '../services/api'
 import { documentsApi } from '../services/documentsApi'
 import { DocumentForm } from './DocumentForm'
+import { ConsumptionForm } from './consumption/ConsumptionForm'
 import { InwardChallanForm } from './grn/InwardChallanForm'
 import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS } from './actions'
 import { draftFromDocument } from './formModel'
@@ -94,8 +95,22 @@ export function DocumentFormPage() {
       )
     }
     const initial = draftFromDocument(doc, spec)
-    // Receiving has its own screen (see grn/InwardChallanForm): it brings its own page shell,
-    // breadcrumbs and sticky action bar, so it is returned whole rather than wrapped here.
+    // Two types have their own screen — consumption and receiving. Each brings its own page
+    // shell, breadcrumbs and sticky action bar, so it is returned whole rather than wrapped in
+    // the `.page` div below. Every other native type still uses the shared DocumentForm.
+    if (spec.code === 'CONSUMPTION') {
+      return (
+        <ConsumptionForm
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          existingStatus={doc.status}
+          existingVersion={doc.version}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
     if (spec.formKind === 'inward_challan') {
       return (
         <InwardChallanForm
@@ -118,6 +133,9 @@ export function DocumentFormPage() {
   }
 
   const s = spec as NonNullable<typeof spec>
+  if (s.code === 'CONSUMPTION') {
+    return <ConsumptionForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
   if (s.formKind === 'inward_challan') {
     return <InwardChallanForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
   }
