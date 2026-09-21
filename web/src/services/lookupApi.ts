@@ -102,13 +102,20 @@ export const lookupApi = {
     return res.data
   },
 
-  /** Exact UPC / SKU match for a keyboard-wedge scan: `GET /v1/items/by-barcode/{code}`. 404 when nothing matches. */
+  /**
+   * Exact UPC / SKU match for a keyboard-wedge scan or a pasted code column:
+   * `GET /v1/items/by-barcode/{code}`. 404 when nothing matches, so callers catch.
+   *
+   * The endpoint answers with the list columns, which carry no alternate units and no default
+   * warehouse, so both are normalised to the search row's shape rather than left undefined: a
+   * caller reading `row.units` must not have to know which endpoint the row came from.
+   */
   async byBarcode(code: string, options: { warehouseId?: number | null; signal?: AbortSignal } = {}): Promise<ItemSearchRow> {
-    const res = await api.get<ItemResponse<ItemSearchRow>>(`v1/items/by-barcode/${encodeURIComponent(code)}`, {
+    const res = await api.get<ItemResponse<Partial<ItemSearchRow> & { item_id: number }>>(`v1/items/by-barcode/${encodeURIComponent(code)}`, {
       query: { warehouse_id: options.warehouseId ?? undefined },
       signal: options.signal,
     })
-    return res.data
+    return { units: [], default_warehouse_id: null, ...res.data } as ItemSearchRow
   },
 
   async warehouses(signal?: AbortSignal): Promise<WarehouseRow[]> {

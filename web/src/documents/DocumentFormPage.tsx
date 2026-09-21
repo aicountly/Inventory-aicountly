@@ -16,6 +16,8 @@ import type { StatusTone } from './actions'
 import { documentTypeGlyph } from './documentTypeIcon'
 import { draftFromDocument } from './formModel'
 import { specForCode, specForSlug, UNAVAILABLE_TYPES } from './registry'
+import { revaluationDraftFromDocument } from './revaluation/revaluationModel'
+import { StockRevaluationPage } from './revaluation/StockRevaluationPage'
 import type { DocumentStatus } from './types'
 import './documents.css'
 
@@ -119,6 +121,10 @@ export function DocumentFormPage() {
         </PageShell>
       )
     }
+    // A revaluation has its own screen; the gates above (type, status, permission) have already run.
+    if (spec.formKind === 'revaluation') {
+      return <StockRevaluationPage key={doc.document_id} spec={spec} documentId={doc.document_id} initial={revaluationDraftFromDocument(doc)} existing={doc} />
+    }
     const initial = draftFromDocument(doc, spec)
     if (spec.code === 'STOCK_TRANSFER') {
       return (
@@ -163,6 +169,9 @@ export function DocumentFormPage() {
   }
 
   const s = spec as NonNullable<typeof spec>
+  if (s.formKind === 'revaluation') {
+    return <StockRevaluationPage key={s.code} spec={s} />
+  }
   if (s.code === 'STOCK_TRANSFER') {
     return <StockTransferWorkspace key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
   }

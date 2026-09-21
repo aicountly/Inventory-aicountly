@@ -275,7 +275,8 @@
 }
 .dark .border-violet-100,
 .dark .border-violet-200,
-.dark .border-violet-300 {
+.dark .border-violet-300,
+.dark .hover\:border-violet-200:hover {
   border-color: rgb(91 33 182 / 0.5);
 }
 /* A hover border is meant to be visibly brighter than the one it replaces, so

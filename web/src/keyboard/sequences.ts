@@ -101,6 +101,7 @@ export const SEQUENCE_SHORTCUTS: readonly SequenceShortcut[] = [
   { id: 'new.issue', keys: ['n', 'i'], label: 'New stock issue', group: 'Create', path: newDocumentPath('MATERIAL_ISSUE'), permissions: createPermissions('MATERIAL_ISSUE') },
   { id: 'new.transfer', keys: ['n', 't'], label: 'New transfer', group: 'Create', path: newDocumentPath('STOCK_TRANSFER'), permissions: createPermissions('STOCK_TRANSFER') },
   { id: 'new.count', keys: ['n', 'c'], label: 'New stock count', group: 'Create', path: newDocumentPath('PHYSICAL_ADJUSTMENT'), permissions: createPermissions('PHYSICAL_ADJUSTMENT') },
+  { id: 'new.revaluation', keys: ['n', 'v'], label: 'New stock revaluation', group: 'Create', path: newDocumentPath('REVALUATION'), permissions: createPermissions('REVALUATION') },
 ]
 
 /** `['g','1']` → `g 1`, the key a lookup table is built on. */
