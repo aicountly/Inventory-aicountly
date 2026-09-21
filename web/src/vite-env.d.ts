@@ -18,6 +18,14 @@ interface ImportMetaEnv {
    * rather than inventing an answer — see masters/warehouseGroups/warehouseGroupsAi.ts.
    */
   readonly VITE_INVENTORY_AI_PATH?: string
+  /**
+   * Material receipt integrations, each off until the endpoint behind it exists.
+   * See documents/receipt/integrations.ts — every one of these is a LIVE API
+   * call through Inventory's own relay, never a copy of another product's data.
+   */
+  readonly VITE_FEATURE_RECEIPT_PURCHASE_ORDERS?: string
+  readonly VITE_FEATURE_RECEIPT_AI_AUTOFILL?: string
+  readonly VITE_FEATURE_RECEIPT_ATTACHMENTS?: string
 }
 
 interface ImportMeta {

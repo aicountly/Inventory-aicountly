@@ -3,7 +3,7 @@
  * serials and bills of materials.
  */
 
-import { api } from './api'
+import { api, isApiError } from './api'
 import type { ItemResponse, ListQuery, ListResponse } from './api'
 import type { BomHeader } from '../documents/bom'
 import type { CreateDocumentPayload } from '../documents/types'
@@ -94,6 +94,29 @@ export const lookupApi = {
       signal: options.signal,
     })
     return res.data
+  },
+
+  /**
+   * `GET /v1/items/by-barcode/{code}` — one item by its barcode (item_upc) or SKU.
+   *
+   * What a hardware scanner needs: the code arrives complete, in one burst, and
+   * the answer is one item or none. Resolves to null on 404 rather than
+   * throwing, because "no item carries that barcode" is an ordinary outcome at
+   * a goods-inward desk, not an error.
+   */
+  async itemByBarcode(code: string, options: { warehouseId?: number | null; signal?: AbortSignal } = {}): Promise<ItemSearchRow | null> {
+    const trimmed = code.trim()
+    if (trimmed === '') return null
+    try {
+      const res = await api.get<ItemResponse<ItemSearchRow>>(`v1/items/by-barcode/${encodeURIComponent(trimmed)}`, {
+        query: { warehouse_id: options.warehouseId ?? undefined },
+        signal: options.signal,
+      })
+      return res.data ?? null
+    } catch (err) {
+      if (isApiError(err) && err.status === 404) return null
+      throw err
+    }
   },
 
   async itemsByIds(ids: number[], signal?: AbortSignal): Promise<ItemSearchRow[]> {

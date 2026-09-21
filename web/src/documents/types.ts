@@ -265,6 +265,15 @@ export interface CreateDocumentPayload {
   document_type: string
   document_date: string
   document_no?: string | null
+  /**
+   * The party's own paperwork this document answers: a supplier challan or
+   * invoice number on a material receipt. Stored on inv_documents, shown in the
+   * register and on the print snapshot. `source_document_id` stays null — the
+   * duplicate-posting guard (uq_inv_documents_source) only binds when an id is
+   * present, so a free-text reference never collides.
+   */
+  source_document_no?: string | null
+  source_document_date?: string | null
   party_ref?: number | null
   party_name?: string | null
   from_warehouse_id?: number | null
