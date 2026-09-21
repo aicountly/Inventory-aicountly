@@ -13,6 +13,7 @@ export type FilterKind =
   | 'batch'
   | 'item_group'
   | 'stock_category'
+  | 'brand'
   | 'date'
   /** Preset dropdown + From/To, backed by registers/dateRangePresets. */
   | 'date_range'

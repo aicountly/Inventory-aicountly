@@ -22,6 +22,7 @@ export const warehouseFilter: ReportFilter = { key: 'warehouse_id', kind: 'wareh
 export const batchFilter: ReportFilter = { key: 'batch_id', kind: 'batch', label: 'Batch' }
 export const itemGroupFilter: ReportFilter = { key: 'item_grp_id', kind: 'item_group', label: 'Item group' }
 export const stockCategoryFilter: ReportFilter = { key: 'stock_cat_id', kind: 'stock_category', label: 'Category' }
+export const brandFilter: ReportFilter = { key: 'brand_id', kind: 'brand', label: 'Brand' }
 export const nonzeroFilter: ReportFilter = { key: 'nonzero', kind: 'toggle', label: 'Hide zero rows', defaultOn: true }
 export const byWarehouseFilter: ReportFilter = { key: 'by_warehouse', kind: 'toggle', label: 'Split by warehouse', defaultOn: false }
 
