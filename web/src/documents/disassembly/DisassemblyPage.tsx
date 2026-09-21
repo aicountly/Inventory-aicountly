@@ -267,7 +267,7 @@ function DisassemblyForm({ spec, documentId, initial, document, onCreateAnother 
   const parentItemId = draft.finished.find((l) => l.item_id !== null)?.item_id ?? null
   const parentLine = draft.finished.find((l) => l.item_id !== null) ?? null
   const bomQuery = useQuery(
-    (signal) => (parentItemId ? lookupApi.bomsForItem(parentItemId, signal) : Promise.resolve(null)),
+    (signal) => (parentItemId ? lookupApi.boms('', { finishedItemId: parentItemId, signal }) : Promise.resolve(null)),
     [parentItemId, canReadBoms],
     { enabled: parentItemId !== null && canReadBoms },
   )

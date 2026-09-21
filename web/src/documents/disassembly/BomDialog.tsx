@@ -43,7 +43,7 @@ export function BomDialog({ open, onClose, finishedItemId, finishedItemName, def
   const [applying, setApplying] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const boms = useQuery((signal) => lookupApi.boms(query, signal), [query, open], { enabled: open })
+  const boms = useQuery((signal) => lookupApi.boms(query, { signal }), [query, open], { enabled: open })
   const bom = useQuery((signal) => (bomId ? lookupApi.bom(bomId, signal) : Promise.resolve(null)), [bomId], { enabled: open && bomId !== null })
 
   // Offer the BOMs of the item on the form first; everything else stays reachable through search.

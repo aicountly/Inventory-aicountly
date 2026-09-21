@@ -82,7 +82,6 @@ vi.mock('../../services/lookupApi', () => ({
   lookupApi: {
     searchItems: (q: string) => searchItems(q),
     itemsByIds: vi.fn(async () => []),
-    bomsForItem: vi.fn(async () => ({ data: [], meta: {} })),
     boms: vi.fn(async () => ({ data: [], meta: {} })),
     bom: vi.fn(),
     batches: vi.fn(async () => ({ data: [], meta: {} })),

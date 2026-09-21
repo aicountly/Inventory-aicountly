@@ -168,13 +168,19 @@ export const lookupApi = {
     return res.data
   },
 
-  boms(q = '', signal?: AbortSignal): Promise<ListResponse<BomListRow>> {
-    return api.list<BomListRow>('v1/bill-of-materials', { q, status: 'active', limit: 100 }, { signal })
-  },
-
-  /** Active bills of materials that BUILD this item — `?finished_item_id=` (BomController::index). */
-  bomsForItem(itemId: number, signal?: AbortSignal): Promise<ListResponse<BomListRow>> {
-    return api.list<BomListRow>('v1/bill-of-materials', { finished_item_id: itemId, status: 'active', limit: 50 }, { signal })
+  /**
+   * Active bills of materials, optionally only those that produce one finished item.
+   *
+   * `finished_item_id` is a filter BomController::index already applies; passing it is what lets
+   * the production screen offer only the BOMs valid for the item being made, rather than every
+   * BOM in the company.
+   */
+  boms(q = '', options: { finishedItemId?: number | null; signal?: AbortSignal } = {}): Promise<ListResponse<BomListRow>> {
+    return api.list<BomListRow>(
+      'v1/bill-of-materials',
+      { q, status: 'active', limit: 100, finished_item_id: options.finishedItemId ?? undefined },
+      { signal: options.signal },
+    )
   },
 
   async bom(id: number, signal?: AbortSignal): Promise<BomHeader> {
