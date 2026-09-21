@@ -76,6 +76,9 @@ $routes->group('', ['namespace' => 'App\Controllers\Api', 'filter' => 'cors'], s
             $routes->put($slug . '/(:num)', $ctrl . '::update/$1');
             $routes->delete($slug . '/(:num)', $ctrl . '::delete/$1');
         }
+        // Registered outside the CRUD loop above: the loop's show route is
+        // `batches/(:num)`, so a named sub-resource needs its own line.
+        $routes->get('batches/summary', 'BatchesController::summary');
         $routes->post('serials/bulk', 'SerialsController::bulkCreate');
         $routes->post('bill-of-materials/(:num)/explode', 'BomController::explode/$1');
         $routes->get('items/form-options', 'ItemsController::formOptions');

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { paginateRows } from './paginateRows'
 import type { PageSize, PageSlice } from './paginateRows'
 
@@ -17,7 +17,22 @@ export function useClientTablePagination<T>(
   { resetKey, initialPageSize = 25 }: { resetKey?: string | number; initialPageSize?: PageSize } = {},
 ): ClientTablePagination<T> {
   const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState<PageSize>(initialPageSize)
+  const [rawPageSize, setRawPageSize] = useState<PageSize>(initialPageSize)
+
+  /*
+   * A size change returns to page 1, in the same update.
+   *
+   * The reader who asks for 100 rows means the first 100; left on page 7 of
+   * the old size they would land somewhere arbitrary, or past the end. The
+   * control used to reset the page itself, which cost every URL-backed list
+   * its page size (see TablePagination) — so it belongs here, beside the state
+   * it is resetting.
+   */
+  const setPageSize = useCallback((size: PageSize) => {
+    setRawPageSize(size)
+    setPage(1)
+  }, [])
+  const pageSize = rawPageSize
 
   useEffect(() => {
     setPage(1)

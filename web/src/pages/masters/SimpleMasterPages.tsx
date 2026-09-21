@@ -1,5 +1,5 @@
 import { MasterPage } from '../../masters/MasterPage'
-import { batchesConfig, brandsConfig, itemGroupsConfig, locationsConfig, stockCategoriesConfig, uomConfig, warehouseGroupsConfig, warehousesConfig } from '../../masters/configs'
+import { brandsConfig, itemGroupsConfig, locationsConfig, stockCategoriesConfig, uomConfig, warehouseGroupsConfig, warehousesConfig } from '../../masters/configs'
 
 /** Master screens that are entirely described by a config. */
 
@@ -33,6 +33,10 @@ export function LocationsPage() {
   return <MasterPage config={locationsConfig} breadcrumbs={crumbs} />
 }
 
-export function BatchesPage() {
-  return <MasterPage config={batchesConfig} breadcrumbs={crumbs} />
-}
+/*
+ * Batches is NOT here: it outgrew the config-driven list. A batch carries
+ * expiry dates that decide whether stock is sellable, quantities spread across
+ * warehouses and a movement history, none of which a name-and-status master
+ * screen can show. It lives in `pages/masters/batches/BatchesPage.tsx` and is
+ * routed from there; `batchesConfig` still describes its form and its sheet.
+ */

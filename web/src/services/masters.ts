@@ -134,6 +134,29 @@ export interface StockSummary {
   reserved: number
 }
 
+/** Where a batch's stock sits, biggest holding first (`with_stock=1` lists). */
+export interface BatchWarehouseStock {
+  warehouse_id: number | null
+  warehouse_name: string | null
+  warehouse_code: string | null
+  on_hand: number
+}
+
+/** One warehouse's full bucket breakdown for a batch (`GET /v1/batches/{id}`). */
+export interface BatchBalanceRow extends BatchWarehouseStock {
+  reserved: number
+  committed: number
+  packed: number
+  in_transit: number
+  job_worker: number
+  quality_hold: number
+  damaged: number
+  blocked: number
+  expected: number
+  available: number
+  last_movement_at: string | null
+}
+
 export interface Batch extends AuditFields {
   batch_id: number
   batch_uuid?: string
@@ -147,9 +170,51 @@ export interface Batch extends AuditFields {
   attributes: Record<string, unknown> | null
   item_name: string | null
   item_sku: string | null
+  item_grp_name?: string | null
+  stock_cat_name?: string | null
+  track_expiry?: number | null
   unit_id?: number | null
   unit_symbol: string | null
   stock?: StockSummary
+  /** Only on `with_stock=1` lists. */
+  warehouses?: BatchWarehouseStock[]
+  /** Only on `GET /v1/batches/{id}`. */
+  balances?: BatchBalanceRow[]
+}
+
+/**
+ * `GET /v1/batches/summary` — the whole filtered set counted by the server.
+ *
+ * `states` is the screen's four-way grading (the stored status wins unless it
+ * is `active`, in which case the expiry date decides); `status_counts` is the
+ * raw domain status. Both are computed over exactly the filters the list was
+ * sent, so the cards above the table always speak for the rows below them.
+ */
+export interface BatchSummary {
+  total: number
+  items: number
+  with_stock: number
+  total_on_hand: number
+  expiry_window_days: number
+  as_of: string
+  states: {
+    active: number
+    expiring_soon: number
+    expired: number
+    inactive: number
+  }
+  status_counts: Record<string, number>
+  expiry_buckets: {
+    expired: number
+    within_30: number
+    days_31_90: number
+    days_91_180: number
+    beyond_180: number
+    no_expiry: number
+  }
+  /** Batches opened in the last `expiry_window_days` days, and in the window before it. */
+  created_recent: number
+  created_previous: number
 }
 
 export type SerialStatus = 'expected' | 'in_stock' | 'reserved' | 'issued' | 'in_transit' | 'damaged' | 'returned' | 'scrapped'
@@ -220,7 +285,13 @@ export const warehouseGroupsApi = crud<WarehouseGroup>('warehouse-groups')
 export const warehousesApi = crud<Warehouse>('warehouses')
 export const locationsApi = crud<Location>('locations')
 export const bomApi = crud<Bom>('bill-of-materials')
-export const batchesApi = crud<Batch>('batches')
+export const batchesApi = {
+  ...crud<Batch>('batches'),
+  /** The figures above the Batches table. Takes the same filters as `list`. */
+  async summary(query: ListQuery = {}, signal?: AbortSignal): Promise<BatchSummary> {
+    return (await api.get<ItemResponse<BatchSummary>>('v1/batches/summary', { query, signal })).data
+  },
+}
 export const serialsApi = {
   ...crud<Serial>('serials'),
   async bulkCreate(body: {
