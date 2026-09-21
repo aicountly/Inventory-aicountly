@@ -12,6 +12,7 @@ import { DocumentForm } from './DocumentForm'
 import { ConsumptionForm } from './consumption/ConsumptionForm'
 import { InwardChallanForm } from './grn/InwardChallanForm'
 import { JobWorkPage } from './jobwork/JobWorkPage'
+import { MaterialIssuePage } from './materialIssue/MaterialIssuePage'
 import { MaterialReceiptForm } from './receipt/MaterialReceiptForm'
 import { StockTransferWorkspace } from './transfer/StockTransferWorkspace'
 import { canCreate, isEditable, permissionKeysFor, STATUS_LABELS, statusTone } from './actions'
@@ -22,15 +23,6 @@ import { specForCode, specForSlug, UNAVAILABLE_TYPES } from './registry'
 import type { FormKind } from './registry'
 import type { DocumentStatus } from './types'
 import './documents.css'
-
-/*
- * Two native types have a screen of their own; every other one keeps the shared
- * `DocumentForm`. A type earns one when the generic editor cannot say what it
- * needs to say while the document is being typed — a transfer has two
- * warehouses on the header and a route per line, a consumption has to settle
- * batches and serials before it can be saved at all — and the alternative is
- * finding out when the API refuses it.
- */
 
 const STATUS_BADGE_TONE: Record<StatusTone, BadgeTone> = { neutral: 'neutral', info: 'info', success: 'success', warning: 'warning', danger: 'danger' }
 
@@ -151,9 +143,9 @@ export function DocumentFormPage() {
       )
     }
     const initial = draftFromDocument(doc, spec)
-    // Some types have a screen of their own — transfer, consumption, receiving. Each brings its
-    // own page shell, breadcrumbs and header, so it is returned whole rather than wrapped by the
-    // one below. Every other native type still uses the shared DocumentForm.
+    const reapproval = doc.status === 'APPROVED' || doc.status === 'PENDING_APPROVAL'
+      ? <Notice kind="info">Saving changes returns the document to draft; it will need approval again.</Notice>
+      : null
     if (spec.code === 'STOCK_TRANSFER') {
       return (
         <StockTransferWorkspace
@@ -175,6 +167,20 @@ export function DocumentFormPage() {
           initial={initial}
           existingStatus={doc.status}
           existingVersion={doc.version}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
+    if (spec.code === 'MATERIAL_ISSUE') {
+      return (
+        <MaterialIssuePage
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          documentNo={doc.document_no}
+          status={doc.status as DocumentStatus}
+          notice={reapproval}
           onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
         />
       )
@@ -225,7 +231,7 @@ export function DocumentFormPage() {
           meta={<span className="text-xs text-gray-500">Version {doc.version}</span>}
           escBack={false}
         />
-        {doc.status === 'APPROVED' || doc.status === 'PENDING_APPROVAL' ? <Notice kind="info">Saving changes returns the document to draft; it will need approval again.</Notice> : null}
+        {reapproval}
         <DocumentForm key={doc.document_id} spec={spec} documentId={doc.document_id} initial={initial} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
       </PageShell>
     )
@@ -237,6 +243,9 @@ export function DocumentFormPage() {
   }
   if (s.code === 'CONSUMPTION') {
     return <ConsumptionForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
+  if (s.code === 'MATERIAL_ISSUE') {
+    return <MaterialIssuePage key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
   }
   if (s.formKind === 'inward_challan') {
     return <InwardChallanForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
