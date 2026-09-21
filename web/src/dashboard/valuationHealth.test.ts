@@ -98,13 +98,24 @@ function item(id: number, value: number): StockSummaryRow {
 function warehouses(): WarehouseStockSummary {
   return {
     rows: 3,
+    items: 3,
+    warehouses: 3,
+    active_warehouses: 3,
     closing_qty: 1000,
     closing_value: 1_000_000,
+    reserved_qty: 0,
+    available_qty: 1000,
     by_warehouse: [
-      { warehouse_id: 1, warehouse_name: 'Main', closing_qty: 600, closing_value: 600_000 },
-      { warehouse_id: 2, warehouse_name: 'Secondary', closing_qty: 300, closing_value: 300_000 },
-      { warehouse_id: 3, warehouse_name: 'Transit', closing_qty: 100, closing_value: 100_000 },
+      { warehouse_id: 1, warehouse_name: 'Main', closing_qty: 600, closing_value: 600_000, items: 1 },
+      { warehouse_id: 2, warehouse_name: 'Secondary', closing_qty: 300, closing_value: 300_000, items: 1 },
+      { warehouse_id: 3, warehouse_name: 'Transit', closing_qty: 100, closing_value: 100_000, items: 1 },
     ],
+    health: { negative: 0, out: 0, reorder: 0, low: 0, overstocked: 0, healthy: 3 },
+    health_items: { negative: 0, out: 0, reorder: 0, low: 0, overstocked: 0, healthy: 3 },
+    health_filter: null,
+    method: 'AS_PER_MASTER',
+    live_buckets: true,
+    currency: 'INR',
     to: '2026-09-19',
   }
 }
