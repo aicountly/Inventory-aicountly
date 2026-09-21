@@ -95,13 +95,19 @@ export interface BarcodeLookupOptions {
   signal?: AbortSignal
 }
 
-/** The one `GET /v1/items/by-barcode/{code}` request both barcode helpers below issue. */
+/**
+ * The one `GET /v1/items/by-barcode/{code}` request both barcode helpers below issue.
+ *
+ * The endpoint answers with ItemsController::LIST_COLUMNS, which carries no alternate units and
+ * no default warehouse, so both are defaulted to the search row's shape rather than left
+ * undefined: a caller reading `row.units` must not have to know which endpoint the row came from.
+ */
 async function fetchByBarcode(code: string, options: BarcodeLookupOptions): Promise<ItemSearchRow> {
-  const res = await api.get<ItemResponse<ItemSearchRow>>(`v1/items/by-barcode/${encodeURIComponent(code)}`, {
+  const res = await api.get<ItemResponse<Partial<ItemSearchRow> & { item_id: number }>>(`v1/items/by-barcode/${encodeURIComponent(code)}`, {
     query: { warehouse_id: options.warehouseId ?? undefined },
     signal: options.signal,
   })
-  return res.data
+  return { units: [], default_warehouse_id: null, ...res.data } as ItemSearchRow
 }
 
 export const lookupApi = {

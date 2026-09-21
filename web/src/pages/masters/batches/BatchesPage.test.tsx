@@ -401,7 +401,12 @@ describe('the rail', () => {
     const rail = await screen.findByRole('complementary', { name: 'Batch analytics' })
     // aria-disabled, not `disabled`: a disabled button cannot be hovered or
     // focused, so the tooltip that explains why it is off would never appear.
-    const close = within(rail).getByRole('button', { name: /Close selected batches/ })
+    // `findByRole`, not `getByRole`: the rail renders a skeleton first, so the
+    // aside resolves before its quick actions exist. The sibling test above
+    // waits for "Batch insights" for the same reason — this one asserted
+    // against the placeholder and failed on any runner slow enough to paint
+    // before the fetch landed.
+    const close = await within(rail).findByRole('button', { name: /Close selected batches/ })
     expect(close.getAttribute('aria-disabled')).toBe('true')
     expect(within(rail).getByText(/Tick one or more batches/)).toBeTruthy()
 

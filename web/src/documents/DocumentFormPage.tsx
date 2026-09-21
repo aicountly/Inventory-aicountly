@@ -25,6 +25,8 @@ import type { StatusTone } from './actions'
 import { documentTypeGlyph } from './documentTypeIcon'
 import { draftFromDocument } from './formModel'
 import { specForCode, specForSlug, UNAVAILABLE_TYPES } from './registry'
+import { revaluationDraftFromDocument } from './revaluation/revaluationModel'
+import { StockRevaluationPage } from './revaluation/StockRevaluationPage'
 import type { FormKind } from './registry'
 import type { DocumentStatus } from './types'
 import './documents.css'
@@ -168,6 +170,10 @@ export function DocumentFormPage() {
           <Notice kind="warning">You do not have permission to edit documents.</Notice>
         </PageShell>
       )
+    }
+    // A revaluation has its own screen; the gates above (type, status, permission) have already run.
+    if (spec.formKind === 'revaluation') {
+      return <StockRevaluationPage key={doc.document_id} spec={spec} documentId={doc.document_id} initial={revaluationDraftFromDocument(doc)} existing={doc} />
     }
     const initial = draftFromDocument(doc, spec)
     const reapproval = doc.status === 'APPROVED' || doc.status === 'PENDING_APPROVAL'
@@ -335,6 +341,9 @@ export function DocumentFormPage() {
   const s = spec as NonNullable<typeof spec>
   if (s.formKind === 'packing') {
     return <DocumentForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
+  if (s.formKind === 'revaluation') {
+    return <StockRevaluationPage key={s.code} spec={s} />
   }
   /*
    * Production has its own screen. Same route, same spec, same draft shape and the same
