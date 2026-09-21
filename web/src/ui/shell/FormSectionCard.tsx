@@ -30,8 +30,10 @@ export function FormSectionCard({
   return (
     <Card padding={padding} className={className}>
       {hasHeader ? (
-        <div className="flex items-start justify-between gap-3 mb-3 border-b border-gray-100 pb-3">
-          <div className="flex items-start gap-3 min-w-0">
+        <div className="flex flex-wrap items-start justify-between gap-3 mb-3 border-b border-gray-100 pb-3">
+          {/* `basis-56` with wrap: the action row drops to a line of its own
+              rather than squeezing the heading into a column of single words. */}
+          <div className="flex items-start gap-3 min-w-0 flex-1 basis-56">
             {Icon ? (
               <span className="w-9 h-9 rounded-lg bg-primary-light flex items-center justify-center shrink-0">
                 <Icon className="w-4 h-4 text-primary" aria-hidden />

@@ -243,6 +243,14 @@ export interface RequestOptions {
    */
   scope?: CompanyScope | false
   headers?: Record<string, string>
+  /**
+   * Send this multipart body instead of a JSON one (api.upload).
+   *
+   * The company scope still travels, in the query string — `scopeToQuery` runs
+   * for every request — so an upload is scoped exactly like every other call
+   * without a caller having to remember to append cmp_id itself.
+   */
+  form?: FormData
   /** Milliseconds before the request is abandoned. Default 30s. */
   timeoutMs?: number
 }
@@ -274,7 +282,7 @@ async function readBody(res: Response): Promise<unknown> {
   }
 }
 
-async function send(method: Method, url: string, opts: RequestOptions, bodyJson: string | undefined, sesKey: string): Promise<Response> {
+async function send(method: Method, url: string, opts: RequestOptions, body: string | FormData | undefined, sesKey: string): Promise<Response> {
   const headers: Record<string, string> = {
     Accept: 'application/json',
     Authorization: `Bearer ${sesKey}`,
@@ -283,11 +291,12 @@ async function send(method: Method, url: string, opts: RequestOptions, bodyJson:
     'X-Origin-Host': window.location.host,
     ...(opts.headers ?? {}),
   }
-  if (bodyJson !== undefined) headers['Content-Type'] = 'application/json'
+  // Never set it for FormData: the browser has to add the multipart boundary.
+  if (typeof body === 'string') headers['Content-Type'] = 'application/json'
   return fetch(url, {
     method,
     headers,
-    body: bodyJson,
+    body,
     signal: combineSignals(opts.signal, opts.timeoutMs ?? DEFAULT_TIMEOUT_MS),
   })
 }
@@ -297,14 +306,14 @@ async function exchange(method: Method, path: string, opts: RequestOptions): Pro
   const scope = resolveScope(opts.scope)
   const query = { ...scopeToQuery(scope), ...(opts.query ?? {}) }
   const url = `${getApiBaseUrl()}/${path.replace(/^\//, '')}${buildQueryString(query)}`
-  const bodyJson = opts.body === undefined ? undefined : JSON.stringify(withScopeInBody(opts.body, scope))
+  const body = opts.form ?? (opts.body === undefined ? undefined : JSON.stringify(withScopeInBody(opts.body, scope)))
 
   try {
-    const res = await send(method, url, opts, bodyJson, await ensureSesKey())
+    const res = await send(method, url, opts, body, await ensureSesKey())
     if (res.status !== 401) return res
     // The key may have been revoked before its local expiry: mint once more.
     clearSession()
-    return await send(method, url, opts, bodyJson, await ensureSesKey())
+    return await send(method, url, opts, body, await ensureSesKey())
   } catch (err) {
     if (err instanceof ApiError) throw err
     if ((err as Error)?.name === 'AbortError' || (err as Error)?.name === 'TimeoutError') throw err
@@ -344,6 +353,16 @@ export const api = {
     const res = await exchange('GET', path, opts ?? {})
     if (!res.ok) throw parseErrorBody(res.status, await readBody(res))
     return res.blob()
+  },
+  /**
+   * POST a multipart body — a file the user picked.
+   *
+   * Same bearer key, same company scope, same 401 re-mint and the same
+   * structured errors as every other call: an upload must not be the one
+   * request in the app that goes around the client.
+   */
+  upload<T>(path: string, form: FormData, opts?: RequestOptions): Promise<T> {
+    return request<T>('POST', path, { ...opts, form })
   },
   /** GET a paginated list. `page` is translated to `offset` client-side. */
   list<T>(path: string, query: ListQuery = {}, opts?: RequestOptions): Promise<ListResponse<T>> {

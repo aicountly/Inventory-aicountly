@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { emptyItemForm, itemPayload, itemToForm, openingValue, openingsPayload, unitLinesPayload, validateItemForm } from './itemForm'
+import { duplicateDraft, duplicateItemForm, emptyItemForm, itemPayload, itemToForm, openingValue, openingsPayload, unitLinesPayload, validateItemForm } from './itemForm'
 import type { Item } from '../../services/items'
+import type { ItemFormState } from './itemForm'
 
 describe('unitLinesPayload', () => {
   it('puts the base unit first and drops blank, repeated and invalid lines', () => {
@@ -176,5 +177,127 @@ describe('itemToForm', () => {
     const empty = itemToForm({ ...base, mrp: null } as Item, [], 0)
     expect(empty.mrp).toBe('')
     expect(itemPayload(trimmed).mrp).toBe(15)
+  })
+})
+
+describe('duplicateItemForm', () => {
+  const source = {
+    item_id: 7214,
+    item_name: 'Steel Rod 12mm',
+    item_alias: 'SR12',
+    print_name: 'Steel Rod 12mm',
+    item_type: 'stock',
+    item_sku: 'SR-12',
+    item_upc: '8901234567890',
+    hsn_sac: '7214',
+    mrp: '1234.5000',
+    unit_id: 1,
+    stock_cat_id: 2,
+    item_grp_id: 3,
+    brand_id: 4,
+    valuation_method: 'fifo',
+    track_batch: 1,
+    track_serial: 0,
+    track_expiry: 1,
+    is_active: 0,
+    updated_at: null,
+    created_at: null,
+    unit_symbol: 'Nos',
+    unit_name: 'Numbers',
+    grp_name: 'Raw material',
+    cat_name: 'Metals',
+    brand_name: 'Tata',
+    purchase_unit_id: null,
+    sales_unit_id: null,
+    parent_item_id: null,
+    books_sales_acc_id: null,
+    books_purchase_acc_id: null,
+    books_tax_cat_id: null,
+    shelf_life_days: null,
+    negative_stock_policy: null,
+    min_stock_qty: '10.0000',
+    max_stock_qty: null,
+    reorder_point_qty: '20.0000',
+    reorder_qty: null,
+    safety_stock_qty: null,
+    lead_time_days: null,
+    default_warehouse_id: null,
+    standard_cost: null,
+    itc_eligibility: 'block',
+    attributes: null,
+    variant_attributes: null,
+    unit_lines: [
+      { unit_id: 1, is_default: 1, conversion_factor: 1, uom_role: 'base' },
+      { unit_id: 2, is_default: 0, conversion_factor: 100, uom_role: 'purchase' },
+    ],
+    openings: [],
+  } satisfies Item
+
+  it('keeps everything that makes two items alike', () => {
+    const f = duplicateItemForm(source)
+    expect(f).toMatchObject({
+      item_type: 'stock',
+      hsn_sac: '7214',
+      mrp: '1234.5',
+      item_grp_id: '3',
+      stock_cat_id: '2',
+      brand_id: '4',
+      unit_id: '1',
+      valuation_method: 'FIFO',
+      track_batch: true,
+      track_expiry: true,
+      itc_eligibility: 'block',
+      // itemToForm normalises the API's NUMERIC strings, so the copy carries
+      // "10", not "10.0000".
+      min_stock_qty: '10',
+      reorder_point_qty: '20',
+    })
+    expect(f.unitLines).toHaveLength(1)
+  })
+
+  it('drops the identifiers, which belong to exactly one item', () => {
+    // Copying them would either be refused by the API or, worse, accepted —
+    // leaving two items answering the same scan.
+    const f = duplicateItemForm(source)
+    expect(f.item_sku).toBe('')
+    expect(f.item_upc).toBe('')
+  })
+
+  it('never copies opening stock', () => {
+    // Opening quantity is a statement about physical goods on a date. A copied
+    // opening is stock that was never received, and the valuation engine would
+    // faithfully cost it.
+    expect(duplicateItemForm(source).openings).toEqual([])
+  })
+
+  it('renames the copy so it cannot be saved under the original name by accident', () => {
+    expect(duplicateItemForm(source).item_name).toBe('Steel Rod 12mm (copy)')
+  })
+
+  it('is the same rule the item form\u2019s own Duplicate action applies', () => {
+    /*
+     * Two ways in — the form\u2019s Duplicate, which copies the draft on screen,
+     * and the list\u2019s, which copies a saved record — and exactly one rule
+     * behind them. Two copies of "what a duplicate drops" would drift, and the
+     * thing that drifts is which fields are safe to carry.
+     */
+    // `key` is a render identity from a module counter, so it differs between
+    // any two calls by design. Everything that reaches the API must not.
+    const withoutKeys = (f: ItemFormState) => ({
+      ...f,
+      unitLines: f.unitLines.map(({ key: _k, ...rest }) => rest),
+      openings: f.openings.map(({ key: _k, ...rest }) => rest),
+    })
+    const viaItem = duplicateItemForm(source)
+    const viaDraft = duplicateDraft(itemToForm(source, [], 0))
+    expect(withoutKeys(viaDraft)).toEqual(withoutKeys(viaItem))
+  })
+
+  it('gives the copy its own unit lines rather than the source\u2019s objects', () => {
+    // Editing the copy must not reach back into the draft it came from.
+    const form = itemToForm(source, [], 0)
+    const copy = duplicateDraft(form)
+    expect(copy.unitLines).toEqual(form.unitLines)
+    copy.unitLines.forEach((line, i) => expect(line).not.toBe(form.unitLines[i]))
   })
 })
