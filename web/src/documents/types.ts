@@ -251,6 +251,11 @@ export interface ChallanSettlement {
 
 export interface DocumentMetadata {
   bom_id?: number
+  /** Workflow labels the user picked on the entry screen (Direct GRN, Sample Goods…). */
+  tags?: string[]
+  /** Purchases' id for the order this receipt was raised against; never a local copy of one. */
+  purchase_order_id?: string
+  purchase_order_no?: string
   production_qty?: number
   finished_rate?: number
   warehouse_id?: number | null
@@ -282,6 +287,11 @@ export interface CreateDocumentPayload {
   document_type: string
   document_date: string
   document_no?: string | null
+  /**
+   * The party's own number for the consignment — a supplier challan no., invoice no. or PO no.
+   * Held by the server as `source_document_no` and searched by the documents register's `q`.
+   */
+  source_document_no?: string | null
   party_ref?: number | null
   party_name?: string | null
   from_warehouse_id?: number | null

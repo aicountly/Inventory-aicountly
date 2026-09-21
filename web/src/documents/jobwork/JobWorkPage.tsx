@@ -387,7 +387,9 @@ export function JobWorkPage({ spec, documentId, initial, existing, onSaved }: Jo
       if (trimmed === '') return
       setScanError(null)
       try {
-        const row = await lookupApi.itemByBarcode(trimmed)
+        // Scoped to the warehouse the line will land in, so the availability
+        // the scan reports is the availability where it actually matters.
+        const row = await lookupApi.itemByBarcode(trimmed, { warehouseId: header.default_warehouse_id })
         if (!row) {
           setScanError(`Nothing carries the code “${trimmed}”.`)
           return
@@ -398,7 +400,7 @@ export function JobWorkPage({ spec, documentId, initial, existing, onSaved }: Jo
         setScanError(errorMessage(err, 'The scan could not be checked against the item master.'))
       }
     },
-    [addFromItem],
+    [addFromItem, header.default_warehouse_id],
   )
 
   const submit = useCallback(

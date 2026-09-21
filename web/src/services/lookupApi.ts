@@ -87,6 +87,20 @@ export interface BomListRow {
   line_count: number
 }
 
+export interface BarcodeLookupOptions {
+  warehouseId?: number | null
+  signal?: AbortSignal
+}
+
+/** The one `GET /v1/items/by-barcode/{code}` request both barcode helpers below issue. */
+async function fetchByBarcode(code: string, options: BarcodeLookupOptions): Promise<ItemSearchRow> {
+  const res = await api.get<ItemResponse<ItemSearchRow>>(`v1/items/by-barcode/${encodeURIComponent(code)}`, {
+    query: { warehouse_id: options.warehouseId ?? undefined },
+    signal: options.signal,
+  })
+  return res.data
+}
+
 export const lookupApi = {
   async searchItems(q: string, options: { warehouseId?: number | null; limit?: number; signal?: AbortSignal } = {}): Promise<ItemSearchRow[]> {
     const res = await api.get<ItemResponse<ItemSearchRow[]>>('v1/items/search', {
@@ -96,23 +110,6 @@ export const lookupApi = {
     return res.data
   },
 
-  /**
-   * One item by the exact barcode a scanner typed (`GET /v1/items/by-barcode/{code}`).
-   * Null when nothing carries that code — a scan of an unknown label must say
-   * so rather than silently add the wrong row.
-   */
-  async itemByBarcode(code: string, signal?: AbortSignal): Promise<ItemSearchRow | null> {
-    const trimmed = code.trim()
-    if (trimmed === '') return null
-    try {
-      const res = await api.get<ItemResponse<ItemSearchRow>>(`v1/items/by-barcode/${encodeURIComponent(trimmed)}`, { signal })
-      return res.data ?? null
-    } catch (err) {
-      if (isApiError(err) && err.status === 404) return null
-      throw err
-    }
-  },
-
   async itemsByIds(ids: number[], signal?: AbortSignal): Promise<ItemSearchRow[]> {
     if (ids.length === 0) return []
     const res = await api.post<ItemResponse<ItemSearchRow[]>>('v1/items/bulk-lookup', { item_ids: ids }, { signal })
@@ -120,12 +117,26 @@ export const lookupApi = {
   },
 
   /** Exact UPC / SKU match for a keyboard-wedge scan: `GET /v1/items/by-barcode/{code}`. 404 when nothing matches. */
-  async byBarcode(code: string, options: { warehouseId?: number | null; signal?: AbortSignal } = {}): Promise<ItemSearchRow> {
-    const res = await api.get<ItemResponse<ItemSearchRow>>(`v1/items/by-barcode/${encodeURIComponent(code)}`, {
-      query: { warehouse_id: options.warehouseId ?? undefined },
-      signal: options.signal,
-    })
-    return res.data
+  byBarcode(code: string, options: BarcodeLookupOptions = {}): Promise<ItemSearchRow> {
+    return fetchByBarcode(code, options)
+  },
+
+  /**
+   * The same lookup, resolving to null instead of throwing when nothing matches.
+   *
+   * "This barcode is not one of ours" is an ordinary outcome at a receiving bench, not a failure
+   * the caller should have to tell apart from a network error inside a catch block. The consumption
+   * scan bar wants the throw; the receiving screens want the null. One request, two contracts.
+   */
+  async itemByBarcode(code: string, options: BarcodeLookupOptions = {}): Promise<ItemSearchRow | null> {
+    const trimmed = code.trim()
+    if (!trimmed) return null
+    try {
+      return await fetchByBarcode(trimmed, options)
+    } catch (err) {
+      if (isApiError(err) && err.status === 404) return null
+      throw err
+    }
   },
 
   async warehouses(signal?: AbortSignal): Promise<WarehouseRow[]> {

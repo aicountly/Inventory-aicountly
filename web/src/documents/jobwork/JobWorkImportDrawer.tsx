@@ -70,7 +70,7 @@ export function JobWorkImportDrawer({ open, onClose, onImport, title }: JobWorkI
       for (const [index, row] of rows.entries()) {
         const key = row.code.toLowerCase()
         if (!cache.has(key)) {
-          cache.set(key, await lookupApi.itemByBarcode(row.code, controller.signal))
+          cache.set(key, await lookupApi.itemByBarcode(row.code, { signal: controller.signal }))
         }
         const item = cache.get(key) ?? null
         const qty = toNumber(row.qty)

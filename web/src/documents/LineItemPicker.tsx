@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { Pencil } from 'lucide-react'
 import { useDebounce } from '../hooks/useDebounce'
 import { isAbortError } from '../services/api'
 import { lookupApi } from '../services/lookupApi'
@@ -17,6 +18,12 @@ interface LineItemPickerProps {
   disabled?: boolean
   autoFocus?: boolean
   invalid?: boolean
+  /**
+   * Dense grid: the chosen item shows as its name with an icon-only change
+   * button. In a column narrow enough to matter, the word "Change" beside the
+   * name is wider than the name gets.
+   */
+  compact?: boolean
 }
 
 /**
@@ -30,7 +37,7 @@ interface LineItemPickerProps {
  * was clipped to a couple of pixels and, on a wide line table, could not be
  * reached at all.
  */
-export function LineItemPicker({ itemId, itemName, itemSku, warehouseId, onPick, onClear, disabled, autoFocus, invalid }: LineItemPickerProps) {
+export function LineItemPicker({ itemId, itemName, itemSku, warehouseId, onPick, onClear, disabled, autoFocus, invalid, compact = false }: LineItemPickerProps) {
   const [query, setQuery] = useState('')
   const [rows, setRows] = useState<ItemSearchRow[]>([])
   const [open, setOpen] = useState(false)
@@ -116,7 +123,7 @@ export function LineItemPicker({ itemId, itemName, itemSku, warehouseId, onPick,
         </span>
         {!disabled ? (
           <button type="button" className="btn btn-ghost btn-sm" onClick={onClear} aria-label="Change item">
-            Change
+            {compact ? <Pencil className="h-3.5 w-3.5" aria-hidden /> : 'Change'}
           </button>
         ) : null}
       </div>
