@@ -329,15 +329,14 @@ describe('warehouse stock — the intelligence rail', () => {
   })
 })
 
-describe('warehouse stock — saved views', () => {
+describe('warehouse stock — the five views', () => {
   it('starts on Default and swaps the columns when another view is picked', async () => {
     renderRegister()
     await screen.findByText('Paracetamol 500mg Tablet')
-    const select = screen.getByLabelText('View preset') as HTMLSelectElement
-    expect(select.value).toBe('default')
+    expect(screen.getByRole('tab', { name: 'Default' }).getAttribute('aria-selected')).toBe('true')
     expect(screen.getByRole('columnheader', { name: /Unit cost/ })).toBeTruthy()
 
-    fireEvent.change(select, { target: { value: 'availability' } })
+    fireEvent.click(screen.getByRole('tab', { name: 'Availability' }))
     await waitFor(() =>
       expect(screen.queryByRole('columnheader', { name: /Unit cost/ })).toBeNull(),
     )
@@ -348,11 +347,33 @@ describe('warehouse stock — saved views', () => {
   it('restores a linked view on arrival', async () => {
     renderRegister('/registers/warehouse-stock?view=valuation')
     await screen.findByText('Paracetamol 500mg Tablet')
-    await waitFor(() =>
-      expect((screen.getByLabelText('View preset') as HTMLSelectElement).value).toBe('valuation'),
-    )
+    expect(screen.getByRole('tab', { name: 'Valuation' }).getAttribute('aria-selected')).toBe('true')
     expect(screen.queryByRole('columnheader', { name: /Reserved/ })).toBeNull()
     expect(screen.getByRole('columnheader', { name: /Method applied/ })).toBeTruthy()
+  })
+
+  it('keeps the default out of the URL, so a plain link is the plain register', async () => {
+    renderRegister('/registers/warehouse-stock?view=valuation')
+    await screen.findByText('Paracetamol 500mg Tablet')
+    fireEvent.click(screen.getByRole('tab', { name: 'Default' }))
+    await waitFor(() =>
+      expect(screen.getByTestId('location').textContent).not.toContain('view='),
+    )
+  })
+
+  it('never narrows the rows — a view is the same question read another way', async () => {
+    renderRegister()
+    await screen.findByText('Paracetamol 500mg Tablet')
+    const before = fetchReport.mock.calls.filter((c) => c[0] === 'warehouse-stock').length
+    fireEvent.click(screen.getByRole('tab', { name: 'Stock health' }))
+    await waitFor(() =>
+      expect(screen.getByRole('columnheader', { name: /Reorder point/ })).toBeTruthy(),
+    )
+    // Any refetch that did happen asked the same question: no view adds a filter.
+    for (const call of fetchReport.mock.calls.slice(before).filter((c) => c[0] === 'warehouse-stock')) {
+      expect(call[1].health).toBeUndefined()
+      expect(call[1].warehouse_id).toBeUndefined()
+    }
   })
 })
 

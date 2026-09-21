@@ -14,7 +14,7 @@
 import type { ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import type { PermissionKey } from '../access/AccessContext'
-import type { ListQuery, ListResponse } from '../services/api'
+import type { ListQuery, ListResponse, SortOrder } from '../services/api'
 import type { ReportResponse } from '../services/reportsApi'
 import type { ReportConfig } from '../reports/types'
 import type { IconTone } from '../ui/IconTile'
@@ -36,6 +36,20 @@ export interface StatCardSpec {
   to?: string
   /** Only for the red-when-negative case; never a fabricated comparison. */
   current?: number | null
+  /**
+   * The same figure at a past date, so the card can show a delta.
+   *
+   * Only ever a number the SERVER measured. Most Inventory endpoints send no
+   * comparatives and pass nothing here, and StatCard's contract is that an
+   * absent `previous` renders the hint line and no delta chip — that is the
+   * designed fallback, not a gap. A percentage computed from a figure nobody
+   * measured is a number on a manager's screen that no server ever produced.
+   */
+  previous?: number | null
+  /** For the figures where down is the good direction: ageing, overdue lines. */
+  invertDelta?: boolean
+  /** A measured series behind the figure. Same rule as `previous`. */
+  sparkline?: ReactNode
   emphasizeNegative?: boolean
   /**
    * Renders instead of the card, keeping its cell in the KPI grid.
@@ -139,36 +153,44 @@ export interface RegisterFilterPanelSpec {
    * Omit and every filter is in the grid.
    */
   primaryKeys?: readonly string[]
-  /**
-   * The grid the filter cells are laid out in.
-   *
-   * Four columns is the house default and right for four to six controls. A register
-   * carrying seven wants a denser track on a wide screen rather than one control
-   * stranded on a second row; it says so here rather than every panel growing a
-   * breakpoint for the widest register that exists.
-   */
-  gridClassName?: string
 }
 
 /**
- * A saved arrangement of the register: which columns are on, under a name.
+ * One way of reading the same register.
  *
- * Presets are a VIEW, not a question — nothing about the query changes, so nothing is
- * sent to the server and the reader's own Configure-Columns choice is what loads. Picking
- * one from the control is the only thing that applies it, which is why arriving on the
- * page never overwrites the columns someone deliberately set last week.
+ * A view is NOT a second screen. It is the same question, the same filters and
+ * the same endpoint, read a different way: the pending register's Follow-up view
+ * is its own rows narrowed to the ones someone has to chase, and its Summary view
+ * is those rows aggregated. That is the whole constraint — a "view" that fetched
+ * a different dataset would be a page wearing a tab.
+ *
+ * `query` is how a view narrows: it is merged into the filters the register sends,
+ * so the narrowing happens in SQL and the totals, the KPI cards and the pager all
+ * describe the set the reader is actually looking at. A view that filtered rows
+ * after they arrived would page over the wrong count.
  */
-export interface RegisterViewPreset {
-  /** URL value (`?view=`) and storage id. */
-  id: string
+export interface RegisterView<T, S> {
+  /** URL value (`?view=follow_up`) and identity. The first view is the default. */
+  key: string
   label: string
-  /** One line in the control's title attribute, saying what the preset is for. */
-  description?: string
-  /**
-   * Column keys this preset shows. `alwaysVisible` columns are on whatever this says.
-   * Omit for the register's shipped defaults — that is what "Default" is.
-   */
+  icon?: LucideIcon
+  /** One line under the table heading while this view is on. */
+  hint?: string
+  /** Extra filter values merged into the register's query while this view is on. */
+  query?: Record<string, string>
+  /** Column keys this view shows, in this order. Omit to keep the register's own. */
   columns?: readonly string[]
+  /** Sort applied when the reader switches to this view and has not chosen one. */
+  defaultSort?: string
+  defaultOrder?: SortOrder
+  /**
+   * Replaces the table entirely — the aggregated view.
+   *
+   * It is handed the same summary and rows the table would have had, so a
+   * breakdown cannot quietly answer a differently filtered question.
+   */
+  render?: (args: AnalyticsArgs<T, S>) => ReactNode
+  emptyMessage?: string
 }
 
 /** What an analytics band is handed. See `RegisterConfig.analytics`. */
@@ -307,10 +329,11 @@ export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
    * Clickable KPI cards above the table. Falls back to `summary` when absent.
    *
    * `values` is the effective filter set, defaults resolved — what the register was
-   * actually asked. A card that drills down needs it: a link built from the summary
-   * alone would drop the warehouse or the date the reader is looking at and answer a
-   * wider question than the one on screen. Optional, because most cards do not build
-   * links and every config written before it existed takes two arguments.
+   * asked. A card that drills down needs it: a link built from the summary alone
+   * silently drops the reader's warehouse or date and lands them on a wider set than
+   * the figure they clicked, which is the one thing a drill-down must never do.
+   * Optional, because most cards build no link and the configs written before it
+   * existed pass two arguments.
    */
   kpis?: (
     summary: S,
@@ -352,8 +375,6 @@ export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
    */
   aside?: (args: AnalyticsArgs<T, S>) => ReactNode
 
-  /** Named column arrangements offered above the table. See RegisterViewPreset. */
-  viewPresets?: readonly RegisterViewPreset[]
 
   /**
    * The operational strip under the KPI cards — what the rows on screen say
@@ -365,11 +386,21 @@ export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
    * hint the same way the cards and the footer do. A register that declares
    * none simply shows no strip.
    */
-  insights?: (summary: S, response: ReportResponse<T, S>) => RegisterInsightSet
+  insights?: (
+    summary: S,
+    response: ReportResponse<T, S>,
+    args: AnalyticsArgs<T, S>,
+  ) => RegisterInsightSet
 
 
-  /** Heading over the table card. Defaults to the register's own title. */
-  tableTitle?: string
+  /**
+   * Heading over the table card. Defaults to the register's own title.
+   *
+   * A node rather than a string because a register with `views` puts its view
+   * switcher here: the switcher belongs at the head of the card whose contents
+   * it changes, on the left, where a heading would otherwise sit.
+   */
+  tableTitle?: ReactNode
   /** One line under that heading, saying what the rows on screen are. */
   tableHint?: string
   /**
@@ -379,8 +410,22 @@ export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
    * Here rather than in `extra` because `extra` renders ABOVE the card: a
    * register that put its heading and button there would draw a second heading
    * over the one the card already has.
+   *
+   * As a function it is handed the same summary and rows the table has, which is
+   * what lets a register pin live operational figures there — the pending
+   * register's inbound / outbound / net exposure chips — without fetching them
+   * a second time or restating them from the page instead of the filtered set.
    */
-  tableActions?: ReactNode
+  tableActions?: ReactNode | ((args: AnalyticsArgs<T, S>) => ReactNode)
+
+  /**
+   * Ways of reading this register, offered as a switcher at the head of the
+   * table card. The first is the default; the choice lives in the URL as
+   * `?view=`, so a link to the follow-up list is a link to the follow-up list.
+   *
+   * Declare none and the register renders exactly as it always has.
+   */
+  views?: readonly RegisterView<T, S>[]
 
   /**
    * Groupings the reader can switch between, with per-group subtotals. The
@@ -424,15 +469,23 @@ export interface RegisterConfig<T, S> extends ReportConfig<T, S> {
   /** Register is reachable at `/registers/<path>` unless this overrides it. */
   routePath?: string
   /**
-   * What to show when the register is empty and NO filter is set.
+   * What to show when the register is empty and it is NOT the filters' doing.
    *
    * "No rows match these filters. Widen the period or clear a filter" is the
    * wrong sentence for a company that has simply never entered one of these —
    * it sends the reader hunting for a filter that is not there. Registers that
    * can be legitimately empty supply the other screen; the rest fall back to
    * the filtered message, which is right often enough.
+   *
+   * As a NODE it is shown whenever no filter is set, which is the best guess
+   * available without asking the server. As a FUNCTION the register decides,
+   * because some endpoints can tell the two apart properly: the pending
+   * register's answers whether anything is outstanding at all, filters aside,
+   * so a reader with a narrow filter and an empty company is told they are all
+   * square rather than sent to widen a filter that was never the problem.
+   * Return null to fall through to the filtered message.
    */
-  emptyUnfiltered?: ReactNode
+  emptyUnfiltered?: ReactNode | ((summary: S, activeFilterCount: number) => ReactNode | null)
 
   /**
    * Heading of the filtered empty state.

@@ -10,6 +10,7 @@ import type { IconTone } from '../../ui/IconTile'
 import { Tooltip } from '../../ui/Tooltip'
 import { cx } from '../../ui/cx'
 import type { MetricState } from '../aggregatesApi'
+import { cardErrorCopy } from '../errorCopy'
 
 /**
  * A KPI card that can say "we don't know" four different ways.
@@ -92,6 +93,8 @@ export function MetricCard({
 
   const unavailable = Boolean(error) || state === 'unavailable'
   const notConfigured = state === 'not_configured'
+  // Never `error.message`: that is the server talking to us, not to the reader.
+  const failure = error ? cardErrorCopy(error, label.toLowerCase()) : null
 
   // Only a real, readable figure earns the drill-through. A card that cannot
   // show its number must not offer to show the register "behind" it either.
@@ -143,7 +146,9 @@ export function MetricCard({
 
       <div className={FOOT}>
         {unavailable ? (
-          <span className="truncate text-red-600">{error ? error.message : 'Could not read this figure'}</span>
+          <Tooltip label={failure ? failure.message : undefined} placement="bottom" className="min-w-0">
+            <span className="truncate text-red-600">{failure ? failure.title : 'We couldn’t read this figure'}</span>
+          </Tooltip>
         ) : notConfigured ? (
           <span className="truncate text-gray-400">{reason ?? 'This product does not model it'}</span>
         ) : (
@@ -163,11 +168,11 @@ export function MetricCard({
       className={cx(SHELL, className)}
     >
       {body}
-      {unavailable && onRetry ? (
+      {unavailable && onRetry && (failure === null || failure.retryable) ? (
         <button
           type="button"
           onClick={onRetry}
-          className="self-start rounded-lg border border-gray-200 px-2 py-0.5 text-[11px] font-semibold text-gray-600 hover:border-primary/40 hover:text-primary print:hidden"
+          className="self-start rounded-lg border border-gray-200 px-2 py-0.5 text-[11px] font-semibold text-gray-600 hover:border-primary/40 hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 print:hidden"
         >
           Retry
         </button>

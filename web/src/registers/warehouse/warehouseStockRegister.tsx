@@ -253,11 +253,9 @@ export const warehouseStockConfig = defineRegister<WarehouseStockRow, WarehouseS
   ],
   filterPanel: {
     description: 'Every figure below answers exactly these filters',
+    // Six in the grid, item group and category behind "More filters": the panel's own
+    // 2xl track count fits them in one row, so it needs no override here.
     primaryKeys: ['to', 'item_id', 'warehouse_id', 'method', 'health', 'nonzero'],
-    // Seven controls plus the actions: four columns strands one of them on a row of its
-    // own, so the widest screens get a track per control instead.
-    gridClassName:
-      'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-8',
   },
 
   columns,
@@ -265,14 +263,20 @@ export const warehouseStockConfig = defineRegister<WarehouseStockRow, WarehouseS
   drillTo: (r) => ledgerLink(r.item_id, r.warehouse_id),
   rowActions: (r) => <WarehouseStockRowActions row={r} />,
 
-  viewPresets: [
-    // No column list: "Default" IS the register's shipped set, and repeating it here
-    // would be a second copy to keep in step every time a column is added.
-    { id: 'default', label: 'Default', description: 'Quantity, availability and value' },
+  /**
+   * The same register read five ways.
+   *
+   * Columns only — no view here narrows the rows, so every one of them answers the
+   * question the filters ask and the totals under them are the same totals. The first
+   * is the default and names no columns, which is what makes it the reader's own
+   * Configure Columns choice rather than a fixed set competing with it.
+   */
+  views: [
+    { key: 'default', label: 'Default', hint: 'Closing position per item and warehouse, as at the date above' },
     {
-      id: 'health',
+      key: 'health',
       label: 'Stock health',
-      description: 'What is short, and what it was measured against',
+      hint: 'What is short, and the level it was measured against',
       columns: [
         'item_name',
         'item_sku',
@@ -283,11 +287,12 @@ export const warehouseStockConfig = defineRegister<WarehouseStockRow, WarehouseS
         'min_stock_qty',
         'stock_health',
       ],
+      defaultSort: 'stock_health',
     },
     {
-      id: 'warehouse',
+      key: 'warehouse',
       label: 'Warehouse analysis',
-      description: 'How the year moved this stock, warehouse by warehouse',
+      hint: 'How the financial year has moved this stock, warehouse by warehouse',
       columns: [
         'item_name',
         'warehouse_name',
@@ -299,11 +304,12 @@ export const warehouseStockConfig = defineRegister<WarehouseStockRow, WarehouseS
         'closing_qty',
         'closing_value',
       ],
+      defaultSort: 'warehouse_name',
     },
     {
-      id: 'valuation',
+      key: 'valuation',
       label: 'Valuation',
-      description: 'Cost, value and the method each item was valued at',
+      hint: 'Cost, value and the method each item was actually valued at',
       columns: [
         'item_name',
         'item_sku',
@@ -314,11 +320,13 @@ export const warehouseStockConfig = defineRegister<WarehouseStockRow, WarehouseS
         'closing_value',
         'valuation_method_applied',
       ],
+      defaultSort: 'closing_value',
+      defaultOrder: 'desc',
     },
     {
-      id: 'availability',
+      key: 'availability',
       label: 'Availability',
-      description: 'On hand, committed and free to promise',
+      hint: 'On hand, committed to open documents, and free to promise',
       columns: [
         'item_name',
         'item_sku',

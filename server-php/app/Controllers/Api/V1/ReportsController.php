@@ -137,11 +137,22 @@ class ReportsController extends BaseController
         }, 100, 1000, 'item_name');
     }
 
-    /** GET reports/stock-ageing — remaining cost layers in 0-30 / 31-60 / 61-90 / 91-180 / 180+ day buckets. */
+    /**
+     * GET reports/stock-ageing — remaining cost layers in 0-30 / 31-60 / 61-90 / 91-180 / 180+ day buckets.
+     *
+     * `age_bucket` and `health_status` narrow the rows to one ageing band or one health
+     * classification, which is what the ageing chart and the health cards drill into.
+     * Both are validated against the service's own constant lists rather than reaching
+     * the query as free text.
+     */
     public function stockAgeing()
     {
         return $this->report('stock_ageing', function (array $ctx, array $p) {
-            $f = $this->commonFilters($p) + $this->dates(['as_of']) + ['by_warehouse' => $this->flag('by_warehouse', false)];
+            $f = $this->commonFilters($p) + $this->dates(['as_of']) + [
+                'by_warehouse'  => $this->flag('by_warehouse', false),
+                'age_bucket'    => $this->oneOf('age_bucket', InventoryReportService::AGE_BUCKETS),
+                'health_status' => $this->oneOf('health_status', InventoryReportService::HEALTH_STATUSES),
+            ];
 
             return $this->reports->stockAgeing((int) $ctx['cmp_id'], (int) $ctx['fy_id'], (int) $ctx['bo_id'], $f, $p['limit'], $p['offset']);
         }, 100, 1000, 'item_name');
@@ -234,6 +245,7 @@ class ReportsController extends BaseController
             'warehouse_id' => $this->int('warehouse_id'),
             'item_grp_id'  => $this->int('item_grp_id'),
             'stock_cat_id' => $this->int('stock_cat_id'),
+            'brand_id'     => $this->int('brand_id'),
             'sort'         => $p['sort'],
             'order'        => $p['order'],
         ];
@@ -247,6 +259,14 @@ class ReportsController extends BaseController
         }
 
         return (int) $v;
+    }
+
+    /** A query parameter that must be one of a known set, or null. */
+    private function oneOf(string $key, array $allowed): ?string
+    {
+        $v = strtolower(trim((string) ($this->request->getGet($key) ?? '')));
+
+        return $v !== '' && in_array($v, $allowed, true) ? $v : null;
     }
 
     private function flag(string $key, bool $default): bool

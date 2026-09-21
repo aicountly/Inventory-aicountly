@@ -31,6 +31,16 @@ abstract class MasterController extends BaseController
     protected string $entityType = 'master';
     /** Master kind Books mirrors (uom | warehouse): every write enqueues an upsert event in the same transaction. null = not mirrored. */
     protected ?string $mirrorKind = null;
+    /**
+     * Sort keys accepted beyond the name, the pk, the timestamps and $columns.
+     *
+     * For a key that is NOT a column of the table — a derived figure such as a brand's item count.
+     * Naming it here only makes it acceptable; applySort() below decides what it orders by, so a
+     * subclass cannot let a client order by an arbitrary string.
+     *
+     * @var list<string>
+     */
+    protected array $extraSortColumns = [];
 
     public function index()
     {
@@ -60,8 +70,10 @@ abstract class MasterController extends BaseController
         }
         $this->applyIndexFilters($b);
         $total = (clone $b)->countAllResults(false);
-        $sort = in_array($p['sort'], array_merge([$this->nameColumn, $this->pk, 'created_at', 'updated_at'], $this->columns), true) ? $p['sort'] : $this->nameColumn;
-        $rows = $b->orderBy($sort, $p['order'])->limit($p['limit'], $p['offset'])->get()->getResultArray();
+        $sortable = array_merge([$this->nameColumn, $this->pk, 'created_at', 'updated_at'], $this->columns, $this->extraSortColumns);
+        $sort = in_array($p['sort'], $sortable, true) ? $p['sort'] : $this->nameColumn;
+        $this->applySort($b, $sort, $p['order']);
+        $rows = $b->limit($p['limit'], $p['offset'])->get()->getResultArray();
 
         return $this->respondList($this->decorateRows($cmpId, array_map([$this, 'present'], $rows)), $total, $p['limit'], $p['offset']);
     }
@@ -215,6 +227,19 @@ abstract class MasterController extends BaseController
 
     protected function applyIndexFilters($builder): void
     {
+    }
+
+    /**
+     * Apply the (already whitelisted) sort to the list builder.
+     *
+     * The default is the plain ORDER BY every master has always used. A subclass overrides it only
+     * for a key it declared in $extraSortColumns — a derived figure that has to be computed before
+     * it can be ordered by. The count above is taken before this runs, so a subquery added here
+     * cannot change the total.
+     */
+    protected function applySort($builder, string $sort, string $order): void
+    {
+        $builder->orderBy($sort, $order);
     }
 
     /** @return array<string, mixed>|null */
