@@ -37,6 +37,9 @@ import { WarehouseSelect } from './WarehouseSelect'
 import { canCreate, permissionKeysFor } from './actions'
 import { countDifference, draftTotals, isBlankLine, lineAmount, lineBaseQty, newHeader, newLine, toPayload, validateDraft } from './formModel'
 import type { HeaderDraft, LineDraft, LineOrigin } from './formModel'
+import { BooksHandoffNotice } from './BooksHandoffNotice'
+import { parseBooksHandoff } from './booksHandoff'
+import type { BooksHandoffBlock } from './booksHandoff'
 import { offendingDraftKeys, parseNegativeStock } from './negativeStock'
 import type { NegativeStockDetail } from './negativeStock'
 import { PackingFormView } from './packing/PackingFormView'
@@ -101,6 +104,7 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
   const [errors, setErrors] = useState<string[]>([])
   const [apiError, setApiError] = useState<string | null>(null)
   const [negative, setNegative] = useState<NegativeStockDetail[] | null>(null)
+  const [booksBlock, setBooksBlock] = useState<BooksHandoffBlock | null>(null)
   const [override, setOverride] = useState(false)
   const [warnings, setWarnings] = useState<PostingWarning[]>([])
   const [busy, setBusy] = useState<'save' | 'post' | null>(null)
@@ -264,6 +268,7 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
     setErrors([])
     setApiError(null)
     setWarnings([])
+    setBooksBlock(null)
     if (!post) setNegative(null)
     const errs = validateDraft(header, lines, spec)
     if (errs.length) {
@@ -290,6 +295,16 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
       toast.success(post ? 'Document posted successfully.' : hadExisting ? 'Changes saved.' : 'Draft saved.')
       onSaved(doc, post)
     } catch (err) {
+      // The books would not take the accounting entry, so the post was refused and no stock
+      // moved. The draft is saved; the banner says why and what to do about it.
+      const books = parseBooksHandoff(err)
+      if (books) {
+        setBooksBlock(books)
+        // The draft was saved AND posted; the post was then undone. Calling it "still a draft"
+        // would send the user back to a Post button that refuses a reversed document.
+        setApiError(id && !books.reversed ? `Draft #${id} is saved but was not posted.` : null)
+        return
+      }
       const neg = parseNegativeStock(err)
       if (neg) {
         setNegative(neg)
@@ -599,6 +614,7 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
           </ul>
         </Notice>
       ) : null}
+      {booksBlock ? <BooksHandoffNotice block={booksBlock} /> : null}
       {apiError && !negative ? <Notice kind="error">{apiError}</Notice> : null}
       {negative ? (
         <Notice kind="error" title="Insufficient stock">

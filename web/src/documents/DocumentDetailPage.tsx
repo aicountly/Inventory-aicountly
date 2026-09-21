@@ -13,6 +13,9 @@ import { packingApi } from '../services/stockApi'
 import { formatDate, formatDateTime, formatMoney, formatQty } from '../utils/format'
 import { STATUS_LABELS, allowedActions, canRecordChallanValue, packingActions, statusTone } from './actions'
 import type { DocumentAction, PackingAction } from './actions'
+import { BooksHandoffNotice } from './BooksHandoffNotice'
+import { parseBooksHandoff } from './booksHandoff'
+import type { BooksHandoffBlock } from './booksHandoff'
 import { offendingLineIds, parseNegativeStock } from './negativeStock'
 import type { NegativeStockDetail } from './negativeStock'
 import { STOCK_EFFECT_LABELS, labelForCode, specForCode } from './registry'
@@ -57,6 +60,7 @@ export function DocumentDetailPage() {
   const [flash, setFlash] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [negative, setNegative] = useState<NegativeStockDetail[] | null>(null)
+  const [booksBlock, setBooksBlock] = useState<BooksHandoffBlock | null>(null)
   const [override, setOverride] = useState(false)
   const [warnings, setWarnings] = useState<PostingWarning[]>([])
   const [challanValueOpen, setChallanValueOpen] = useState(false)
@@ -82,6 +86,7 @@ export function DocumentDetailPage() {
   const run = async (label: string, fn: () => Promise<InventoryDocument>, success: string) => {
     setBusy(label)
     setActionError(null)
+    setBooksBlock(null)
     setFlash(null)
     try {
       const result = await fn()
@@ -91,9 +96,20 @@ export function DocumentDetailPage() {
       setNotes('')
       setForce(false)
       setNegative(null)
+      setBooksBlock(null)
       setOverride(false)
       refresh()
     } catch (err) {
+      // The books would not take the accounting entry, so nothing posted. Shown as its own
+      // banner: it is not the document's fault and there is nothing on it to correct.
+      const books = parseBooksHandoff(err)
+      if (books) {
+        setBooksBlock(books)
+        setDialog(null)
+        // The document was reversed (or never moved), so what is on screen is stale either way.
+        refresh()
+        return
+      }
       const neg = parseNegativeStock(err)
       if (neg) {
         setNegative(neg)
@@ -249,6 +265,7 @@ export function DocumentDetailPage() {
       />
 
       {flash ? <Notice kind="success">{flash}</Notice> : null}
+      {booksBlock ? <BooksHandoffNotice block={booksBlock} /> : null}
       {actionError && !negative ? <Notice kind="error">{actionError}</Notice> : null}
       {negative ? (
         <Notice kind="error" title="Insufficient stock — not posted">

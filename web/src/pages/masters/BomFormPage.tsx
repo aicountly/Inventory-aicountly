@@ -5,6 +5,7 @@ import { useCompany } from '../../company/CompanyContext'
 import { ConfirmDialog } from '../../components/ConfirmDialog'
 import { FormField } from '../../components/FormField'
 import { ItemPicker } from '../../components/ItemPicker'
+import { ListSheetActions } from '../../components/ListSheetActions'
 import { Notice } from '../../components/Notice'
 import { PageHeader } from '../../components/PageHeader'
 import { useDebounce } from '../../hooks/useDebounce'
@@ -33,6 +34,8 @@ import {
   validateBom,
 } from './bomForm'
 import type { BomHeaderDraft, BomLineDraft, BomValidation } from './bomForm'
+import { BOM_SHEET_COLUMNS, buildBomSheet } from './bomSheet'
+import type { BomSheetRow } from './bomSheet'
 
 const LIST = '/masters/bill-of-materials'
 const crumbs = [
@@ -128,6 +131,15 @@ export function BomFormPage() {
   const validation = useMemo<BomValidation>(() => validateBom(header, lines), [header, lines])
   const unitOptions = options?.units ?? []
   const readOnly = !canWrite
+
+  /*
+   * The printable sheet is built from `existing.data` — the bill as the server
+   * returned it — and never from the draft above. A sheet assembled from
+   * unsaved edits would carry this company's letterhead over quantities the
+   * database does not hold; the footer says which one the reader is holding.
+   * A bill that has not been saved yet has nothing to print, hence the null.
+   */
+  const sheet = useMemo(() => (existing.data ? buildBomSheet(existing.data) : null), [existing.data])
 
   /* ---- live costing ----------------------------------------------------- */
   /*
@@ -276,6 +288,20 @@ export function BomFormPage() {
         subtitle={bomId && existing.data ? `#${existing.data.bom_id} · ${existing.data.line_count} line${existing.data.line_count === 1 ? '' : 's'}` : 'Components consumed and by-products produced per yield of the finished item.'}
         actions={
           <>
+            {sheet ? (
+              <ListSheetActions<BomSheetRow>
+                columns={BOM_SHEET_COLUMNS}
+                rows={sheet.rows}
+                filenameBase={sheet.filenameBase}
+                title={sheet.title}
+                description={sheet.description}
+                metaLines={sheet.metaLines}
+                summaryCards={sheet.summaryCards}
+                footerNotes={sheet.footerNotes}
+                orientation="portrait"
+                disabled={existing.loading}
+              />
+            ) : null}
             {bomId && canDelete ? (
               <button type="button" className="btn btn-danger" onClick={() => setConfirmDelete(true)} disabled={saving}>
                 Delete
