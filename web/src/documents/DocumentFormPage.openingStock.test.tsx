@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { DocumentFormPage } from './DocumentFormPage'
+import { ToastProvider } from '../ui/ToastContext'
 
 /*
  * A render-level check that the revamped Opening Stock screen actually mounts
@@ -37,13 +38,6 @@ vi.mock('../access/AccessContext', () => ({
     profile: { profile_name: 'Owner', template_key: 'owner' },
   }),
   useCan: () => true,
-}))
-
-// The form tree toasts on save / import. App.tsx mounts ToastProvider around
-// every screen; a bare render() does not, and `useToast` throws without it —
-// mocked here the way DocumentForm.test.tsx and DisassemblyPage.test.tsx do.
-vi.mock('../ui/ToastContext', () => ({
-  useToast: () => ({ notify: vi.fn(), success: vi.fn(), error: vi.fn(), info: vi.fn() }),
 }))
 
 vi.mock('./useReferenceData', () => ({
@@ -84,11 +78,13 @@ vi.mock('../services/stockViewsApi', () => ({
 
 function renderOpeningStock() {
   return render(
-    <MemoryRouter initialEntries={['/documents/new/opening_stock']}>
-      <Routes>
-        <Route path="/documents/new/:slug" element={<DocumentFormPage />} />
-      </Routes>
-    </MemoryRouter>,
+    <ToastProvider>
+      <MemoryRouter initialEntries={['/documents/new/opening_stock']}>
+        <Routes>
+          <Route path="/documents/new/:slug" element={<DocumentFormPage />} />
+        </Routes>
+      </MemoryRouter>
+    </ToastProvider>,
   )
 }
 

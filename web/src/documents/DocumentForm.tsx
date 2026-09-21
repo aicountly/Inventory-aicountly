@@ -21,6 +21,8 @@ import { InventoryAssistantPanel } from './InventoryAssistantPanel'
 import { LineEditor, unitOptionsFrom } from './LineEditor'
 import { AddMultipleItemsModal } from './AddMultipleItemsModal'
 import { ImportLinesModal } from './ImportLinesModal'
+import { WriteOffAssistPanel } from './WriteOffAssistPanel'
+import type { StagedAttachment } from './AttachmentUploader'
 import { computeCostConfidence } from './lineFormInsights'
 import { CopyStockModal } from './openingStock/CopyStockModal'
 import { OpeningStockHeaderExtras } from './openingStock/OpeningStockHeaderExtras'
@@ -104,6 +106,7 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
   const [busy, setBusy] = useState<'save' | 'post' | null>(null)
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [pendingNav, setPendingNav] = useState<(() => void) | null>(null)
+  const [attachments, setAttachments] = useState<StagedAttachment[]>([])
   const linesWrapRef = useRef<HTMLDivElement>(null)
 
   const canOverride = can('stock.negative_override')
@@ -446,6 +449,15 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
         </FormGrid>
       </FormSectionCard>
 
+      {spec.code === 'WRITE_OFF' ? (
+        <WriteOffAssistPanel
+          warehouseId={header.default_warehouse_id}
+          attachments={attachments}
+          onAttachmentsChange={setAttachments}
+          onApplyReasonSuggestion={(s) => patchHeader({ reason_code: s.reasonCode, ...(s.remark ? { movement_reason: s.remark } : {}) })}
+          disabled={disabled}
+        />
+      ) : null}
       {spec.formKind === 'job_work_in' ? (
         <SettlementsPanel
           spec={spec}
@@ -471,6 +483,11 @@ export function DocumentForm({ spec, documentId, initial, onSaved }: DocumentFor
         />
       ) : null}
       {spec.formKind === 'physical_count' ? <PhysicalCountPanel spec={spec} warehouses={warehouses} defaultWarehouseId={defaultWarehouseId} disabled={disabled} onLoad={(generated) => replaceOrigin(['count', 'manual'], generated, false)} /> : null}
+      {/* The charges block, embedded in the generic form. The ROUTED landed cost screen is
+          documents/landedCost/LandedCostAllocationPage — DocumentFormPage sends the type there,
+          because a five-step allocation over several receipts needs its own header, sidebar and
+          action bar. This panel stays as the single-receipt editor for any caller that composes
+          DocumentForm directly, and it is the one the policy tests exercise. */}
       {spec.formKind === 'landed_cost' ? (
         <LandedCostPanel
           initial={header.metadata}

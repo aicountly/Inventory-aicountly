@@ -67,7 +67,6 @@ const { MasterPage } = await import('./MasterPage')
 const { itemsConfig } = await import('../pages/items/ItemsListPage')
 const { warehousesConfig, batchesConfig } = await import('./configs')
 const { serialsConfig } = await import('../pages/masters/SerialsPage')
-const { bomConfig } = await import('../pages/masters/BomListPage')
 
 /** The config as declared, with its API swapped for one row of known data. */
 function withRow<T>(config: MasterConfig<T>, row: T): MasterConfig<T> {
@@ -177,20 +176,6 @@ const SERIAL = {
   ...AUDIT,
 }
 
-const BOM = {
-  bom_id: 12,
-  bom_name: 'Frame assembly',
-  finished_item_id: 900,
-  yield_qty: 10,
-  yield_unit_id: 1,
-  is_active: 1,
-  finished_item_name: 'Frame',
-  finished_item_sku: 'FR-1',
-  yield_unit_symbol: 'Nos',
-  line_count: 4,
-  ...AUDIT,
-}
-
 /**
  * The cell as the TABLE renders it.
  *
@@ -214,7 +199,6 @@ describe('every real master exports every column it shows', () => {
     ['warehouses', warehousesConfig as unknown as MasterConfig<never>, WAREHOUSE, 'Main store'],
     ['batches', batchesConfig as unknown as MasterConfig<never>, BATCH, 'B-0091'],
     ['serials', serialsConfig as unknown as MasterConfig<never>, SERIAL, 'SN-0001'],
-    ['bill of materials', bomConfig as unknown as MasterConfig<never>, BOM, 'Frame assembly'],
   ]
 
   it.each(cases)('%s: no column comes out blank on the sheet', async (_name, config, row, first) => {

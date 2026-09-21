@@ -98,10 +98,25 @@ export function TablePagination({
             <span className="text-gray-500">Rows per page</span>
             <select
               value={pageSize === 'all' ? 'all' : String(pageSize)}
+              /*
+               * The size change ALONE.
+               *
+               * It used to call `onPageChange(1)` straight after, which is
+               * right in intent — a reader who asks for 100 rows means the
+               * first 100 — and destructive in practice. On a URL-backed list
+               * those are two navigations, and react-router builds the second
+               * from the query string of the render that is already stale, so
+               * the second silently discarded the new size and the select
+               * snapped back. Every server-paginated screen shared it.
+               *
+               * Resetting the page belongs to whoever owns the state, in the
+               * same update that sets the size: `useListParams.setLimit`,
+               * `useClientTablePagination.setPageSize` and
+               * `WarehouseGroupsPage.writeParams` all do it already.
+               */
               onChange={(e) => {
                 const v = e.target.value
                 onPageSizeChange(v === 'all' ? 'all' : Number(v))
-                onPageChange?.(1)
               }}
               className="h-7 rounded-lg border border-gray-200 bg-white px-2 text-xs text-gray-700 transition-colors focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/30"
               aria-label="Rows per page"

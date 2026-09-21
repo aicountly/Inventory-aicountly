@@ -29,6 +29,11 @@ interface WarehouseSelectProps {
    */
   variant?: 'legacy' | 'field'
   size?: 'sm' | 'md'
+  /**
+   * Accessible name, for a grid row where the visible column header is not tied to the control.
+   * A table of five identical "Select warehouse…" dropdowns is five unnamed controls otherwise.
+   */
+  'aria-label'?: string
 }
 
 export function WarehouseSelect({
@@ -43,6 +48,7 @@ export function WarehouseSelect({
   invalid,
   variant = 'legacy',
   size = 'sm',
+  'aria-label': ariaLabel,
 }: WarehouseSelectProps) {
   const known = value !== null && warehouses.some((w) => w.warehouse_id === value)
   const options = (
@@ -61,7 +67,7 @@ export function WarehouseSelect({
 
   if (variant === 'field') {
     return (
-      <Select ref={ref} id={id} className={className} size={size} value={value ?? ''} disabled={disabled} invalid={invalid} onChange={(e) => handleChange(e.target.value)}>
+      <Select ref={ref} id={id} className={className} size={size} value={value ?? ''} disabled={disabled} invalid={invalid} aria-label={ariaLabel} onChange={(e) => handleChange(e.target.value)}>
         {options}
       </Select>
     )
@@ -75,6 +81,7 @@ export function WarehouseSelect({
       value={value ?? ''}
       disabled={disabled}
       aria-invalid={invalid || undefined}
+      aria-label={ariaLabel}
       onChange={(e) => handleChange(e.target.value)}
     >
       {options}

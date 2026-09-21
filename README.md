@@ -44,8 +44,7 @@ Manage through the API's read-only relay (`/api/manage/...`).
   alternate units and conversions, tracking flags, stock levels and opening
   stock per warehouse (`/v1/items/{id}/openings`); soft delete.
 - **Masters** — item groups (tree), stock categories, brands, units of measure,
-  warehouse groups, warehouses, locations, bills of materials
-  (components, by-products, scrap) and serial numbers (single and bulk
+  warehouse groups, warehouses, locations and serial numbers (single and bulk
   registration). **Brands** has its own workspace: company-wide figures
   from `/v1/brands/metrics`, search across name / alias / code / description,
   status, period and item-linkage filters, item counts that open the filtered
@@ -62,6 +61,14 @@ Manage through the API's read-only relay (`/api/manage/...`).
   category, lot and on-hand — all in the URL — a detail drawer with
   per-warehouse balances and recent movements, CSV import, Code 39 labels, and a
   bulk status change (`POST /v1/batches/bulk-update`).
+  **Bills of materials** is a workspace over `/v1/bill-of-materials`:
+  company-wide counters (`/summary`), component previews carried in the list
+  itself rather than a request per row, filters on item group, component count,
+  scrap, dates and actor, a detail drawer, a material-cost breakdown valued from
+  `inv_wac_state` (falling back to the item's standard cost, and saying "Cost
+  unavailable" rather than ₹0 when neither exists), a two-bill comparison, a CSV
+  import that refuses to invent item codes, and an editor showing gross quantity
+  and live costing per component line.
 
 - **Documents** — list, detail (lines with valuation, accounting effects,
   approvals, print snapshot) and create / edit forms for every native type;

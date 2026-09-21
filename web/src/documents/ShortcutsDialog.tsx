@@ -1,26 +1,25 @@
 import { Modal } from '../components/Modal'
 import { comboLabel } from '../keyboard/platform'
 
-const SHORTCUTS: { action: string; combo: string; linesOnly?: boolean }[] = [
-  { action: 'Add line', combo: 'alt+a' },
+const BASE_SHORTCUTS: { action: string; combo: string }[] = [
+  { action: 'Add line', combo: 'ctrl+enter' },
   { action: 'Save draft', combo: 'ctrl+s' },
-  { action: 'Save & post', combo: 'ctrl+enter' },
-  // DocumentForm binds `/` only on a lines form (`if (!isLinesForm …) return`),
-  // so on any other type this row would name a key that does nothing.
-  { action: 'Search items', combo: '/', linesOnly: true },
+  { action: 'Save & post', combo: 'alt+p' },
   { action: 'Close dialog', combo: 'escape' },
 ]
+
+const SEARCH_ITEMS_SHORTCUT = { action: 'Search items', combo: '/' }
 
 export interface ShortcutsDialogProps {
   open: boolean
   onClose: () => void
-  /** Lists the item-search key. False on a form that does not bind it. */
+  /** Only the "lines"-form types wire up the "/" jump-to-search binding. */
   showSearchItems?: boolean
 }
 
 /** Read-only reference for the document form's keyboard bindings, opened from the "Shortcuts" button. */
-export function ShortcutsDialog({ open, onClose, showSearchItems = true }: ShortcutsDialogProps) {
-  const shortcuts = SHORTCUTS.filter((s) => showSearchItems || !s.linesOnly)
+export function ShortcutsDialog({ open, onClose, showSearchItems = false }: ShortcutsDialogProps) {
+  const shortcuts = showSearchItems ? [...BASE_SHORTCUTS.slice(0, 3), SEARCH_ITEMS_SHORTCUT, BASE_SHORTCUTS[3]] : BASE_SHORTCUTS
   return (
     <Modal open={open} title="Keyboard shortcuts" onClose={onClose} size="sm">
       <ul className="divide-y divide-gray-100">

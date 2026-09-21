@@ -13,12 +13,16 @@ import { DocumentForm } from './DocumentForm'
 import { BatchAdjustmentPage } from './batch/BatchAdjustmentPage'
 import { DeliveryChallanForm } from './challan/DeliveryChallanForm'
 import { ConsumptionForm } from './consumption/ConsumptionForm'
+import { AssemblyPage } from './assembly/AssemblyPage'
 import { DisassemblyPage } from './disassembly/DisassemblyPage'
 import { InwardChallanForm } from './grn/InwardChallanForm'
 import { JobWorkPage } from './jobwork/JobWorkPage'
+import { LandedCostAllocationPage } from './landedCost/LandedCostAllocationPage'
 import { MaterialIssuePage } from './materialIssue/MaterialIssuePage'
 import { ProductionWorkspace } from './production/ProductionWorkspace'
 import { MaterialReceiptForm } from './receipt/MaterialReceiptForm'
+import { SerialAdjustmentPage } from './serialAdjustment/SerialAdjustmentPage'
+import { draftFromDocument as serialDraftFromDocument } from './serialAdjustment/model'
 import { PhysicalStockCountPage } from './physicalCount/PhysicalStockCountPage'
 import { StockJournalPage } from './stockJournal/StockJournalPage'
 import { StockTransferWorkspace } from './transfer/StockTransferWorkspace'
@@ -177,6 +181,19 @@ export function DocumentFormPage() {
     if (spec.formKind === 'revaluation') {
       return <StockRevaluationPage key={doc.document_id} spec={spec} documentId={doc.document_id} initial={revaluationDraftFromDocument(doc)} existing={doc} />
     }
+    // So does a serial adjustment, which expands the stored lines back into one row per serial.
+    if (spec.code === 'SERIAL_ADJUSTMENT') {
+      return (
+        <SerialAdjustmentPage
+          key={doc.document_id}
+          documentId={doc.document_id}
+          initial={serialDraftFromDocument(doc)}
+          status={doc.status}
+          documentNo={doc.document_no}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
     const initial = draftFromDocument(doc, spec)
     const reapproval = doc.status === 'APPROVED' || doc.status === 'PENDING_APPROVAL'
       ? <Notice kind="info">Saving changes returns the document to draft; it will need approval again.</Notice>
@@ -257,10 +274,28 @@ export function DocumentFormPage() {
         />
       )
     }
-    // Disassembly brings its own page shell — breadcrumbs, context panel, sticky footer — so it
-    // replaces the wrapper rather than sitting inside it, like every screen in this list.
+    // Assembly and disassembly each bring their own page shell — breadcrumbs, context panel,
+    // sticky footer — so they replace the wrapper rather than sitting inside it, like every
+    // screen in this list.
+    if (spec.formKind === 'assembly') {
+      return (
+        <AssemblyPage
+          key={doc.document_id}
+          spec={spec}
+          documentId={doc.document_id}
+          initial={initial}
+          statusBadge={<Badge tone={STATUS_BADGE_TONE[statusTone(doc.status)]}>{STATUS_LABELS[doc.status as DocumentStatus] ?? doc.status}</Badge>}
+          onSaved={(saved) => navigate(`/documents/${saved.document_id}`)}
+        />
+      )
+    }
     if (spec.formKind === 'disassembly') {
       return <DisassemblyPage key={doc.document_id} spec={spec} documentId={doc.document_id} initial={initial} document={doc} />
+    }
+    // A landed cost allocation is another: five steps, several receipts, a per-line valuation
+    // preview and a readiness gate, with its own header and action bar.
+    if (spec.formKind === 'landed_cost') {
+      return <LandedCostAllocationPage key={doc.document_id} spec={spec} documentId={doc.document_id} initial={initial} />
     }
     if (spec.code === 'MATERIAL_ISSUE') {
       return (
@@ -391,7 +426,11 @@ export function DocumentFormPage() {
   if (s.code === 'CONSUMPTION') {
     return <ConsumptionForm key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
   }
+  if (s.formKind === 'assembly') {
+    return <AssemblyPage key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
   if (s.formKind === 'disassembly') return <DisassemblyPage spec={s} />
+  if (s.formKind === 'landed_cost') return <LandedCostAllocationPage key={s.code} spec={s} />
   if (s.code === 'MATERIAL_ISSUE') {
     return <MaterialIssuePage key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
   }
@@ -409,6 +448,14 @@ export function DocumentFormPage() {
   if (isReceipt) return <MaterialReceiptForm key={s.code} spec={s} />
   if (s.formKind === 'physical_count') {
     return <PhysicalStockCountPage key={s.code} spec={s} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
+  }
+  /*
+   * A serial adjustment is entered serial-first: the operator has the number on the label and is
+   * asking Inventory which item, warehouse and batch it belongs to, which is the opposite of the
+   * item-first order the generic editor imposes. Same route, spec, payload and lifecycle.
+   */
+  if (s.code === 'SERIAL_ADJUSTMENT') {
+    return <SerialAdjustmentPage key={s.code} onSaved={(saved) => navigate(`/documents/${saved.document_id}`)} />
   }
   return (
     <PageShell paddingBottom>
