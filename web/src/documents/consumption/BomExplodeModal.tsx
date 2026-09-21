@@ -50,7 +50,8 @@ function toDrafts(lines: CreateDocumentLine[], bom: BomHeader, spec: DocumentTyp
  * only the OUT (component) lines — the finished-good and by-product lines a Production document
  * would receive have no place on a document that only ever consumes stock. Reuses the same
  * `POST /v1/bill-of-materials/{id}/explode` (falling back to the client mirror on a 404) that
- * ProductionPanel uses, so the arithmetic is identical; nothing here duplicates the BOM master.
+ * the production workspace uses, so the arithmetic is identical; nothing here duplicates the BOM
+ * master.
  */
 export function BomExplodeModal({ open, onClose, spec, warehouses, defaultWarehouseId, onInsert }: BomExplodeModalProps) {
   const [query, setQuery] = useState('')
@@ -69,7 +70,7 @@ export function BomExplodeModal({ open, onClose, spec, warehouses, defaultWareho
     }
   }, [open, defaultWarehouseId])
 
-  const boms = useQuery((signal) => lookupApi.boms(query, signal), [query], { enabled: open })
+  const boms = useQuery((signal) => lookupApi.boms(query, { signal }), [query], { enabled: open })
   const bom = useQuery((signal) => (bomId ? lookupApi.bom(bomId, signal) : Promise.resolve(null)), [bomId], { enabled: open && bomId !== null })
 
   useEffect(() => {
