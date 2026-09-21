@@ -92,12 +92,23 @@ describe('utilisationLevel', () => {
 describe('stockByWarehouse', () => {
   const summary: WarehouseStockSummary = {
     rows: 3,
+    items: 12,
+    warehouses: 1,
+    active_warehouses: 2,
     closing_qty: 16240,
     closing_value: 1248000,
+    reserved_qty: null,
+    available_qty: null,
     by_warehouse: [
-      { warehouse_id: 1, warehouse_name: 'Main', closing_qty: 16240, closing_value: 1248000 },
-      { warehouse_id: null, warehouse_name: null, closing_qty: 5, closing_value: 50 },
+      { warehouse_id: 1, warehouse_name: 'Main', closing_qty: 16240, closing_value: 1248000, items: 42 },
+      { warehouse_id: null, warehouse_name: null, closing_qty: 5, closing_value: 50, items: 1 },
     ],
+    health: { out: 0, negative: 0, reorder: 0, low: 0, overstocked: 0, healthy: 12 },
+    health_items: { out: 0, negative: 0, reorder: 0, low: 0, overstocked: 0, healthy: 12 },
+    health_filter: null,
+    method: 'FIFO',
+    live_buckets: true,
+    currency: 'INR',
     to: '2026-09-18',
   }
 

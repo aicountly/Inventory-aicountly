@@ -33,6 +33,16 @@ export interface RegisterFilterPanelProps {
   searchInputRef?: RefObject<HTMLInputElement | null>
   /** Company · financial year · branch, printed above the grid. */
   scope?: ReactNode
+  /**
+   * A control that belongs in the field grid but is not a filter — "Group by".
+   *
+   * Grouping is a view of the rows rather than part of the question the server
+   * was asked, so it is not a `ReportFilter` and never reaches the URL. It is
+   * still a labelled dropdown a reader sets while composing a view, and
+   * stranding it on a line of its own above the table left the panel looking
+   * like it had lost a cell.
+   */
+  trailing?: ReactNode
 }
 
 /**
@@ -70,6 +80,7 @@ export function RegisterFilterPanel({
   ctx,
   searchInputRef,
   scope,
+  trailing,
 }: RegisterFilterPanelProps) {
   const [moreOpen, setMoreOpen] = useState(false)
   const moreRef = useRef<HTMLDivElement>(null)
@@ -89,6 +100,20 @@ export function RegisterFilterPanel({
     () => (primaryKeys ? visible.filter((f) => !primaryKeys.includes(f.key)) : []),
     [visible, primaryKeys],
   )
+
+  /*
+   * A checkbox is not a field, and putting it in a field cell says it is.
+   *
+   * The grid sizes every cell to hold a label above a 39px control. A toggle
+   * needs neither, so it sat in a quarter of the panel's width with a label
+   * floating at the height of its neighbours' inputs — and, worse, pushed the
+   * next real filter onto a second row, which is how "Group by" ended up
+   * homeless above the table. Toggles go on the panel's own bottom line
+   * beside Clear all and Apply filters, where they read as what they are:
+   * switches over the result, not more things to fill in.
+   */
+  const gridFilters = useMemo(() => primary.filter((f) => f.kind !== 'toggle'), [primary])
+  const toggleFilters = useMemo(() => primary.filter((f) => f.kind === 'toggle'), [primary])
   const overflowActive = overflow.filter((f) =>
     f.kind === 'toggle' ? values[f.key] === '1' : Boolean(values[f.key]),
   ).length
@@ -96,9 +121,26 @@ export function RegisterFilterPanel({
   // The period the chips drive: the register's own declared date range.
   const range = useMemo(() => visible.find((f) => f.kind === 'date_range'), [visible])
   const rangeToKey = range?.toKey ?? 'to'
-  const activePreset = range
-    ? matchDateRangePreset(values[range.key] ?? '', values[rangeToKey] ?? '', ctx)
-    : null
+  const from = range ? (values[range.key] ?? '') : ''
+  const to = range ? (values[rangeToKey] ?? '') : ''
+  const activePreset = range ? matchDateRangePreset(from, to, ctx) : null
+
+  /**
+   * Whether a chip IS the period on screen.
+   *
+   * Compared by the dates it resolves to, not by `matchDateRangePreset`'s answer: several
+   * presets legitimately name the same range — inside an April–March financial year, "This
+   * FY-to-date" and "This half year-to-date" are both 1 April to today until October — and
+   * the matcher can only return one of them. Naming the first meant the chip a reader had
+   * just pressed, and the one describing the register's own default, both sat unlit.
+   */
+  const chipIsActive = (id: string) => {
+    if (!range) return false
+    if (id === activePreset) return true
+    if (id === ALL_DATES_PRESET_ID) return from === '' && to === ''
+    const resolved = getDateRangeForPreset(id, ctx)
+    return resolved !== null && resolved.from === from && resolved.to === to
+  }
 
   const chips = useMemo(() => {
     if (!range || !spec.quickRanges?.length) return []
@@ -200,12 +242,15 @@ export function RegisterFilterPanel({
 
         <div className="flex flex-wrap items-center gap-1.5">
           {scope ? (
-            <span className="mr-1 whitespace-nowrap text-xs font-semibold text-gray-500">
+            // Wraps on a phone rather than being clipped: the scope line names the
+            // company, the financial year and the branch every figure below belongs to,
+            // and half of it is worse than two lines of it.
+            <span className="mr-1 min-w-0 text-xs font-semibold text-gray-500 sm:whitespace-nowrap">
               {scope}
             </span>
           ) : null}
           {chips.map((chip) => {
-            const active = activePreset === chip.id
+            const active = chipIsActive(chip.id)
             return (
               <button
                 key={chip.id}
@@ -268,33 +313,51 @@ export function RegisterFilterPanel({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 items-end gap-x-4 gap-y-3 sm:grid-cols-2 xl:grid-cols-4">
-        {primary.map(control)}
-        <div className="flex items-end justify-end gap-2 min-w-0">
-          {onReset ? (
-            <Button
-              variant="secondary"
-              size="md"
-              onClick={onReset}
-              disabled={activeCount === 0}
-              title={activeCount === 0 ? 'No filter is set' : 'Clear every filter'}
-            >
-              Clear all
-            </Button>
-          ) : null}
-          {onApply ? (
-            <Button
-              variant="primary"
-              size="md"
-              onClick={onApply}
-              loading={applying}
-              title="Filters apply as you change them — this re-runs the query"
-            >
-              Apply filters
-            </Button>
-          ) : null}
-        </div>
+      {/* Six across on a wide screen: a register with eight primary filters reads
+          as two tidy rows there and as four cramped ones at `xl`, and the extra
+          two tracks cost nothing to a register that declares four. */}
+      <div className="grid grid-cols-1 items-end gap-x-4 gap-y-3 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-6">
+        {gridFilters.map(control)}
+        {trailing ? <div className="min-w-0">{trailing}</div> : null}
+        {/* Clear all and Apply filters are NOT here. Both sides of this merge
+            were fixing the same complaint — the actions stranded mid-row under
+            whichever filter happened to land above them. `col-span-full` gave
+            them a row inside the grid; the toggle row below does the same job
+            and seats the checkboxes beside them, which is what the approved
+            layout asks for. Keeping both would render Apply filters twice. */}
       </div>
+
+      {toggleFilters.length || onReset || onApply ? (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-3 border-t border-gray-100 pt-3">
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+            {toggleFilters.map(control)}
+          </div>
+          <div className="flex min-w-0 items-center gap-2 max-sm:w-full max-sm:[&>*]:flex-1">
+            {onReset ? (
+              <Button
+                variant="secondary"
+                size="md"
+                onClick={onReset}
+                disabled={activeCount === 0}
+                title={activeCount === 0 ? 'No filter is set' : 'Clear every filter'}
+              >
+                Clear all
+              </Button>
+            ) : null}
+            {onApply ? (
+              <Button
+                variant="primary"
+                size="md"
+                onClick={onApply}
+                loading={applying}
+                title="Filters apply as you change them — this re-runs the query"
+              >
+                Apply filters
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </section>
   )
 }

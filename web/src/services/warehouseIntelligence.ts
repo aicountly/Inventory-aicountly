@@ -14,7 +14,7 @@
  *    call, and answering it from the data on screen is both instant and
  *    verifiable against the table beneath it. These work today.
  *  - `ask` is everything else — free-form language, cross-module reasoning,
- *    redistribution advice. Those need a backend, and until `VITE_WAREHOUSE_AI_ENDPOINT`
+ *    redistribution advice. Those need a backend, and until `VITE_INVENTORY_AI_PATH`
  *    names one, `ask` rejects with `WarehouseIntelligenceUnavailableError` and the
  *    panel says "AI connection not configured". It never invents a reply.
  *
@@ -27,7 +27,13 @@ import type { AreaUnit, Warehouse } from './masters'
 import { api } from './api'
 import { formatInt, formatQty, toNumber } from '../utils/format'
 
-const ENDPOINT = (import.meta.env.VITE_WAREHOUSE_AI_ENDPOINT ?? '').trim()
+/*
+ * The same variable every other masters AI panel reads
+ * (masters/warehouseGroups/warehouseGroupsAi.ts, services/uomAiApi.ts). One
+ * seam for one service: two names for one endpoint is how half the screens end
+ * up connected and the other half quietly are not.
+ */
+const ENDPOINT = (import.meta.env.VITE_INVENTORY_AI_PATH ?? '').trim().replace(/^\/+/, '')
 
 /** One warehouse, reduced to what a question can be answered from. */
 export interface WarehouseFact {
@@ -143,7 +149,7 @@ export function answerLocally(question: string, facts: readonly WarehouseFact[])
 }
 
 export const warehouseIntelligenceService = {
-  /** Whether free-form questions can be sent anywhere. */
+  /** Whether free-form questions can be sent anywhere. False until VITE_INVENTORY_AI_PATH is set. */
   isConfigured(): boolean {
     return ENDPOINT !== ''
   },
@@ -162,7 +168,7 @@ export const warehouseIntelligenceService = {
     const local = answerLocally(request.question, request.facts)
     if (local) return local
     if (!ENDPOINT) throw new WarehouseIntelligenceUnavailableError()
-    // TODO(aicountly-ai): point VITE_WAREHOUSE_AI_ENDPOINT at the assistant route once it ships.
+    // TODO(aicountly-ai): set VITE_INVENTORY_AI_PATH once the assistant route ships.
     // The contract is this request body and `{ data: WarehouseAiAnswer }` back; the API client
     // carries the session and the company scope, so the service sees the same tenant the page does.
     const res = await api.post<{ data: WarehouseAiAnswer }>(ENDPOINT, { question: request.question, facts: request.facts }, { signal })

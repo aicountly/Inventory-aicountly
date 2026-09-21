@@ -71,8 +71,8 @@ describe('answerLocally', () => {
 
 describe('warehouseIntelligenceService.ask', () => {
   it('rejects an open-ended question when no assistant endpoint is configured', async () => {
-    // No VITE_WAREHOUSE_AI_ENDPOINT is set in this environment, which is the
-    // deployed state today.
+    // VITE_INVENTORY_AI_PATH — the one variable every masters AI panel reads —
+    // is unset in this environment, which is the deployed state today.
     expect(warehouseIntelligenceService.isConfigured()).toBe(false)
     await expect(
       warehouseIntelligenceService.ask({ question: 'Suggest a stock redistribution plan', facts: [fact()] }),

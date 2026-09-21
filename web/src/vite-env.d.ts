@@ -13,11 +13,28 @@ interface ImportMetaEnv {
   /** Generic GA4 measurement ID fallback, checked when the product-specific one is unset. */
   readonly VITE_GA4_MEASUREMENT_ID?: string
   /**
-   * API path of the Aicountly AI assistant, relative to the API base.
-   * Unset (the default) = the Warehouses AI panel answers only the questions it can
-   * compute from the rows on screen and reports "AI connection not configured" for the rest.
+   * API path that answers Aicountly AI requests, e.g. `v1/ai/suggest`.
+   * Unset (the default) and the masters AI panels offer themselves as not yet
+   * connected rather than inventing an answer — see
+   * masters/warehouseGroups/warehouseGroupsAi.ts and services/uomAiApi.ts.
    */
-  readonly VITE_WAREHOUSE_AI_ENDPOINT?: string
+  readonly VITE_INVENTORY_AI_PATH?: string
+
+  /* Feature flags — see src/config/features.ts. Unset means on; `0`/`false`/`off` takes it out. */
+  readonly VITE_FEATURE_JOB_WORK_ASSISTANT?: string
+  readonly VITE_FEATURE_JOB_WORK_SMART_WARNINGS?: string
+  readonly VITE_FEATURE_JOB_WORK_TIMELINE?: string
+  readonly VITE_FEATURE_JOB_WORK_IMPORT?: string
+  readonly VITE_FEATURE_JOB_WORK_BARCODE_SCAN?: string
+
+  /**
+   * Material receipt integrations, each off until the endpoint behind it exists.
+   * See documents/receipt/integrations.ts — every one of these is a LIVE API
+   * call through Inventory's own relay, never a copy of another product's data.
+   */
+  readonly VITE_FEATURE_RECEIPT_PURCHASE_ORDERS?: string
+  readonly VITE_FEATURE_RECEIPT_AI_AUTOFILL?: string
+  readonly VITE_FEATURE_RECEIPT_ATTACHMENTS?: string
 }
 
 interface ImportMeta {

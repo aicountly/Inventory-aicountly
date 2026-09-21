@@ -31,7 +31,6 @@ import { P } from '../../../services/access'
 import type { ListMeta, ListQuery } from '../../../services/api'
 import { fetchAllRows } from '../../../services/listAll'
 import { locationsApi, warehousesApi } from '../../../services/masters'
-import { settingsApi } from '../../../services/settingsApi'
 import type { Warehouse, WarehouseSummary } from '../../../services/masters'
 import { fetchReport } from '../../../services/reportsApi'
 import type { WarehouseStockRow, WarehouseStockSummary } from '../../../services/reportsApi'
@@ -71,7 +70,7 @@ export interface WarehousesScreenState {
   canSeeStockValue: boolean
   /** Bin/zone rows configured, for the "enable bin locations" insight. null until loaded. */
   locationCount: number | null
-  /** The company's base currency, for the value captions. Falls back to the formatter's default. */
+  /** The company's base currency, as the stock report reports it. */
   currency: string
   reload: () => void
   /** Walks every page of the current filter, for the export sheet. */
@@ -131,17 +130,6 @@ export function useWarehousesScreen(list: ListParams, view: WarehouseView): Ware
     { enabled: !!scope && can(P.masters('locations', 'read')), resetKey: scopeKey },
   )
 
-  /*
-   * Only to label the value captions. Company settings are their own permission,
-   * so a user without it simply gets the money formatter's default rather than a
-   * blocked screen — the figures themselves come from the stock report.
-   */
-  const settingsState = useQuery(
-    (signal) => settingsApi.get(signal),
-    [scopeKey],
-    { enabled: !!scope && canRead && can(P.settingsRead), resetKey: scopeKey },
-  )
-
   const stock = useMemo(
     () => stockByWarehouse(stockState.data?.summary ?? null, canSeeStockValue),
     [stockState.data, canSeeStockValue],
@@ -176,7 +164,14 @@ export function useWarehousesScreen(list: ListParams, view: WarehouseView): Ware
     canSeeStock,
     canSeeStockValue,
     locationCount: locationState.data?.meta.total ?? null,
-    currency: settingsState.data?.base_currency_code || 'INR',
+    /*
+     * The warehouse-stock report already names the company's base currency, so
+     * the screen does not ask company settings for it — that is a separate
+     * permission, and one more request for a string that arrived with the
+     * figures it labels. Without the report there are no values to label
+     * either, so the formatter's own default is enough.
+     */
+    currency: stockState.data?.summary.currency || 'INR',
     reload,
     fetchAll,
   }

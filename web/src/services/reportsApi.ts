@@ -27,6 +27,9 @@ export interface ReportItemColumns {
   grp_name?: string | null
   stock_cat_id: number | null
   cat_name?: string | null
+  brand_id?: number | null
+  brand_name?: string | null
+  hsn_sac?: string | null
   valuation_method?: string | null
   is_active?: number | null
 }
@@ -52,17 +55,76 @@ export interface StockSummarySummary {
   to: string
 }
 
+/**
+ * The warehouse-stock register's verdict on one row, worst first.
+ *
+ * Decided by the server (InventoryReportService::stockHealth) from the item's own
+ * thresholds, never re-derived here: two answers to "is this low" is one answer too many,
+ * and the filter and the counts are the server's either way.
+ */
+export const STOCK_HEALTH = ['negative', 'out', 'reorder', 'low', 'overstocked', 'healthy'] as const
+export type StockHealth = (typeof STOCK_HEALTH)[number]
+
+/** Named sets the `health` filter also accepts. Mirrors STOCK_HEALTH_GROUPS. */
+export type StockHealthFilter = StockHealth | 'attention'
+
 export interface WarehouseStockRow extends StockSummaryRow {
   warehouse_id: number | null
   warehouse_name: string | null
   warehouse_code: string | null
+  /**
+   * Reserved and free-to-promise, from the materialised balances.
+   *
+   * `null` on a back-dated read: inv_stock_balances is the position as it stands and has
+   * no date dimension, so this morning's reservations are not an answer about last March.
+   * `summary.live_buckets` says which kind of read this was.
+   */
+  reserved_qty: number | null
+  available_qty: number | null
+  /** The item's own levels, so a badge can say what it was measured against. */
+  min_stock_qty: number | null
+  max_stock_qty: number | null
+  reorder_point_qty: number | null
+  safety_stock_qty: number | null
+  stock_health: StockHealth
+}
+
+export interface WarehouseStockWarehouseTotal {
+  warehouse_id: number | null
+  warehouse_name: string | null
+  closing_qty: number
+  closing_value: number
+  items: number
 }
 
 export interface WarehouseStockSummary {
+  /** Rows, distinct items and distinct warehouses in the filtered result. */
   rows: number
+  items: number
+  warehouses: number
+  /** Warehouses the company operates in this branch scope — not just the stocked ones. */
+  active_warehouses: number
   closing_qty: number
   closing_value: number
-  by_warehouse: { warehouse_id: number | null; warehouse_name: string | null; closing_qty: number; closing_value: number }[]
+  reserved_qty: number | null
+  available_qty: number | null
+  by_warehouse: WarehouseStockWarehouseTotal[]
+  /**
+   * Counted over the set matching every filter EXCEPT `health`, so the card that offers
+   * to filter by a state can say what filtering would find.
+   *
+   * `health` counts ROWS (item × warehouse) and `health_items` distinct ITEMS. The item
+   * counts deliberately do not add up to `items`: negative is a fact about one shelf
+   * while reorder is a fact about the item, so one item can be counted under both.
+   */
+  health: Record<StockHealth, number>
+  health_items: Record<StockHealth, number>
+  health_filter: StockHealthFilter | null
+  method: string
+  /** False when the register was read as at a past date; the buckets are then null. */
+  live_buckets: boolean
+  /** The company's base currency — Aicountly is multi-currency. */
+  currency: string
   to: string
 }
 
@@ -148,6 +210,34 @@ export interface AgeBucket {
   value: number
 }
 
+/** Summary buckets add the item count a row's own buckets have no use for. */
+export interface AgeBucketTotal extends AgeBucket {
+  items: number
+}
+
+/**
+ * How healthy the stock is, as the server classifies it.
+ *
+ * Decided by InventoryReportService::rowHealthStatus / healthScore, never in the
+ * browser: the badge on screen, the word in the CSV and the word on the printed
+ * sheet all have to be the same word, and only a server-side rule guarantees that.
+ */
+export type StockHealthStatus = 'fresh' | 'healthy' | 'watch' | 'slow' | 'obsolete'
+export type StockHealthBand = 'excellent' | 'healthy' | 'watch' | 'at_risk' | 'critical'
+
+/** Ageing exposure of one warehouse or one item group, ranked worst-first. */
+export interface AgeingExposure {
+  warehouse_id?: number | null
+  warehouse_name?: string | null
+  item_grp_id?: number | null
+  grp_name?: string | null
+  total_qty: number
+  total_value: number
+  value_over_90: number
+  value_over_180: number
+  weighted_age_days: number | null
+}
+
 export interface StockAgeingRow extends ReportItemColumns {
   warehouse_id: number | null
   warehouse_name: string | null
@@ -157,6 +247,7 @@ export interface StockAgeingRow extends ReportItemColumns {
   oldest_days: number | null
   newest_days: number | null
   weighted_age_days: number | null
+  health_status: StockHealthStatus | null
   layers: number
   aged_from: string | null
 }
@@ -165,9 +256,26 @@ export interface StockAgeingSummary {
   items: number
   total_qty: number
   total_value: number
-  buckets: Record<AgeBucketKey, AgeBucket>
+  buckets: Record<AgeBucketKey, AgeBucketTotal>
   bucket_labels: Record<AgeBucketKey, string>
   as_of: string
+  /** Quantity-weighted age of everything in scope, in days. */
+  weighted_age_days: number | null
+  oldest_days: number | null
+  value_over_90: number
+  value_over_180: number
+  qty_over_90: number
+  qty_over_180: number
+  by_health: Record<StockHealthStatus, number>
+  /** 0-100, or null when there is no stock to judge. */
+  health_score: number | null
+  health_band: StockHealthBand | null
+  /** Echo of the applied drill-down, so the UI can show it as selected. */
+  age_bucket: AgeBucketKey | null
+  health_status: StockHealthStatus | null
+  /** Empty while a bucket or health filter narrows the rows — see the service. */
+  warehouses: AgeingExposure[]
+  item_groups: AgeingExposure[]
 }
 
 export type MovementClass = 'fast' | 'slow' | 'non_moving' | 'dead'

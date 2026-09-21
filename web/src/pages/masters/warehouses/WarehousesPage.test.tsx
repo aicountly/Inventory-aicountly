@@ -168,19 +168,25 @@ vi.mock('../../../services/reportsApi', async (importOriginal) => {
         report: path,
         summary: {
           rows: 1,
+          items: 42,
+          warehouses: 1,
+          active_warehouses: 2,
           closing_qty: 16240,
           closing_value: 1248000,
-          by_warehouse: [{ warehouse_id: 1, warehouse_name: 'Main', closing_qty: 16240, closing_value: 1248000 }],
+          reserved_qty: null,
+          available_qty: null,
+          by_warehouse: [{ warehouse_id: 1, warehouse_name: 'Main', closing_qty: 16240, closing_value: 1248000, items: 42 }],
+          health: { out: 0, negative: 0, reorder: 0, low: 0, overstocked: 0, healthy: 42 },
+          health_items: { out: 0, negative: 0, reorder: 0, low: 0, overstocked: 0, healthy: 42 },
+          health_filter: null,
+          method: 'FIFO',
+          live_buckets: true,
+          currency: 'INR',
           to: '2026-09-18',
         },
       }
     },
   }
-})
-
-vi.mock('../../../services/settingsApi', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../services/settingsApi')>()
-  return { ...actual, settingsApi: { ...actual.settingsApi, get: async () => ({ base_currency_code: 'INR' }) } }
 })
 
 const { WarehousesPage } = await import('./WarehousesPage')

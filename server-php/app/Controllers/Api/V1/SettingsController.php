@@ -91,6 +91,53 @@ class SettingsController extends BaseController
         return $this->respond(['data' => $out]);
     }
 
+    /**
+     * GET /document-parties — the parties Inventory's own documents reference.
+     *
+     * A picker, not a master. Inventory does not own customers, suppliers or job
+     * workers: `party_ref` is an opaque Books ledger id and `party_name` is the name
+     * captured on the document when it was raised. This reads back exactly those two
+     * columns from inv_documents so a register can offer "All parties" instead of
+     * asking a reader to type a ledger id — nothing is copied here, nothing is
+     * synced, and no screen gains a party record Books does not already own.
+     *
+     * Capped and ordered by recent activity: a company with ten thousand ledgers gets
+     * the ones it has actually moved stock with, which is the whole population a
+     * stock register can filter on anyway.
+     */
+    public function documentParties()
+    {
+        $a = $this->authorize('documents.read');
+        if (isset($a['response'])) {
+            return $a['response'];
+        }
+        $cmpId = (int) $a['ctx']['cmp_id'];
+        $boId = (int) $a['ctx']['bo_id'];
+        $limit = (int) ($this->request->getGet('limit') ?? 500);
+        $limit = max(1, min(2000, $limit));
+
+        $db = \Config\Database::connect();
+        $sql = 'SELECT d.party_ref, MAX(d.party_name) AS party_name, MAX(d.document_date) AS last_document_date'
+            . ' FROM inv_documents d WHERE d.cmp_id = ? AND d.party_ref IS NOT NULL'
+            . ($boId > 0 ? ' AND d.bo_id = ?' : '')
+            . ' GROUP BY d.party_ref ORDER BY last_document_date DESC NULLS LAST LIMIT ?';
+        $binds = $boId > 0 ? [$cmpId, $boId, $limit] : [$cmpId, $limit];
+
+        $rows = array_map(static fn ($r) => [
+            'party_ref'  => (int) $r['party_ref'],
+            'party_name' => $r['party_name'] !== null && $r['party_name'] !== '' ? $r['party_name'] : null,
+        ], $db->query($sql, $binds)->getResultArray());
+
+        // Alphabetical for the picker; the query ordered by recency only to decide
+        // WHICH parties make the cap.
+        usort($rows, static fn ($x, $y) => strcasecmp(
+            (string) ($x['party_name'] ?? '#' . $x['party_ref']),
+            (string) ($y['party_name'] ?? '#' . $y['party_ref']),
+        ));
+
+        return $this->respond(['data' => $rows]);
+    }
+
     public function periodLocks()
     {
         $a = $this->authorize('settings.read', true, false);
