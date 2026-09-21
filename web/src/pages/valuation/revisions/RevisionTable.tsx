@@ -167,6 +167,35 @@ export function RevisionTable({
     }
 
     cols.push(
+      /*
+       * The revision's own number, first and sortable.
+       *
+       * It is the reference an operator quotes back to Books when a COGS re-posting is
+       * queried, and the only handle on a revision that survives a filter change — so it
+       * stays on the grid rather than being demoted to the detail panel, however dense the
+       * rest of the row gets.
+       */
+      {
+        key: 'revision_id',
+        header: '#',
+        sortKey: 'revision_id',
+        align: 'right',
+        width: 64,
+        render: (r) => (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              onOpen(r)
+            }}
+            className="font-semibold tabular-nums text-primary hover:underline"
+            aria-label={`Open revision ${r.revision_id}`}
+            title={`Open revision ${r.revision_id}`}
+          >
+            {r.revision_id}
+          </button>
+        ),
+      },
       {
         key: 'created_at',
         header: 'Created',
@@ -410,7 +439,7 @@ export function RevisionTable({
       scrollBody
       density="compact"
       size="xs"
-      minWidth={1420}
+      minWidth={1480}
       keyboardResetKey={resetKey}
       onRowActivate={onOpen}
       rowClassName={(r) => (selected.has(r.revision_id) ? 'bg-primary-light/50' : undefined)}
