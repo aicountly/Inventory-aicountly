@@ -28,8 +28,27 @@ const h = vi.hoisted(() => ({
   summaryCalls: 0,
 }))
 
+interface SheetPayload {
+  rows: Record<string, { text: string; value: unknown }>[]
+  columns: { key: string; label: string; format?: string }[]
+}
+
+const exportTabularPdf = vi.fn(async (_p: SheetPayload) => {})
+
+vi.mock('../../../export/documentExport', () => ({
+  exportTabularExcel: vi.fn(async () => {}),
+  exportTabularPdf: (p: SheetPayload) => exportTabularPdf(p),
+  printTabular: vi.fn(() => true),
+}))
+
 vi.mock('../../../company/CompanyContext', () => ({
-  useCompany: () => ({ scope: { cmp_id: 1, fy_id: 3, bo_id: 0 }, companyName: 'Acme Ltd' }),
+  useCompany: () => ({
+    scope: { cmp_id: 1, fy_id: 3, bo_id: 0 },
+    companyName: 'Acme Ltd',
+    addressLines: [],
+    gstin: '27AAAAA0000A1Z5',
+    logo: null,
+  }),
 }))
 vi.mock('../../../company/useScopeLabel', () => ({ useScopeLabel: () => 'Acme Ltd' }))
 vi.mock('../../../access/AccessContext', () => ({
@@ -193,6 +212,66 @@ beforeEach(() => {
   h.updated = []
   h.removed = []
   h.summaryCalls = 0
+  exportTabularPdf.mockClear()
+})
+
+/** Drive the export menu to the PDF sheet and hand back what it was given. */
+async function sheet(): Promise<SheetPayload> {
+  fireEvent.click(screen.getByRole('button', { name: /export/i }))
+  fireEvent.click(await screen.findByRole('menuitem', { name: /PDF/ }))
+  await waitFor(() => expect(exportTabularPdf).toHaveBeenCalledOnce())
+  return exportTabularPdf.mock.calls[0][0]
+}
+
+describe('the exported sheet', () => {
+  it('carries every column the table shows, with no blank cell under a header', async () => {
+    mount()
+    await waitFor(() => expect(inTable('Main')).toBeTruthy())
+    const payload = await sheet()
+
+    const keys = payload.columns.map((c) => c.key)
+    expect(keys).toContain('capacity_units')
+    expect(keys).toContain('location')
+    expect(keys).toContain('stock_qty')
+    expect(keys).toContain('utilisation')
+
+    // The defect this guards: a column whose value resolver names no field
+    // resolves to '' and the sheet ships a silently empty column.
+    const blanks = payload.columns.filter((c) => (payload.rows[0][c.key]?.text ?? '') === '')
+    expect(blanks.map((c) => `${c.key} (${c.label})`)).toEqual([])
+  })
+
+  it('writes the same figures the screen shows', async () => {
+    mount()
+    await waitFor(() => expect(inTable('Main')).toBeTruthy())
+    const row = (await sheet()).rows[0]
+
+    expect(row.capacity_units.text).toContain('50,000')
+    expect(row.location.text).toBe('New Delhi, Delhi')
+    expect(row.stock_qty.text).toContain('16,240')
+    expect(row.utilisation.text).toBe('32.5%')
+  })
+
+  it('says "Not configured" for the warehouse with no capacity, rather than 0%', async () => {
+    mount()
+    await waitFor(() => expect(inTable('Main')).toBeTruthy())
+    const rows = (await sheet()).rows
+
+    expect(rows[1].capacity_units.text).toBe('Not configured')
+    expect(rows[1].utilisation.text).toBe('Not configured')
+  })
+
+  it('omits the stock columns entirely from a user who may not read the report', async () => {
+    h.permissions = new Set(WRITE)
+    mount()
+    await waitFor(() => expect(inTable('Main')).toBeTruthy())
+    const payload = await sheet()
+
+    const keys = payload.columns.map((c) => c.key)
+    expect(keys).not.toContain('stock_qty')
+    expect(keys).not.toContain('stock_value')
+    expect(keys).toContain('capacity_units')
+  })
 })
 
 describe('the Warehouses screen', () => {
