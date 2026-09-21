@@ -209,6 +209,11 @@
 .dark .hover\:bg-violet-50\/70:hover {
   background-color: rgb(76 29 149 / 0.16);
 }
+/* The hover step of the same accent, a touch stronger so the affordance is
+   still visible on a dark card — violet-50 → violet-100 in light mode. */
+.dark .hover\:bg-violet-100:hover {
+  background-color: rgb(76 29 149 / 0.34);
+}
 .dark .bg-rose-50 {
   background-color: rgb(136 19 55 / 0.22);
 }
