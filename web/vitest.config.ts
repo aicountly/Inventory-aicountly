@@ -12,6 +12,12 @@ import { defineConfig } from 'vitest/config'
  */
 export default defineConfig({
   test: {
+    // Vitest's 5000ms default assumes a dedicated machine. On a shared CI runner under load
+    // from the rest of this suite, a test that is not actually broken can occasionally need
+    // longer than that -- see src/test/setup.ts's asyncUtilTimeout for the matching waitFor()
+    // increase and the failure pattern (a different test timing out each run) that led here.
+    testTimeout: 15000,
+    hookTimeout: 15000,
     projects: [
       {
         test: {
