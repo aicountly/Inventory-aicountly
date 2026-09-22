@@ -21,21 +21,33 @@ class OpeningStockResolver
      * Opening rows for a year, shaped like unit lines (item_id, warehouse_id, unit_id, opening_qty,
      * opening_valuation_rate, is_default, conversion_factor, batch_id).
      *
+     * $boId: branch scope, default null = every branch (the long-standing behaviour every caller
+     * except ReconciliationService relies on — a costing rate under company-scope valuation is
+     * legitimately pooled across all branches, so narrowing this default would silently change
+     * WAC/FIFO costs everywhere it's used for that). Pass a real branch id only when the caller
+     * itself is answering a single-branch question, e.g. one branch's opening value.
+     * A row with no warehouse_id, or a warehouse belonging to no branch, is company-wide and
+     * always stays in scope, same predicate as StockBalanceService::listBalances().
+     *
      * @param list<int> $itemIds empty = all
      * @return list<array<string, mixed>>
      */
-    public function openingLines(int $cmpId, int $fyId, array $itemIds = []): array
+    public function openingLines(int $cmpId, int $fyId, array $itemIds = [], ?int $boId = null): array
     {
         $db = \Config\Database::connect();
         $this->units->warmCompany($cmpId);
         $useCarried = $fyId > 0 && FyCarryForwardStatus::hasRunInto($cmpId, $fyId);
-        $b = $db->table('inv_item_openings')
-            ->select('opening_id, item_id, warehouse_id, unit_id, batch_id, opening_qty, opening_valuation_rate, opening_value, source_kind')
-            ->where('cmp_id', $cmpId)
-            ->where('fy_id', $useCarried ? $fyId : 0)
-            ->orderBy('item_id', 'ASC')->orderBy('opening_id', 'ASC');
+        $b = $db->table('inv_item_openings o')
+            ->select('o.opening_id, o.item_id, o.warehouse_id, o.unit_id, o.batch_id, o.opening_qty, o.opening_valuation_rate, o.opening_value, o.source_kind')
+            ->where('o.cmp_id', $cmpId)
+            ->where('o.fy_id', $useCarried ? $fyId : 0)
+            ->orderBy('o.item_id', 'ASC')->orderBy('o.opening_id', 'ASC');
         if ($itemIds !== []) {
-            $b->whereIn('item_id', $itemIds);
+            $b->whereIn('o.item_id', $itemIds);
+        }
+        if ($boId !== null && $boId > 0) {
+            $b->join('inv_warehouses w', 'w.warehouse_id = o.warehouse_id', 'left')
+                ->groupStart()->where('o.warehouse_id', null)->orWhere('w.bo_id', 0)->orWhere('w.bo_id', $boId)->groupEnd();
         }
         $out = [];
         foreach ($b->get()->getResultArray() as $row) {
@@ -78,13 +90,16 @@ class OpeningStockResolver
     /**
      * One blended opening layer per item (qty_remaining, unit_cost) in base units.
      *
+     * $boId: see openingLines() -- default null (every branch) is what every existing caller
+     * needs; pass a real branch id only for a genuinely single-branch value question.
+     *
      * @param list<int> $itemIds
      * @return array<int, list<array{qty_remaining: float, unit_cost: float}>>
      */
-    public function openingLayersByItem(int $cmpId, int $fyId, array $itemIds = []): array
+    public function openingLayersByItem(int $cmpId, int $fyId, array $itemIds = [], ?int $boId = null): array
     {
         $byItem = [];
-        foreach ($this->openingLines($cmpId, $fyId, $itemIds) as $row) {
+        foreach ($this->openingLines($cmpId, $fyId, $itemIds, $boId) as $row) {
             $layer = self::layerFromOpeningLine($row);
             if ($layer !== null) {
                 $byItem[(int) $row['item_id']][] = $layer;

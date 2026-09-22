@@ -187,7 +187,7 @@ class ReconciliationService
 
         $buckets = [];
         // 1. Opening difference.
-        $inventoryOpening = $this->inventoryOpeningValue($cmpId, $fyId);
+        $inventoryOpening = $this->inventoryOpeningValue($cmpId, $fyId, $boId);
         $booksOpening = $books['opening_balance'];
         $buckets['opening_difference'] = [
             'amount'                  => $booksOpening !== null ? round($inventoryOpening - $booksOpening, 4) : 0.0,
@@ -272,11 +272,18 @@ class ReconciliationService
         ];
     }
 
-    /** Inventory opening value for the FY: Σ opening layers (base qty × base unit cost). */
-    public function inventoryOpeningValue(int $cmpId, int $fyId): float
+    /**
+     * Inventory opening value for the FY: Σ opening layers (base qty × base unit cost).
+     *
+     * Branch-scoped when $boId > 0, matching every other figure compute() diffs against Books
+     * for that one branch -- a company-wide opening total compared against one branch's Books
+     * opening leaks every OTHER branch's opening value into opening_difference (and, through it,
+     * unexplained) as a phantom amount on any multi-branch company.
+     */
+    public function inventoryOpeningValue(int $cmpId, int $fyId, int $boId = 0): float
     {
         $total = 0.0;
-        foreach ($this->openings->openingLayersByItem($cmpId, $fyId) as $layers) {
+        foreach ($this->openings->openingLayersByItem($cmpId, $fyId, [], $boId > 0 ? $boId : null) as $layers) {
             foreach ($layers as $layer) {
                 $total += (float) $layer['qty_remaining'] * (float) $layer['unit_cost'];
             }
