@@ -868,7 +868,21 @@ class DocumentService
             if ($item['deleted_at'] !== null) {
                 throw InventoryException::validation('Line ' . ($idx + 1) . ': item #' . $itemId . ' is deleted', ['item_id' => $itemId]);
             }
-            $unitId = isset($line['unit_id']) && (int) $line['unit_id'] > 0 ? (int) $line['unit_id'] : ($this->units->defaultUnitId($cmpId, $itemId) ?: (int) ($item['unit_id'] ?? 0));
+            $explicitUnitId = isset($line['unit_id']) && (int) $line['unit_id'] > 0 ? (int) $line['unit_id'] : null;
+            // A unit_id the line actually named must be one this item is registered under --
+            // otherwise UnitConversionService::factorFor() cannot tell "this unit legitimately
+            // converts 1:1" from "this unit was never configured for this item at all" and would
+            // silently fall back to a factor of 1.0, posting the line's qty/rate at whatever scale
+            // the caller happened to supply. That is how a line entered in Kilograms against an
+            // item priced in Grams (with no Kilograms alternate unit registered) posts through at
+            // a ~1000x scale error with no warning -- confirmed against real production data.
+            if ($explicitUnitId !== null && !$this->units->isRegisteredUnit($cmpId, $itemId, $explicitUnitId)) {
+                throw InventoryException::validation(
+                    'Line ' . ($idx + 1) . ': unit #' . $explicitUnitId . ' is not a registered unit for item #' . $itemId . ' -- add it as an alternate unit with a real conversion factor before posting in this unit',
+                    ['item_id' => $itemId, 'unit_id' => $explicitUnitId]
+                );
+            }
+            $unitId = $explicitUnitId ?? ($this->units->defaultUnitId($cmpId, $itemId) ?: (int) ($item['unit_id'] ?? 0));
             $factor = $this->units->factorFor($cmpId, $itemId, $unitId > 0 ? $unitId : null);
             $rate = (float) ($line['rate'] ?? $line['source_transaction_rate'] ?? 0);
             $amount = (float) ($line['amount'] ?? $line['source_transaction_amount'] ?? 0);

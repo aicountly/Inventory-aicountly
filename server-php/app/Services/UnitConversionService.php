@@ -76,6 +76,22 @@ class UnitConversionService
         return $this->defaultUnitByItem[$cmpId . ':' . $itemId] ?? 0;
     }
 
+    /**
+     * True only if $unitId is genuinely registered for this item -- its own base unit, or an
+     * inv_item_uoms row. factorFor() cannot make this distinction (it falls back to 1.0 for an
+     * unrecognised unit, which is right for a read of old data but wrong to trust for a NEW
+     * document line); this is the check a poster must make before trusting factorFor()'s answer.
+     */
+    public function isRegisteredUnit(int $cmpId, int $itemId, int $unitId): bool
+    {
+        if ($cmpId <= 0 || $itemId <= 0 || $unitId <= 0) {
+            return false;
+        }
+        $this->warmItem($cmpId, $itemId);
+
+        return isset($this->factorByItemUnit[$cmpId . ':' . $itemId . ':' . $unitId]);
+    }
+
     /** @return array{base_qty: float, base_unit_cost: float, factor: float, effective_rate: float} */
     public function lineToBase(int $cmpId, int $itemId, ?int $unitId, float $qty, float $rate, float $amount = 0.0): array
     {
@@ -119,9 +135,12 @@ class UnitConversionService
 
     private function warmItem(int $cmpId, int $itemId): void
     {
-        if (isset($this->warmedCompanies[$cmpId])) {
-            return;
-        }
+        // Deliberately NOT short-circuited by warmedCompanies: that flag only means a bulk load
+        // ran at some point in this request, not that every item still exists at that point in
+        // time. An item created after warmCompany() ran (a second item in the same request/test,
+        // an item added mid-import) would otherwise never get its own base-unit binding loaded --
+        // harmless while factorFor() silently defaulted unknown units to 1.0 (its own base unit
+        // is 1.0 anyway), but wrong once isRegisteredUnit() is trusted to reject a real mismatch.
         $key = $cmpId . ':' . $itemId;
         if (isset($this->defaultUnitByItem[$key])) {
             return;
