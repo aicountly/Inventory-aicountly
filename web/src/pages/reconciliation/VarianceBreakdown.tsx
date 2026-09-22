@@ -1,13 +1,13 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { ChevronDown, ChevronRight, Info } from 'lucide-react'
 import { Skeleton } from '../../ui/Skeleton'
 import { Tooltip } from '../../ui/Tooltip'
 import { cx } from '../../ui/cx'
 import { formatDate, formatInt, formatMoney, humanize } from '../../utils/format'
 import type { BucketDocument, PostingStatusEntry } from '../../services/reconciliationApi'
-import type { BucketRow } from './reconciliationModel'
-import { formatPercent } from './reconciliationModel'
+import type { BucketRow, UnexplainedExplanation } from './reconciliationModel'
+import { UNEXPLAINED_ACTION, UNEXPLAINED_ACTION_HREF, UNEXPLAINED_WHY, formatPercent } from './reconciliationModel'
 
 /**
  * How the gap is explained.
@@ -110,19 +110,63 @@ export function TopVariances({ rows, loading, emptyMessage, limit = 5 }: TopVari
   )
 }
 
+/**
+ * Why this run's `unexplained` figure looks the way it does, and what to do
+ * about it — the content behind the info icon on that one row.
+ *
+ * `info` is undefined when the caller has not computed it (a screen that only
+ * has the rows, not the full breakdown); the row still expands, just without
+ * the driver paragraph a full breakdown would add.
+ */
+function UnexplainedInfoPanel({ info }: { info: UnexplainedExplanation | undefined }) {
+  if (info && !info.active) {
+    return (
+      <p className="mt-2 max-w-2xl text-xs leading-relaxed text-gray-600">
+        Nothing left over on this run — every bucket above already nets to the difference, so there is nothing here to
+        explain.
+      </p>
+    )
+  }
+  return (
+    <div className="mt-2 max-w-2xl space-y-2 text-xs leading-relaxed text-gray-600">
+      <p className="m-0">{UNEXPLAINED_WHY}</p>
+      {info?.driver ? (
+        <p className="m-0">
+          In this run, the gap lines up with Inventory's own internal diagnostic — valuation_method_variance of ₹{' '}
+          {formatMoney(info.driver.amount)}
+          {info.driver.unvaluedMovements ? ` across ${formatInt(info.driver.unvaluedMovements)} movement${info.driver.unvaluedMovements === 1 ? '' : 's'} costed with no real rate on record` : ''}{' '}
+          — rather than a posting that never reached Books. Every other bucket above is already clear.
+        </p>
+      ) : null}
+      <p className="m-0">
+        {UNEXPLAINED_ACTION}{' '}
+        <Link to={UNEXPLAINED_ACTION_HREF} className="font-semibold text-primary hover:underline">
+          Review negative &amp; zero-cost layers →
+        </Link>
+      </p>
+    </div>
+  )
+}
+
 export interface BucketBreakdownProps {
   rows: readonly BucketRow[]
   loading: boolean
   emptyMessage: string
+  /** Powers the `unexplained` row's info panel; omit to leave that row's expand plain. */
+  unexplained?: UnexplainedExplanation
 }
 
 /**
  * Every bucket, with the documents behind it one click away.
  *
  * `unexplained` is called out rather than sorted like the rest: it is the one
- * row that must be zero before anybody signs the reconciliation off.
+ * row that must be zero before anybody signs the reconciliation off. It also
+ * gets its own info icon — the other buckets are self-explanatory from their
+ * "What it means" text, but "what is left after everything else" needs a
+ * reader to know WHY a residual can exist at all before "must be zero" means
+ * anything actionable.
  */
-export function BucketBreakdown({ rows, loading, emptyMessage }: BucketBreakdownProps) {
+export function BucketBreakdown({ rows, loading, emptyMessage, unexplained }: BucketBreakdownProps) {
   const [open, setOpen] = useState<string | null>(null)
   const documents = useMemo(() => new Map(rows.map((row) => [row.key, bucketDocuments(row)])), [rows])
 
@@ -164,12 +208,14 @@ export function BucketBreakdown({ rows, loading, emptyMessage }: BucketBreakdown
         <tbody>
           {rows.map((row) => {
             const docs = documents.get(row.key) ?? []
+            const isUnexplained = row.key === 'unexplained'
             const expanded = open === row.key
-            const critical = row.key === 'unexplained' && Math.abs(row.amount) >= 0.005
+            const critical = isUnexplained && Math.abs(row.amount) >= 0.005
+            const expandable = docs.length > 0 || isUnexplained
             return (
               <tr key={row.key} className={cx('border-b border-gray-100 align-top', critical && 'bg-red-50/40')}>
                 <td className="px-3 py-2">
-                  {docs.length > 0 ? (
+                  {expandable ? (
                     <button
                       type="button"
                       aria-expanded={expanded}
@@ -178,11 +224,16 @@ export function BucketBreakdown({ rows, loading, emptyMessage }: BucketBreakdown
                     >
                       {expanded ? <ChevronDown className="h-3.5 w-3.5" aria-hidden /> : <ChevronRight className="h-3.5 w-3.5" aria-hidden />}
                       {row.label}
+                      {isUnexplained ? (
+                        <Tooltip label="Why this can be nonzero, and what to do about it">
+                          <Info className="h-3.5 w-3.5 text-gray-400" aria-hidden />
+                        </Tooltip>
+                      ) : null}
                     </button>
                   ) : (
                     <span className="font-semibold text-gray-900">{row.label}</span>
                   )}
-                  {expanded ? (
+                  {expanded && docs.length > 0 ? (
                     <ul className="mt-2 max-h-72 list-none space-y-1 overflow-y-auto p-0 text-xs text-gray-600">
                       {docs.slice(0, 200).map((d, i) => (
                         <li key={`${row.key}-${d.document_id}-${i}`} className="border-l-2 border-gray-200 pl-2">
@@ -203,6 +254,7 @@ export function BucketBreakdown({ rows, loading, emptyMessage }: BucketBreakdown
                       {docs.length > 200 ? <li className="text-gray-400">… and {formatInt(docs.length - 200)} more</li> : null}
                     </ul>
                   ) : null}
+                  {expanded && isUnexplained ? <UnexplainedInfoPanel info={unexplained} /> : null}
                 </td>
                 <td className="px-3 py-2 text-xs text-gray-500">{row.help}</td>
                 <td className="px-3 py-2 text-right tabular-nums text-gray-700">{formatInt(row.count)}</td>

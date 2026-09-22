@@ -115,4 +115,44 @@ describe('ReconciliationVariancePage', () => {
     // No column claims to hold a Books value for an item.
     expect(screen.queryByRole('columnheader', { name: /Books value/i })).toBeNull()
   })
+
+  it('opens onto why the unexplained residual exists and what to do about it', async () => {
+    getRun.mockImplementation(async (id: number) => ({
+      run_id: id,
+      run_uuid: null,
+      cmp_id: 1,
+      fy_id: 3,
+      bo_id: 0,
+      as_of_date: '2026-09-16',
+      inventory_closing_value: 2456320,
+      inventory_closing_qty: 968,
+      books_stock_ledger_balance: 179549.11,
+      difference: -2275554.89,
+      status: 'COMPLETED',
+      requested_by: 'asha',
+      created_at: '2026-09-16 07:30:00',
+      breakdown: {
+        as_of: '2026-09-16',
+        sign_convention: 'amount = contribution to (inventory - books)',
+        explained_total: 0,
+        residual: -2275554.89,
+        books: { available: true, status: 200, error: null },
+        buckets: {
+          opening_difference: { amount: 0, count: 0 },
+          unexplained: { amount: -2275554.89, count: 1 },
+        },
+        diagnostics: {
+          valuation_method_variance: { amount: -2275000, count: 1, unvalued_movements: 15 },
+        },
+      },
+      document_status: null,
+    }))
+    renderPage()
+    await waitFor(() => expect(screen.getByText(/Run #87/)).toBeTruthy())
+
+    fireEvent.click(screen.getByRole('button', { name: /Unexplained/ }))
+    await waitFor(() => expect(screen.getByText(/mathematically guaranteed to agree/)).toBeTruthy())
+    expect(document.body.textContent).toContain('across 15 movements costed with no real rate on record')
+    expect(screen.getByRole('link', { name: /Review negative & zero-cost layers/ })).toBeTruthy()
+  })
 })
