@@ -12,7 +12,16 @@ import { buildBooksAppLink } from '../../services/booksApi'
 import { reconciliationApi } from '../../services/reconciliationApi'
 import type { BucketDocument, ReconciliationBucket, ReconciliationRunDetail } from '../../services/reconciliationApi'
 import { formatDate, formatDateTime, formatInt, formatMoney, formatQty } from '../../utils/format'
-import { BUCKET_HELP, DIAGNOSTIC_HELP, differenceTone } from './reconciliationModel'
+import {
+  BUCKET_HELP,
+  DIAGNOSTIC_HELP,
+  UNEXPLAINED_ACTION,
+  UNEXPLAINED_ACTION_HREF,
+  UNEXPLAINED_WHY,
+  differenceTone,
+  unexplainedExplanation,
+} from './reconciliationModel'
+import type { UnexplainedExplanation } from './reconciliationModel'
 import { PostingStatusTable } from './PostingStatusTable'
 import '../views.css'
 
@@ -25,6 +34,7 @@ export function ReconciliationRunPage() {
   const bd = r?.breakdown ?? null
   const buckets = bd ? Object.entries(bd.buckets ?? {}) : []
   const diagnostics = bd ? Object.entries(bd.diagnostics ?? {}) : []
+  const unexplained = unexplainedExplanation(bd)
 
   return (
     // The module layout used to supply this wrapper; the tabs moved onto the
@@ -70,7 +80,7 @@ export function ReconciliationRunPage() {
                   </thead>
                   <tbody>
                     {buckets.map(([key, b]) => (
-                      <BucketRow key={key} name={key} bucket={b} run={r} />
+                      <BucketRow key={key} name={key} bucket={b} run={r} unexplained={key === 'unexplained' ? unexplained : undefined} />
                     ))}
                   </tbody>
                 </table>
@@ -127,11 +137,14 @@ function BucketRow({
   bucket,
   run,
   helpMap = BUCKET_HELP,
+  unexplained,
 }: {
   name: string
   bucket: ReconciliationBucket
   run: ReconciliationRunDetail
   helpMap?: Record<string, string>
+  /** Set only for the `unexplained` row — why this run's residual looks the way it does. */
+  unexplained?: UnexplainedExplanation
 }) {
   const docs: BucketDocument[] = Array.isArray(bucket.documents) ? bucket.documents : []
   const nonzero = Math.abs(bucket.amount ?? 0) >= 0.005
@@ -169,6 +182,31 @@ function BucketRow({
           ) : null}
         </td>
       </tr>
+      {unexplained?.active ? (
+        <tr>
+          <td colSpan={4}>
+            <details>
+              <summary>Why this can be nonzero, and what to do about it</summary>
+              <div className="muted" style={{ maxWidth: '48rem' }}>
+                <p>{UNEXPLAINED_WHY}</p>
+                {unexplained.driver ? (
+                  <p>
+                    In this run, the gap lines up with Inventory&rsquo;s own internal diagnostic —
+                    valuation_method_variance of {formatMoney(unexplained.driver.amount)}
+                    {unexplained.driver.unvaluedMovements
+                      ? ` across ${formatInt(unexplained.driver.unvaluedMovements)} movement${unexplained.driver.unvaluedMovements === 1 ? '' : 's'} costed with no real rate on record`
+                      : ''}{' '}
+                    — rather than a posting that never reached Books. Every other bucket above is already clear.
+                  </p>
+                ) : null}
+                <p>
+                  {UNEXPLAINED_ACTION} <Link to={UNEXPLAINED_ACTION_HREF}>Review negative &amp; zero-cost layers →</Link>
+                </p>
+              </div>
+            </details>
+          </td>
+        </tr>
+      ) : null}
       {docs.length > 0 ? (
         <tr>
           <td colSpan={4}>

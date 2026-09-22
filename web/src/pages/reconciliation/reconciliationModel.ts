@@ -256,6 +256,83 @@ export function bucketLabel(key: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1)
 }
 
+/**
+ * Why an `unexplained` residual can exist at all, for the reader who has just
+ * been told "must be zero before sign-off" and wants to know what to do about
+ * a nonzero one. Written once, not per-run: the mechanism is always the same.
+ *
+ * Inventory's closing figure is a fresh, point-in-time recompute of today's
+ * stock. Books' figure is a running sum of every entry Inventory has ever
+ * posted to it. For a healthy item the two are mathematically guaranteed to
+ * agree — opening plus every movement equals closing, computed either way.
+ * They diverge only for stock that was sold or issued below zero before a
+ * real purchase cost existed for it: at that moment each side independently
+ * priced the movement, and nothing guarantees two independent estimates land
+ * on the same number.
+ */
+export const UNEXPLAINED_WHY =
+  "Inventory's figure here is a fresh, point-in-time recompute of today's stock. Books' figure is a running sum of every entry Inventory has ever posted to its ledger. For a healthy item the two are mathematically guaranteed to agree — opening plus every movement equals closing, computed either way. They diverge only for stock that was sold or issued below zero before a real purchase cost existed for it: at that moment each side had to independently estimate a cost, and nothing guarantees two independent estimates land on the same number."
+
+export const UNEXPLAINED_ACTION =
+  'Find the item(s) behind it — layers with a negative balance or a zero cost, opened before a real receipt was on record — enter the real purchase cost on the source document, and run a recalculation from that date. Once both sides price the same movement from the same real cost, this gap closes on its own; nothing here needs changing by hand.'
+
+/** Where the corrective action above sends the reader. */
+export const UNEXPLAINED_ACTION_HREF = '/valuation/cost-layers?status=negative'
+
+export interface UnexplainedDriver {
+  /** `diagnostics.valuation_method_variance.amount` for this run. */
+  amount: number
+  /** Movements costed with no real rate on record, when the run reported one. */
+  unvaluedMovements: number | null
+}
+
+export interface UnexplainedExplanation {
+  amount: number | null
+  /** Worth explaining at all — a residual at or above rounding. */
+  active: boolean
+  /** Every other bucket nets to ~0, so `unexplained` is not a mix of several causes. */
+  otherBucketsClear: boolean
+  /**
+   * Set only when the residual lines up with Inventory's own internal
+   * valuation_method_variance diagnostic AND every other bucket is clear — the
+   * one situation where that diagnostic can be named as the mechanism rather
+   * than a coincidence. Never asserted from the amount alone.
+   */
+  driver: UnexplainedDriver | null
+}
+
+/** A diagnostic amount within 5% (floor ₹1) of the residual is close enough to name as the driver. */
+const DRIVER_ALIGNMENT_TOLERANCE_RATIO = 0.05
+
+/**
+ * Explains a run's `unexplained` bucket for the info panel on the variance
+ * screens. Pure arithmetic over what the run already returned — no new
+ * figure is computed and nothing here reads anything Books reported beyond
+ * what `compute()` already netted into the buckets.
+ */
+export function unexplainedExplanation(breakdown: ReconciliationBreakdown | null | undefined): UnexplainedExplanation {
+  const amount = toNumber(breakdown?.buckets?.unexplained?.amount)
+  const active = amount !== null && Math.abs(amount) >= AGREED_TOLERANCE
+
+  const buckets = breakdown?.buckets ?? {}
+  const otherBucketsClear = Object.entries(buckets).every(([key, bucket]) => {
+    if (key === 'unexplained' || key === 'rounding') return true
+    return Math.abs(toNumber(bucket?.amount) ?? 0) < AGREED_TOLERANCE
+  })
+
+  let driver: UnexplainedDriver | null = null
+  const variance = breakdown?.diagnostics?.valuation_method_variance
+  const varianceAmount = toNumber(variance?.amount)
+  if (active && otherBucketsClear && amount !== null && varianceAmount !== null) {
+    const tolerance = Math.max(1, Math.abs(amount) * DRIVER_ALIGNMENT_TOLERANCE_RATIO)
+    if (Math.abs(varianceAmount - amount) <= tolerance) {
+      driver = { amount: varianceAmount, unvaluedMovements: toNumber(variance?.unvalued_movements) }
+    }
+  }
+
+  return { amount, active, otherBucketsClear, driver }
+}
+
 export interface BucketRow {
   key: string
   label: string

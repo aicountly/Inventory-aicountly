@@ -12,6 +12,7 @@ import {
   insights,
   previousCompletedRun,
   trendPoints,
+  unexplainedExplanation,
 } from './reconciliationModel'
 
 /**
@@ -254,5 +255,80 @@ describe('diagnosticRows', () => {
     expect(diagnosticRows(breakdown).map((r) => r.key)).not.toContain('unexplained')
     expect(diagnosticRows(null)).toEqual([])
     expect(diagnosticRows(undefined)).toEqual([])
+  })
+})
+
+describe('unexplainedExplanation', () => {
+  it('is inactive when the residual is below rounding, whatever diagnostics say', () => {
+    const breakdown = {
+      as_of: '2026-09-16',
+      sign_convention: 'amount = contribution to (inventory - books)',
+      explained_total: 10670,
+      residual: 0,
+      books: { available: true, status: 200, error: null },
+      buckets: { unexplained: { amount: 0, count: 0 } },
+      diagnostics: { valuation_method_variance: { amount: 500, count: 1 } },
+    }
+    const info = unexplainedExplanation(breakdown)
+    expect(info.active).toBe(false)
+    expect(info.driver).toBeNull()
+  })
+
+  it('names the diagnostic as the driver only when it lines up AND every other bucket is clear', () => {
+    const aligned = unexplainedExplanation({
+      as_of: '2026-09-16',
+      sign_convention: 'amount = contribution to (inventory - books)',
+      explained_total: 0,
+      residual: -2275554.89,
+      books: { available: true, status: 200, error: null },
+      buckets: {
+        opening_difference: { amount: 0, count: 0 },
+        pending_posting: { amount: 0, count: 0 },
+        unexplained: { amount: -2275554.89, count: 1 },
+      },
+      diagnostics: {
+        valuation_method_variance: { amount: -2275000, count: 1, unvalued_movements: 15 },
+      },
+    })
+    expect(aligned.active).toBe(true)
+    expect(aligned.otherBucketsClear).toBe(true)
+    expect(aligned.driver).toEqual({ amount: -2275000, unvaluedMovements: 15 })
+  })
+
+  it('withholds the driver when another bucket is still carrying a real amount', () => {
+    const info = unexplainedExplanation({
+      as_of: '2026-09-16',
+      sign_convention: 'amount = contribution to (inventory - books)',
+      explained_total: 5000,
+      residual: -2275554.89,
+      books: { available: true, status: 200, error: null },
+      buckets: {
+        opening_difference: { amount: 5000, count: 1 },
+        unexplained: { amount: -2275554.89, count: 1 },
+      },
+      diagnostics: {
+        valuation_method_variance: { amount: -2275000, count: 1 },
+      },
+    })
+    expect(info.otherBucketsClear).toBe(false)
+    expect(info.driver).toBeNull()
+  })
+
+  it('withholds the driver when the diagnostic does not actually line up with the residual', () => {
+    const info = unexplainedExplanation({
+      as_of: '2026-09-16',
+      sign_convention: 'amount = contribution to (inventory - books)',
+      explained_total: 0,
+      residual: -2275554.89,
+      books: { available: true, status: 200, error: null },
+      buckets: { unexplained: { amount: -2275554.89, count: 1 } },
+      diagnostics: { valuation_method_variance: { amount: -50, count: 1 } },
+    })
+    expect(info.driver).toBeNull()
+  })
+
+  it('reports no driver and no residual without a breakdown', () => {
+    expect(unexplainedExplanation(null)).toEqual({ amount: null, active: false, otherBucketsClear: true, driver: null })
+    expect(unexplainedExplanation(undefined).active).toBe(false)
   })
 })

@@ -18,7 +18,14 @@ import { PageShell } from '../../ui/shell/PageShell'
 import { formatDate, formatInt, formatMoney, humanize } from '../../utils/format'
 import { ReconciliationTabs } from './ReconciliationTabs'
 import { BucketBreakdown } from './VarianceBreakdown'
-import { booksAnswered, bucketRows, differencePercent, formatPercent, headlineRun } from './reconciliationModel'
+import {
+  booksAnswered,
+  bucketRows,
+  differencePercent,
+  formatPercent,
+  headlineRun,
+  unexplainedExplanation,
+} from './reconciliationModel'
 import type { BucketRow } from './reconciliationModel'
 
 const EXPORT_COLUMNS: ExportableColumn<BucketRow>[] = [
@@ -65,6 +72,7 @@ export function ReconciliationVariancePage() {
   )
   const run = detail.data ?? null
   const rows = useMemo(() => bucketRows(run?.breakdown ?? null), [run?.breakdown])
+  const unexplained = useMemo(() => unexplainedExplanation(run?.breakdown ?? null), [run?.breakdown])
 
   const loading = detail.loading || (requested <= 0 && recent.loading)
 
@@ -152,6 +160,7 @@ export function ReconciliationVariancePage() {
                 ? 'This run reports no bucket with a value or a count — nothing is standing between the two sides.'
                 : 'No breakdown to show yet.'
             }
+            unexplained={unexplained}
           />
         </Card>
       </RequirePermission>
