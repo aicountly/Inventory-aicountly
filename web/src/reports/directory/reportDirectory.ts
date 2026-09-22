@@ -30,6 +30,7 @@ import {
 } from '../configs/analysisReports'
 import {
   batchStockConfig,
+  openingStockConfig,
   serialStockConfig,
   stockSummaryConfig,
   warehouseStockConfig,
@@ -161,6 +162,14 @@ export const REPORT_DIRECTORY: readonly ReportDirectoryEntry[] = [
     preview: 'bars',
     category: 'stock-movement',
     keywords: ['opening', 'receipts', 'issues', 'closing', 'valuation', 'fifo', 'lifo', 'weighted average', 'period'],
+  }),
+  entry(openingStockConfig, reportRoute(openingStockConfig), {
+    id: 'opening-stock',
+    blurb: 'What the year opened with per item — quantity, cost and value.',
+    tone: 'teal',
+    preview: 'ledger',
+    category: 'valuation-ledger',
+    keywords: ['opening', 'opening stock', 'opening balance', 'inception', 'carry forward', 'year end', 'stock in hand', 'reconciliation'],
   }),
   entry(warehouseStockConfig, reportRoute(warehouseStockConfig), {
     id: 'warehouse-stock',

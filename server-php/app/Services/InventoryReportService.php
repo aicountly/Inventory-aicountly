@@ -197,6 +197,230 @@ class InventoryReportService
         return $out;
     }
 
+    // ------------------------------------------------------------------ opening stock
+
+    /**
+     * Columns the opening stock register may be ordered by.
+     *
+     * Named so the screen can be checked against it (see configs.test.ts): a sort header the
+     * endpoint ignores moves the arrow, returns the same rows, and leaves the reader believing
+     * the top line is the largest opening.
+     */
+    public const OPENING_STOCK_SORTABLE = ['item_name', 'item_sku', 'opening_qty', 'unit_cost', 'opening_value', 'unvalued_qty', 'lines', 'item_id'];
+
+    /**
+     * The financial year's opening stock, per item, exactly as valuation reads it.
+     *
+     * This report has to agree with two other screens at once, so it does not compute an opening
+     * of its own. Each row is the item's collapsed opening layer from
+     * OpeningStockResolver::openingLayersByItem() -- the cost FIFO/LIFO/WAC actually start the
+     * year from -- and `summary.opening_value` is the sum of exactly those layers, which is the
+     * same arithmetic ReconciliationService::inventoryOpeningValue() performs. The total at the
+     * top of this report therefore IS the `inventory_opening_value` the reconciliation tab holds
+     * against Books' Stock-in-Hand opening. Recomputing it here from qty x rate would foot to a
+     * slightly different paisa and turn a clean reconciliation into a phantom variance.
+     *
+     * WHICH rows those are is likewise not this report's choice: once the year-end close has run
+     * into the FY, that FY's own rows are authoritative (even when there are none) and the
+     * company's inception rows at fy_id = 0 are not. `summary.basis` states which of the two the
+     * reader is looking at, because "opening stock" means a different set of rows either side of
+     * a close, and a report that stayed silent about it would read as a contradiction.
+     *
+     * `unvalued_qty` is the column this report exists for as much as the value: opening quantity
+     * entered with no valuation rate is stock the company holds and Inventory values at nil, and
+     * it is the single largest reason an Inventory opening sits below the Books one.
+     *
+     * @param array{item_id?:int, warehouse_id?:int, item_grp_id?:int, stock_cat_id?:int, brand_id?:int, nonzero?:bool, unvalued?:bool, sort?:string, order?:string} $f
+     * @return array{rows: list<array<string, mixed>>, total: int, summary: array<string, mixed>}
+     */
+    public function openingStock(int $cmpId, int $fyId, int $boId, array $f, int $limit, int $offset): array
+    {
+        $itemId = (int) ($f['item_id'] ?? 0) ?: null;
+        $warehouseId = (int) ($f['warehouse_id'] ?? 0) ?: null;
+
+        $lines = $this->openings->openingLines($cmpId, $fyId, $itemId !== null ? [$itemId] : [], $boId > 0 ? $boId : null);
+
+        /** @var array<int, list<array<string, mixed>>> $byItem */
+        $byItem = [];
+        foreach ($lines as $line) {
+            // A warehouse filter narrows to openings entered FOR that warehouse. Rows with no
+            // warehouse are company-wide stock, not "warehouse 0": they belong to the unfiltered
+            // view and to no single warehouse, so they are left out rather than attributed.
+            if ($warehouseId !== null && (int) ($line['warehouse_id'] ?? 0) !== $warehouseId) {
+                continue;
+            }
+            $byItem[(int) $line['item_id']][] = $line;
+        }
+
+        $items = $this->itemMeta($cmpId, array_keys($byItem));
+        $byItem = $this->applyItemFilters($byItem, $items, $f);
+        $warehouses = $this->warehouseMeta($cmpId);
+        $batchNos = $this->batchNumbers($cmpId, $byItem);
+
+        $rows = [];
+        foreach ($byItem as $id => $itemLines) {
+            $row = $this->itemColumns($items[$id] ?? null, (int) $id)
+                + $this->openingRowFigures($itemLines)
+                + $this->openingRowScope($itemLines, $warehouses, $batchNos);
+            $rows[] = $row;
+        }
+
+        if (!empty($f['nonzero'])) {
+            $rows = array_values(array_filter($rows, static fn ($r) => abs((float) $r['opening_qty']) > self::EPS || abs((float) $r['opening_value']) > self::EPS));
+        }
+        if (!empty($f['unvalued'])) {
+            $rows = array_values(array_filter($rows, static fn ($r) => (float) $r['unvalued_qty'] > self::EPS));
+        }
+
+        $summary = [
+            'items'        => count($rows),
+            'lines'        => 0,
+            'opening_qty'  => 0.0,
+            'opening_value' => 0.0,
+            'unvalued_qty' => 0.0,
+            'unvalued_items' => 0,
+            'warehouses'   => [],
+        ];
+        foreach ($rows as $row) {
+            $summary['lines'] += (int) $row['lines'];
+            $summary['opening_qty'] += (float) $row['opening_qty'];
+            $summary['opening_value'] += (float) $row['opening_value'];
+            $summary['unvalued_qty'] += (float) $row['unvalued_qty'];
+            if ((float) $row['unvalued_qty'] > self::EPS) {
+                $summary['unvalued_items']++;
+            }
+            foreach ((array) $row['warehouse_ids'] as $wid) {
+                $summary['warehouses'][(int) $wid] = true;
+            }
+        }
+        foreach (['opening_qty', 'opening_value', 'unvalued_qty'] as $k) {
+            $summary[$k] = round($summary[$k], 4);
+        }
+        $summary['warehouses'] = count($summary['warehouses']);
+        // Which set of rows this is, and the fy_id they were actually read from. A reader
+        // comparing two companies needs to know that one is showing a carried-forward year and
+        // the other the company's inception opening.
+        $carried = $fyId > 0 && FyCarryForwardStatus::hasRunInto($cmpId, $fyId);
+        $summary['basis'] = $carried ? 'carry_forward' : 'master_inception';
+        $summary['source_fy_id'] = $carried ? $fyId : 0;
+        $summary['warehouse_id'] = $warehouseId;
+
+        self::sortRows($rows, $f['sort'] ?? 'item_name', $f['order'] ?? 'ASC', self::OPENING_STOCK_SORTABLE);
+
+        return ['rows' => array_slice($rows, $offset, $limit), 'total' => count($rows), 'summary' => $summary];
+    }
+
+    /**
+     * One item's opening figures, built from the same layer collapse valuation uses.
+     *
+     * @param list<array<string, mixed>> $lines
+     * @return array<string, mixed>
+     */
+    private function openingRowFigures(array $lines): array
+    {
+        $layers = [];
+        $unvaluedQty = 0.0;
+        $nonPositive = 0;
+        foreach ($lines as $line) {
+            $layer = OpeningStockResolver::layerFromOpeningLine($line);
+            if ($layer === null) {
+                // Zero or negative opening quantity: it carries no layer, so it is no part of
+                // what the year opens with. Counted, never silently dropped.
+                $nonPositive++;
+                continue;
+            }
+            $layers[] = $layer;
+            if ($layer['unit_cost'] <= self::EPS) {
+                $unvaluedQty += $layer['qty_remaining'];
+            }
+        }
+        $collapsed = OpeningStockResolver::collapse($layers);
+        $qty = $collapsed === [] ? 0.0 : (float) $collapsed[0]['qty_remaining'];
+        $cost = $collapsed === [] ? 0.0 : (float) $collapsed[0]['unit_cost'];
+
+        return [
+            'opening_qty'       => $qty,
+            'unit_cost'         => $cost,
+            // Exactly what inventoryOpeningValue() adds up for this item.
+            'opening_value'     => round($qty * $cost, 4),
+            'unvalued_qty'      => round($unvaluedQty, 4),
+            'lines'             => count($lines),
+            'non_positive_lines' => $nonPositive,
+        ];
+    }
+
+    /**
+     * Where one item's opening sits: warehouses, batches and how it got there.
+     *
+     * @param list<array<string, mixed>> $lines
+     * @param array<int, array<string, mixed>> $warehouses
+     * @param array<int, string> $batchNos
+     * @return array<string, mixed>
+     */
+    private function openingRowScope(array $lines, array $warehouses, array $batchNos): array
+    {
+        $whIds = [];
+        $whNames = [];
+        $batches = [];
+        $sources = [];
+        foreach ($lines as $line) {
+            $wid = (int) ($line['warehouse_id'] ?? 0);
+            if ($wid > 0) {
+                $whIds[$wid] = true;
+                $whNames[$warehouses[$wid]['warehouse_name'] ?? ('Warehouse #' . $wid)] = true;
+            } else {
+                $whNames[''] = true; // company-wide; named by the client, not here
+            }
+            $bid = (int) ($line['batch_id'] ?? 0);
+            if ($bid > 0) {
+                $batches[$batchNos[$bid] ?? ('#' . $bid)] = true;
+            }
+            $kind = trim((string) ($line['source_kind'] ?? ''));
+            if ($kind !== '') {
+                $sources[$kind] = true;
+            }
+        }
+        unset($whNames['']);
+
+        return [
+            'warehouse_ids'   => array_values(array_map('intval', array_keys($whIds))),
+            'warehouse_names' => array_values(array_keys($whNames)),
+            'batch_nos'       => array_values(array_keys($batches)),
+            'source_kinds'    => array_values(array_keys($sources)),
+        ];
+    }
+
+    /**
+     * batch_id => batch_no for every batch named by an opening line.
+     *
+     * @param array<int, list<array<string, mixed>>> $byItem
+     * @return array<int, string>
+     */
+    private function batchNumbers(int $cmpId, array $byItem): array
+    {
+        $ids = [];
+        foreach ($byItem as $lines) {
+            foreach ($lines as $line) {
+                $bid = (int) ($line['batch_id'] ?? 0);
+                if ($bid > 0) {
+                    $ids[$bid] = true;
+                }
+            }
+        }
+        if ($ids === []) {
+            return [];
+        }
+        $out = [];
+        $db = \Config\Database::connect();
+        foreach (array_chunk(array_keys($ids), 500) as $chunk) {
+            foreach ($db->table('inv_batches')->select('batch_id, batch_no')->where('cmp_id', $cmpId)->whereIn('batch_id', $chunk)->get()->getResultArray() as $r) {
+                $out[(int) $r['batch_id']] = (string) $r['batch_no'];
+            }
+        }
+
+        return $out;
+    }
+
     // ------------------------------------------------------------------ item ledger
 
     /**

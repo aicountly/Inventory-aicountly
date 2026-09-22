@@ -147,6 +147,19 @@ const summaries: Record<string, unknown> = {
     trend: null,
     whole: true,
   },
+  // OpeningStockSummary — the opening position, with the basis it was read on.
+  'opening-stock': {
+    items: 3,
+    lines: 5,
+    opening_qty: 140,
+    opening_value: 91250,
+    unvalued_qty: 25,
+    unvalued_items: 1,
+    warehouses: 2,
+    basis: 'master_inception',
+    source_fy_id: 0,
+    warehouse_id: null,
+  },
   'stock-balances': {
     total: 4,
     pageRows: 4,

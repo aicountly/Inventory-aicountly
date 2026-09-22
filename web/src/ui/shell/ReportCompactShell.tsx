@@ -33,6 +33,17 @@ export interface ReportCompactShellProps {
    * as a whole instead, and the table takes a bounded scroll box of its own.
    */
   fill?: boolean
+  /**
+   * Cap the page at `max-w-screen-2xl` (1536px) instead of letting it use the window.
+   *
+   * A register IS its grid, and the widest of them declare a `minWidth` well past 1536px —
+   * the stock balance register asks for 1600px on its own. Centred inside a 1536px column on
+   * a 1920 or 2560 monitor, such a grid scrolled sideways from the first paint while a third
+   * of the screen sat empty either side of it, which is the "the window is tiny" complaint.
+   * So the register shell fills what the app frame gives it and this is the opt-out, kept for
+   * a future screen whose content is prose rather than rows.
+   */
+  narrow?: boolean
   /** `page` only: decoration beside the title, shown only at ≥1536px. */
   headerAside?: ReactNode
   /**
@@ -79,6 +90,7 @@ export function ReportCompactShell({
   headerActions,
   headerVariant = 'compact',
   fill = true,
+  narrow = false,
   headerAside,
   headerBadge,
   toolbar,
@@ -127,6 +139,7 @@ export function ReportCompactShell({
   return (
     <PageShell
       compact
+      fullBleed={!narrow}
       paddingBottom={false}
       className={cx(
         'flex flex-col',

@@ -456,6 +456,25 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
     [selectColumn, visibleColumns, actionsColumn],
   )
 
+  /**
+   * The table's minimum width, scaled to the columns actually on screen.
+   *
+   * `config.minWidth` is declared for a register's FULL column set — the stock balance
+   * register asks for 1600px across its fifteen columns — but six of those are hidden by
+   * default and a reader can hide more. Held at the declared figure, a nine-column grid
+   * forces a horizontal scrollbar it does not need and stretches those nine across sixteen
+   * columns' worth of room. Scaling by the share of columns shown keeps a wide register wide
+   * and lets a narrowed one fit the window; the floor stops a two-column view collapsing
+   * into an unreadable ribbon.
+   */
+  const tableMinWidth = useMemo(() => {
+    const declared = config.minWidth ?? 1100
+    const total = config.columns.length
+    const shown = visibleColumns.length
+    if (total <= 0 || shown >= total) return declared
+    return Math.max(640, Math.round((declared * shown) / total))
+  }, [config.minWidth, config.columns.length, visibleColumns.length])
+
   // ---- totals --------------------------------------------------------------
   const totals = useMemo(() => {
     if (!config.totals || summary === undefined) return undefined
@@ -976,7 +995,7 @@ export function ReportPage<T, S>({ config }: { config: RegisterConfig<T, S> }) {
             searchInputRef={searchInputRef}
             rowClassName={rowClassName}
             totals={totals}
-            minWidth={config.minWidth ?? 1100}
+            minWidth={tableMinWidth}
             empty={
               emptyUnfiltered ?? (
                 <EmptyState

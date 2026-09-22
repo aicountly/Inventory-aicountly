@@ -56,6 +56,51 @@ export interface StockSummarySummary {
 }
 
 /**
+ * One item's opening stock for the financial year — the collapsed layer valuation starts from,
+ * not the rows as they were typed. Several opening lines for one item (a warehouse split, a
+ * batch split, an alternate unit) come back as the one blended layer FIFO/LIFO/WAC actually
+ * open on, which is why `opening_qty` and `unit_cost` are in base units.
+ */
+export interface OpeningStockRow extends ReportItemColumns {
+  opening_qty: number
+  unit_cost: number
+  opening_value: number
+  /**
+   * Base quantity opened with no valuation rate.
+   *
+   * Stock the company holds and Inventory values at nil — the single largest reason an
+   * Inventory opening sits below the Books one, so it is a column rather than something a
+   * reader has to infer from a zero value.
+   */
+  unvalued_qty: number
+  /** Opening rows behind this line, and how many of them carry no layer (qty ≤ 0). */
+  lines: number
+  non_positive_lines: number
+  warehouse_ids: number[]
+  warehouse_names: string[]
+  batch_nos: string[]
+  source_kinds: string[]
+}
+
+/**
+ * `basis` is the register's disclosure of WHICH rows it read: once the year-end close has run
+ * into the FY those rows are authoritative, and before it the company's inception opening is.
+ * The same FY legitimately means different stock either side of that run.
+ */
+export interface OpeningStockSummary {
+  items: number
+  lines: number
+  opening_qty: number
+  opening_value: number
+  unvalued_qty: number
+  unvalued_items: number
+  warehouses: number
+  basis: 'carry_forward' | 'master_inception'
+  source_fy_id: number
+  warehouse_id: number | null
+}
+
+/**
  * The warehouse-stock register's verdict on one row, worst first.
  *
  * Decided by the server (InventoryReportService::stockHealth) from the item's own
