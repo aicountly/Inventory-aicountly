@@ -75,8 +75,14 @@ class BooksApiClient
         return $this->request('GET', 'integration/inventory/posting-status?cmp_id=' . $cmpId . '&fy_id=' . $fyId);
     }
 
-    /** @return array{ok:bool, status:int, body:?array, error:?string} */
-    public function request(string $method, string $path, ?array $body = null): array
+    /**
+     * @param list<string> $extraHeaders Additional raw header lines, e.g. an operator's own
+     *     `Authorization: Bearer <ses_key>` for a request that must run under Books' own
+     *     per-user permission check rather than this service's blanket service-key trust
+     *     (see BooksBulkTaxUpdateService).
+     * @return array{ok:bool, status:int, body:?array, error:?string}
+     */
+    public function request(string $method, string $path, ?array $body = null, array $extraHeaders = []): array
     {
         $startedAt = microtime(true);
 
@@ -102,14 +108,14 @@ class BooksApiClient
 
         $url = $this->apiRoot() . '/' . ltrim($path, '/');
         $ch = curl_init($url);
-        $headers = [
+        $headers = array_merge([
             'Accept: application/json',
             'Content-Type: application/json',
             'X-Service-Key: ' . $key,
             'X-Source-App: inventory',
             // Name ourselves so Books will not call Inventory back while serving this.
             CrossServiceCallContext::HEADER . ': inventory',
-        ];
+        ], $extraHeaders);
         $opts = [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_CUSTOMREQUEST  => strtoupper($method),
