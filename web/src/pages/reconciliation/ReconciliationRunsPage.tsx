@@ -33,6 +33,7 @@ import { StatusBadge } from '../../ui/StatusBadge'
 import { Tooltip } from '../../ui/Tooltip'
 import { cx } from '../../ui/cx'
 import { BreadcrumbHeader } from '../../ui/shell/BreadcrumbHeader'
+import { HealPanel } from '../../reconciliation/HealPanel'
 import { PageShell } from '../../ui/shell/PageShell'
 import { SmartTable } from '../../ui/shell/SmartTable'
 import type { SmartColumn } from '../../ui/shell/SmartTable'
@@ -463,6 +464,7 @@ export function ReconciliationRunsPage() {
                 >
                   {running ? 'Running…' : 'Run Reconciliation'}
                 </Button>
+                <HealPanel onHealed={reloadAll} />
               </>
             ) : null}
           </div>

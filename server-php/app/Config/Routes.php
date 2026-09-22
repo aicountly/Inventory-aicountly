@@ -207,6 +207,8 @@ $routes->group('', ['namespace' => 'App\Controllers\Api', 'filter' => 'cors'], s
         $routes->post('reconciliation/run', 'ReconciliationController::run');
         $routes->get('reconciliation/(:num)', 'ReconciliationController::show/$1');
         $routes->get('reconciliation/posting-status', 'ReconciliationController::postingStatus');
+        $routes->get('reconciliation/status', 'ReconciliationController::status');
+        $routes->post('reconciliation/heal', 'ReconciliationController::heal');
 
         // Integration (Books -> Inventory events, outbox)
         $routes->post('integration/events', 'IntegrationController::inbound');
