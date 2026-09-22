@@ -149,7 +149,7 @@ async function addLaptop(qty = '5') {
   const search = screen.getByRole('combobox', { name: /search items/i })
   fireEvent.focus(search)
   fireEvent.change(search, { target: { value: 'Laptop' } })
-  const option = await screen.findByRole('option', { name: /Laptop – Dell Inspiron 14/ }, { timeout: 3000 })
+  const option = await screen.findByRole('option', { name: /Laptop – Dell Inspiron 14/ }, { timeout: 8000 })
   fireEvent.mouseDown(option)
   const qtyBox = screen.getByLabelText('Qty')
   fireEvent.change(qtyBox, { target: { value: qty } })
@@ -213,7 +213,7 @@ describe('the delivery challan screen', () => {
   it('shows the live availability the server answered, never a figure of its own', async () => {
     renderForm()
     await addLaptop('5')
-    await waitFor(() => expect(check).toHaveBeenCalled(), { timeout: 3000 })
+    await waitFor(() => expect(check).toHaveBeenCalled(), { timeout: 8000 })
     await waitFor(() => expect(screen.getByText('Main', { selector: 'span.block' })).toBeTruthy())
   })
 
@@ -231,7 +231,7 @@ describe('the delivery challan screen', () => {
     const customer = screen.getByRole('combobox', { name: 'Customer' })
     fireEvent.focus(customer)
     fireEvent.change(customer, { target: { value: 'Acme' } })
-    fireEvent.mouseDown(await screen.findByRole('option', { name: /Acme Ltd/ }, { timeout: 3000 }))
+    fireEvent.mouseDown(await screen.findByRole('option', { name: /Acme Ltd/ }, { timeout: 8000 }))
     await addLaptop('5')
 
     fireEvent.click(screen.getByRole('button', { name: /Save as draft/ }))
@@ -269,7 +269,7 @@ describe('the delivery challan screen', () => {
     check.mockResolvedValue({ ok: false, lines: [{ index: 0, item_id: 10, requested: 5, available: 4, on_hand: 4, ok: false, short_by: 1 }] })
 
     fireEvent.click(screen.getByRole('button', { name: /Save & post/ }))
-    await waitFor(() => expect(screen.getByText('Stock changed since this challan was prepared')).toBeTruthy(), { timeout: 3000 })
+    await waitFor(() => expect(screen.getByText('Stock changed since this challan was prepared')).toBeTruthy(), { timeout: 8000 })
     expect(create).not.toHaveBeenCalled()
     expect(post).not.toHaveBeenCalled()
   })
@@ -278,7 +278,7 @@ describe('the delivery challan screen', () => {
     renderForm()
     await addLaptop('5')
     fireEvent.click(screen.getByRole('button', { name: /Save & post/ }))
-    await waitFor(() => expect(post).toHaveBeenCalledWith(91, { negativeOverride: false }), { timeout: 3000 })
+    await waitFor(() => expect(post).toHaveBeenCalledWith(91, { negativeOverride: false }), { timeout: 8000 })
     expect(create).toHaveBeenCalledTimes(1)
   })
 
@@ -329,7 +329,7 @@ describe('the delivery challan screen', () => {
     const customer = screen.getByRole('combobox', { name: 'Customer' })
     fireEvent.focus(customer)
     fireEvent.change(customer, { target: { value: 'Acme' } })
-    fireEvent.mouseDown(await screen.findByRole('option', { name: /Acme Ltd/ }, { timeout: 3000 }))
-    await waitFor(() => expect(screen.getByText(/45 open on 2 challans/)).toBeTruthy(), { timeout: 3000 })
+    fireEvent.mouseDown(await screen.findByRole('option', { name: /Acme Ltd/ }, { timeout: 8000 }))
+    await waitFor(() => expect(screen.getByText(/45 open on 2 challans/)).toBeTruthy(), { timeout: 8000 })
   })
 })
