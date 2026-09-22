@@ -213,6 +213,12 @@ $routes->group('', ['namespace' => 'App\Controllers\Api', 'filter' => 'cors'], s
         $routes->post('integration/outbox/(:num)/replay', 'IntegrationController::replay/$1');
         $routes->post('integration/outbox/dispatch', 'IntegrationController::dispatch');
 
+        // Items -> Bulk Tax Rate Update, proxied to Books' Operations -> Bulk Update (item_tax_category)
+        $routes->get('operations/bulk-tax-update/records', 'BulkTaxUpdateController::records');
+        $routes->get('operations/bulk-tax-update/tax-categories', 'BulkTaxUpdateController::taxCategories');
+        $routes->post('operations/bulk-tax-update/validate', 'BulkTaxUpdateController::validateBatch');
+        $routes->post('operations/bulk-tax-update/apply', 'BulkTaxUpdateController::apply');
+
         // Audit
         $routes->get('audit-log', 'AuditController::index');
         $routes->get('audit-log/summary', 'AuditController::summary');

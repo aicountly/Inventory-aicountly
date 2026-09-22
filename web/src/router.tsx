@@ -5,6 +5,7 @@ import { renderDocumentRoutes } from './documents/routes'
 import NotFound from './pages/NotFound'
 import { ItemFormPage } from './pages/items/ItemFormPage'
 import { ItemsBulkEditPage } from './pages/items/bulkEdit/ItemsBulkEditPage'
+import { BulkTaxUpdatePage } from './pages/items/BulkTaxUpdatePage'
 import { ItemsListPage } from './pages/items/ItemsListPage'
 import { BomFormPage } from './pages/masters/BomFormPage'
 import { BillOfMaterialsPage } from './pages/masters/bom/BillOfMaterialsPage'
@@ -55,6 +56,7 @@ export function AppRoutes() {
 
         <Route path="items" element={<ItemsListPage />} />
         <Route path="items/bulk-edit" element={<ItemsBulkEditPage />} />
+        <Route path="items/bulk-tax-update" element={<BulkTaxUpdatePage />} />
         <Route path="items/new" element={<ItemFormPage />} />
         <Route path="items/:id" element={<ItemFormPage />} />
 

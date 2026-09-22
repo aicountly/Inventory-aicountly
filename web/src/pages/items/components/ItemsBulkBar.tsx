@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { CheckCircle2, CircleSlash, Download, PencilLine, Trash2, X } from 'lucide-react'
+import { CheckCircle2, CircleSlash, Download, PencilLine, Percent, Trash2, X } from 'lucide-react'
 import { Button } from '../../../ui/Button'
 
 export interface ItemsBulkBarProps {
@@ -27,7 +27,9 @@ export interface ItemsBulkBarProps {
  * units, the valuation method — is deliberately absent: those go through the
  * item form or a stock adjustment, one at a time, where the consequence is
  * spelled out. "Change category / group / brand" opens Bulk edit, which already
- * shows the old and new value per item before anything is written.
+ * shows the old and new value per item before anything is written. "Bulk tax
+ * update" opens the tax-category screen, which previews the same way but writes
+ * through Books — the tax rate is not Inventory's to change directly.
  */
 export function ItemsBulkBar({
   count,
@@ -72,6 +74,13 @@ export function ItemsBulkBar({
             >
               <PencilLine className="h-3.5 w-3.5" aria-hidden />
               Bulk edit
+            </Link>
+            <Link
+              to="/items/bulk-tax-update"
+              className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs font-semibold text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+            >
+              <Percent className="h-3.5 w-3.5" aria-hidden />
+              Bulk tax update
             </Link>
           </>
         ) : null}

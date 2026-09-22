@@ -105,6 +105,43 @@ unset Inventory makes no outbound call at all and the Brands screen simply rende
 a revenue column. Setting `BOOKS_BRAND_SALES = 1` in the Inventory `.env` is the only switch; a 404
 from Books is reported to the browser as `not_implemented` rather than as an outage.
 
+## Bulk tax rate update (Inventory → Books, the operator's own session)
+
+`Items → Bulk tax rate update` (`/items/bulk-tax-update`) lets an operator re-assign the GST tax
+category across many items at once — e.g. moving every item on a superseded slab to the rate a
+government notification puts in force, from a chosen effective date. The rate itself is not
+Inventory's: `inv_items` carries only the opaque `books_tax_cat_id`, never a percentage, and
+`ItemsController::booksOwnedStatutoryEdit()` refuses any write to it that does not present Books'
+own service key. So this screen cannot be "Inventory writes its own copy" — every read and write
+goes straight to Books' `Operations → Bulk Update` engine (target `item_tax_category`), which owns
+the tax category, its `rate_percent`, and the with-effect-from history that keeps voucher lines
+resolving the right rate by date.
+
+Unlike every other integration point in this document, the relay does **not** use the shared
+`BOOKS_SERVICE_KEY` / `X-Service-Key` credential. It forwards the human operator's own
+`Authorization: Bearer <ses_key>` — the same portal-wide session Inventory just validated on this
+request — as an extra header on the call to Books (`BooksApiClient::request()`'s `$extraHeaders`
+param). Books therefore authorizes the write exactly as it would from its own screen
+(`masters.items.write` on the operator's Books membership for the company), not as a blanket
+service-to-service trust. An operator with Inventory access but no Books access — or no
+`masters.tax_categories.read` for the tax-category picker specifically — gets Books' own 403,
+surfaced as-is; this proxy adds no authority of its own.
+
+```
+GET/POST /api/v1/operations/bulk-tax-update/{records,tax-categories,validate,apply}   (Inventory, operator's ses_key)
+  -> BooksBulkTaxUpdateService  (hard-scoped to target=item_tax_category, never caller-supplied)
+    -> GET/POST /api/operations/bulk-update/{records,validate,apply}   (Books, same ses_key forwarded)
+    -> GET /api/masters/tax-categories                                  (Books, same ses_key forwarded)
+```
+
+`records` also translates between the two apps' differing list conventions: Inventory speaks
+`limit`/`offset` (`api.list()`, `BaseController::listParams()`), Books speaks `page`/`per_page` —
+translated once in `BulkTaxUpdateController`, so neither the service nor the frontend has to know
+about the other side's pagination style. A non-2xx Books answer (422's per-row validation payload
+included) is reshaped into Inventory's own `{error: {code, message, details}, message}` envelope
+rather than relayed verbatim, so the frontend's `ApiError` carries the validation rows the same way
+every other Inventory error does.
+
 ## Reconciliation
 Inventory's `POST /v1/reconciliation/run` compares its closing stock value with Books' Stock-in-Hand ledger balance (`GET integration/inventory/stock-ledger-balance`) and explains the difference by bucket (opening, pending postings, failed postings, reversed documents, unacknowledged revisions, revaluations, manual journals, missing sources). See `INVENTORY_RECONCILIATION.md`.
 
