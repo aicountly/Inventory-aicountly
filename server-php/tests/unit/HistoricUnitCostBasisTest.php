@@ -93,7 +93,7 @@ final class HistoricUnitCostBasisTest extends TestCase
         };
         $openings = new class extends OpeningStockResolver {
             /** @return array<int, list<array<string, mixed>>> */
-            public function openingLayersByItem(int $cmpId, int $fyId, array $itemIds = []): array
+            public function openingLayersByItem(int $cmpId, int $fyId, array $itemIds = [], ?int $boId = null): array
             {
                 return [];
             }
