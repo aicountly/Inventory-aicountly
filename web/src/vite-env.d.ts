@@ -8,6 +8,8 @@ interface ImportMetaEnv {
   readonly VITE_PRODUCT_KEY: string
   /** Overrides the login portal origin. For local development only. */
   readonly VITE_PORTAL_LOGIN_URL: string
+  /** Overrides the Books SPA origin for cross-app links. Defaults to the `books` entry in config/aicountlyApps.ts. */
+  readonly VITE_BOOKS_APP_URL?: string
   /** GA4 measurement ID for this product. Analytics is disabled when unset. */
   readonly VITE_GA4_SAAS_INVENTORY_MEASUREMENT_ID?: string
   /** Generic GA4 measurement ID fallback, checked when the product-specific one is unset. */
