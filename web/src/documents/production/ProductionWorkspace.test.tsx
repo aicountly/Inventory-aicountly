@@ -141,9 +141,19 @@ function renderWorkspace() {
   )
 }
 
-/** Choose the only BOM on offer and wait for the server explosion to land. */
+/**
+ * Choose the only BOM on offer and wait for the server explosion to land.
+ *
+ * The select renders immediately with just a "Loading…" placeholder option; its real
+ * <option value="7"> only exists once the mocked lookupApi.boms() promise resolves. Firing the
+ * change event before that option exists is a silent no-op on a native <select> -- the browser
+ * has nothing to select -- so this must wait for the option itself, not just the select element,
+ * or the flakiness shows up as "Wooden panel" never appearing no matter how long that later
+ * waitFor is given (confirmed: raising its timeout from 5s to 10s did not help).
+ */
 async function pickBom() {
   const select = await screen.findByRole('combobox', { name: /Bill of materials/ })
+  await screen.findByRole('option', { name: /Office chair - standard/ })
   fireEvent.change(select, { target: { value: '7' } })
   await waitFor(() => expect(screen.getByText('Wooden panel')).toBeTruthy(), { timeout: 10000 })
 }
