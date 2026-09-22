@@ -9,11 +9,27 @@ use CodeIgniter\CLI\CLI;
 use App\Services\CronHeartbeat;
 
 /**
- * php spark inventory:reconcile [--company 1,2 | --all] [--as-of YYYY-MM-DD] [--bo 0]
+ * php spark inventory:reconcile [--company 1,2 | --all | --due N] [--as-of YYYY-MM-DD] [--bo 0]
  *
  * Runs the Inventory ↔ Books reconciliation for the latest financial year of each company
- * and prints the unexplained difference. Schedule nightly; non-zero exit when any company
- * has an unexplained difference or Books was unreachable.
+ * and prints the unexplained difference. Non-zero exit when any company has an unexplained
+ * difference or Books was unreachable.
+ *
+ * --all runs every company with a document, in one invocation — correct at any scale, but the
+ * wall-clock cost (one Books HTTP round-trip plus a valuation snapshot per company) grows with
+ * the company count. Fine for a company list small enough to finish overnight; at a large company
+ * count a single nightly --all sweep can run for hours in one process.
+ *
+ * --due N is the scale-safe alternative: it reconciles only the N companies (from the same
+ * --all universe) least recently reconciled — companies never reconciled sort first — instead of
+ * every company in one pass. No company is ever skipped: every company keeps rising to the front
+ * of the queue as its neighbours get checked, so full coverage still happens, just spread across
+ * many short, cheap invocations (cron every few minutes) instead of one long nightly one. This
+ * deliberately does NOT skip a company merely for having no new Inventory activity — Books can
+ * post a manual journal straight onto its stock ledger with no Inventory-side signal at all
+ * (see ReconciliationService's manual_journal bucket), so "nothing changed here" can only be
+ * known by actually asking Books, which is the one thing this can't cut a corner on. --due only
+ * changes HOW OFTEN a company's turn comes up, never WHETHER it's checked.
  */
 class InventoryReconcile extends BaseCommand
 {
@@ -22,10 +38,11 @@ class InventoryReconcile extends BaseCommand
     protected $group       = 'Inventory';
     protected $name        = 'inventory:reconcile';
     protected $description = 'Reconcile Inventory closing stock value with the Books Stock-in-Hand ledger per company.';
-    protected $usage       = 'inventory:reconcile [--company 1,2 | --all] [--as-of YYYY-MM-DD] [--bo 0]';
+    protected $usage       = 'inventory:reconcile [--company 1,2 | --all | --due N] [--as-of YYYY-MM-DD] [--bo 0]';
     protected $options     = [
         '--company' => 'Comma separated cmp_ids',
-        '--all'     => 'Every company that has documents',
+        '--all'     => 'Every company that has documents, in one run',
+        '--due'     => 'The N companies (of --all\'s universe) least recently reconciled — for a frequent, bounded cron instead of one nightly --all sweep',
         '--as-of'   => 'Closing date (default today)',
         '--bo'      => 'Branch (default 0 = consolidated)',
     ];
@@ -63,14 +80,40 @@ class InventoryReconcile extends BaseCommand
             }
         }
         $db = \Config\Database::connect();
+        $dueOpt = CLI::getOption('due') ?? $params['due'] ?? null;
+        $due = $dueOpt !== null && $dueOpt !== '' ? (int) $dueOpt : null;
+        if ($due !== null) {
+            if (CLI::getOption('company') !== null) {
+                CLI::error('--due cannot be combined with --company.');
+
+                return EXIT_USER_INPUT;
+            }
+            if (CLI::getOption('all') !== null) {
+                CLI::error('--due cannot be combined with --all — --due already scopes to the --all universe.');
+
+                return EXIT_USER_INPUT;
+            }
+            if ($due <= 0) {
+                CLI::error('--due must be a positive number of companies.');
+
+                return EXIT_USER_INPUT;
+            }
+        }
+
         $companies = array_values(array_filter(array_map('intval', explode(',', (string) (CLI::getOption('company') ?? '')))));
         if ($companies === [] && CLI::getOption('all') !== null) {
             $companies = array_map(static fn ($r) => (int) $r['cmp_id'], $db->query('SELECT DISTINCT cmp_id FROM inv_documents ORDER BY cmp_id')->getResultArray());
         }
+        if ($companies === [] && $due !== null) {
+            $companies = $this->dueCompanies($due);
+        }
         if ($companies === []) {
-            CLI::error('Give --company=1,2 or --all');
+            CLI::error('Give --company=1,2, --all, or --due=N');
 
             return EXIT_USER_INPUT;
+        }
+        if ($due !== null) {
+            CLI::write(sprintf('inventory:reconcile --due=%d: %d compan%s picked up (least recently reconciled first)', $due, count($companies), count($companies) === 1 ? 'y' : 'ies'));
         }
         $asOf = (string) (CLI::getOption('as-of') ?? date('Y-m-d'));
         $boId = (int) (CLI::getOption('bo') ?? 0);
@@ -100,5 +143,30 @@ class InventoryReconcile extends BaseCommand
         }
 
         return $bad > 0 ? EXIT_ERROR : EXIT_SUCCESS;
+    }
+
+    /**
+     * The N companies (of the --all universe: distinct cmp_id in inv_documents) least recently
+     * reconciled — a company with no row in inv_reconciliation_runs at all sorts first, ahead of
+     * one reconciled a year ago, since "never checked" is more overdue than any checked date.
+     * cmp_id ASC breaks ties (same last_run, or several companies never yet reconciled) so the
+     * order — and therefore which N are picked — is stable across runs in the same second.
+     *
+     * Public so a test can call it directly without exercising the per-company loop, which
+     * would otherwise need real financial-year data and a reachable Books to run cleanly.
+     *
+     * @return list<int>
+     */
+    public function dueCompanies(int $due): array
+    {
+        $db = \Config\Database::connect();
+
+        return array_map(static fn ($r) => (int) $r['cmp_id'], $db->query(
+            'SELECT d.cmp_id FROM (SELECT DISTINCT cmp_id FROM inv_documents) d'
+            . ' LEFT JOIN (SELECT cmp_id, MAX(created_at) AS last_run FROM inv_reconciliation_runs GROUP BY cmp_id) r ON r.cmp_id = d.cmp_id'
+            . ' ORDER BY r.last_run ASC NULLS FIRST, d.cmp_id ASC'
+            . ' LIMIT ?',
+            [$due],
+        )->getResultArray());
     }
 }
