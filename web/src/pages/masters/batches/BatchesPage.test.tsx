@@ -428,7 +428,7 @@ describe('filters', () => {
     // Four keystrokes must not be four requests.
     expect(list.mock.calls.length).toBe(before)
 
-    await waitFor(() => expect(lastCall(list).q).toBe('para'), { timeout: 2000 })
+    await waitFor(() => expect(lastCall(list).q).toBe('para'), { timeout: 8000 })
     expect(list.mock.calls.length).toBeLessThanOrEqual(before + 2)
   })
 

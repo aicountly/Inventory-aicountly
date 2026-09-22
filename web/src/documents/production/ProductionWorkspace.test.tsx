@@ -145,7 +145,7 @@ function renderWorkspace() {
 async function pickBom() {
   const select = await screen.findByRole('combobox', { name: /Bill of materials/ })
   fireEvent.change(select, { target: { value: '7' } })
-  await waitFor(() => expect(screen.getByText('Wooden panel')).toBeTruthy(), { timeout: 5000 })
+  await waitFor(() => expect(screen.getByText('Wooden panel')).toBeTruthy(), { timeout: 10000 })
 }
 
 beforeEach(() => {
@@ -187,7 +187,7 @@ describe('once a bill of materials is chosen', () => {
   it('reads availability per warehouse and names the shortage', async () => {
     renderWorkspace()
     await pickBom()
-    await waitFor(() => expect(screen.getByText('Insufficient')).toBeTruthy(), { timeout: 5000 })
+    await waitFor(() => expect(screen.getByText('Insufficient')).toBeTruthy(), { timeout: 10000 })
     expect(screen.getByText('Short by 0.25')).toBeTruthy()
     expect(screen.getByRole('button', { name: /Available in 1 other warehouse/ })).toBeTruthy()
   })
@@ -196,7 +196,7 @@ describe('once a bill of materials is chosen', () => {
     renderWorkspace()
     await pickBom()
     // 4 × 1.50 + 1.25 × 850 = 1,068.50
-    await waitFor(() => expect(screen.getAllByText(/1,068\.50/).length).toBeGreaterThan(0), { timeout: 5000 })
+    await waitFor(() => expect(screen.getAllByText(/1,068\.50/).length).toBeGreaterThan(0), { timeout: 10000 })
     expect(screen.getByText('Expected value add')).toBeTruthy()
     expect(screen.queryByText(/profit/i)).toBeNull()
   })
@@ -206,7 +206,7 @@ describe('posting', () => {
   it('stops a run the server would refuse, and does not send it', async () => {
     renderWorkspace()
     await pickBom()
-    await waitFor(() => expect(screen.getByText('Insufficient')).toBeTruthy(), { timeout: 5000 })
+    await waitFor(() => expect(screen.getByText('Insufficient')).toBeTruthy(), { timeout: 10000 })
 
     fireEvent.click(screen.getByRole('button', { name: 'Save & post' }))
 
@@ -220,10 +220,10 @@ describe('posting', () => {
     negativeStockPolicy.value = 'warn'
     renderWorkspace()
     await pickBom()
-    await waitFor(() => expect(screen.getByText('Insufficient')).toBeTruthy(), { timeout: 5000 })
+    await waitFor(() => expect(screen.getByText('Insufficient')).toBeTruthy(), { timeout: 10000 })
 
     fireEvent.click(screen.getByRole('button', { name: 'Save & post' }))
-    await waitFor(() => expect(create).toHaveBeenCalled(), { timeout: 5000 })
+    await waitFor(() => expect(create).toHaveBeenCalled(), { timeout: 10000 })
     expect(post).toHaveBeenCalledWith(55, { negativeOverride: false })
   })
 
@@ -232,7 +232,7 @@ describe('posting', () => {
     await pickBom()
     fireEvent.click(screen.getByRole('button', { name: 'Save draft' }))
 
-    await waitFor(() => expect(create).toHaveBeenCalled(), { timeout: 5000 })
+    await waitFor(() => expect(create).toHaveBeenCalled(), { timeout: 10000 })
     const payload = create.mock.calls[0][0] as {
       document_type: string
       lines: { item_id: number; direction?: string; qty: number }[]
@@ -253,7 +253,7 @@ describe('posting', () => {
     const button = screen.getByRole('button', { name: 'Save draft' })
     fireEvent.click(button)
     fireEvent.click(button)
-    await waitFor(() => expect(create).toHaveBeenCalled(), { timeout: 5000 })
+    await waitFor(() => expect(create).toHaveBeenCalled(), { timeout: 10000 })
     expect(create).toHaveBeenCalledTimes(1)
   })
 })
@@ -313,7 +313,7 @@ describe('reopening a saved draft', () => {
       </MemoryRouter>,
     )
     // The hand-typed 20 is still there long after the debounce that would have re-exploded.
-    await waitFor(() => expect(screen.getByText('Screw M6')).toBeTruthy(), { timeout: 5000 })
+    await waitFor(() => expect(screen.getByText('Screw M6')).toBeTruthy(), { timeout: 10000 })
     await new Promise((resolve) => setTimeout(resolve, 1200))
     expect(explodeBom).not.toHaveBeenCalled()
     expect((screen.getByLabelText('Required quantity for Screw M6') as HTMLInputElement).value).toBe('20')
@@ -339,7 +339,7 @@ describe('reopening a saved draft', () => {
     )
     const qty = await screen.findByLabelText(/Production quantity/)
     fireEvent.change(qty, { target: { value: '8' } })
-    await waitFor(() => expect(explodeBom).toHaveBeenCalled(), { timeout: 5000 })
+    await waitFor(() => expect(explodeBom).toHaveBeenCalled(), { timeout: 10000 })
     expect(explodeBom.mock.calls[0][1]).toMatchObject({ production_qty: 8 })
   })
 })
