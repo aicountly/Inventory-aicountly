@@ -8,6 +8,7 @@ use App\Services\AuditService;
 use App\Services\InventorySettingsService;
 use App\Services\MasterMirrorService;
 use App\Services\OpeningStockResolver;
+use App\Services\OpeningValueSyncService;
 use App\Services\StockBalanceService;
 use App\Services\UnitConversionService;
 use App\Services\ValuationEngine;
@@ -1094,7 +1095,17 @@ class ItemsController extends BaseController
         if ($consumed > 0) {
             (new \App\Services\RecalculationService($engine))->enqueue($cmpId, $fyId ?: null, $itemId, '0001-01-01', 'manual', null, $actor);
         }
-        (new StockBalanceService())->rebuildOnHand($cmpId, $fyId > 0 ? $fyId : null);
+        $balances = new StockBalanceService();
+        $balances->rebuildOnHand($cmpId, $fyId > 0 ? $fyId : null);
+
+        // Push to Books against the company's real current FY, not this write's own $fyId — a
+        // master-inception write (fyId 0) still needs to reach whichever real FY Books and
+        // reconciliation both use for this company, and OpeningStockResolver already resolves
+        // fyId 0 vs a carried-forward year transparently once it has a real fy_id to ask about.
+        $realFyId = $balances->latestFyId($cmpId);
+        if ($realFyId > 0) {
+            (new OpeningValueSyncService())->syncIfChanged($cmpId, $realFyId);
+        }
     }
 
     /** @return array{ok:bool, message?:string} */
