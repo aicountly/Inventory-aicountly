@@ -216,9 +216,18 @@ describe('the register engine renders a config', () => {
     // which does have a document, so the test failed by navigating exactly as
     // it is asserting the register must not. That made it fail about one run
     // in seven with a message about the wrong thing.
-    const grid = (await screen.findByText('GRN-001')).closest('table') as HTMLElement
+    const documented = await screen.findByText('GRN-001')
+    const grid = documented.closest('table') as HTMLElement
     const body = grid.querySelector('tbody') as HTMLElement
-    const orphan = within(body).getAllByRole('row')[1]
+    // Both halves matter. Waiting for the body to hold exactly the fixture's two rows stops the
+    // click landing while the grid is still filling — the row at index 1 mid-render is whatever
+    // happens to be there. Then the orphan is found as "the row that is NOT the documented one"
+    // rather than by position, so it cannot silently become the row above, which HAS a document
+    // and would make this test fail by navigating exactly as it asserts the register must not.
+    await waitFor(() => expect(within(body).getAllByRole('row')).toHaveLength(ROWS.length))
+    const documentedRow = documented.closest('tr')
+    const orphan = within(body).getAllByRole('row').find((row) => row !== documentedRow) as HTMLElement
+    expect(orphan).toBeTruthy()
     fireEvent.click(orphan)
     fireEvent.keyDown(orphan, { key: 'Enter' })
     expect(screen.queryByText('Document screen')).toBeNull()
