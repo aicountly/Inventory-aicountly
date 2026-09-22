@@ -74,6 +74,13 @@ export interface ReconciliationBreakdown {
   residual: number | null
   books: { available: boolean; status: number; error: string | null }
   buckets: Record<string, ReconciliationBucket>
+  /**
+   * Inventory-internal-only figures (valuation_method_variance, transfer_valuation_gap) --
+   * neither reads anything Books reported, so neither is counted in `explained_total`/`residual`
+   * and neither belongs in `buckets`, where it would read as a real Books comparison. Absent on
+   * runs computed before this field existed.
+   */
+  diagnostics?: Record<string, ReconciliationBucket>
   error?: string
 }
 

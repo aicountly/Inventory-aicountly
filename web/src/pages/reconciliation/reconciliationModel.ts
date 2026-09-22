@@ -233,11 +233,21 @@ export const BUCKET_HELP: Record<string, string> = {
   unacknowledged_valuation_revisions: 'COGS revisions Inventory published that Books has not applied yet.',
   revaluation: 'Revaluation journals Books recorded in adjustment mode.',
   manual_journal: 'Manual journals on the Stock-in-Hand ledger that have no stock document behind them.',
-  valuation_method_variance: 'Closing snapshot versus opening + movement values — mixed methods, WAC rounding or back-dated recosts.',
-  transfer_valuation_gap: 'Stock transfers whose receiving side carries no cost layer (inherited from legacy data).',
   missing_source: 'Inventory documents that claim a Books source Books cannot find.',
   rounding: 'Sub-rupee rounding between line values and ledger amounts.',
-  unexplained: 'What is left after every bucket above. Must be zero before sign-off.',
+  unexplained: 'What is left after every bucket above, compared against Books. Must be zero before sign-off.',
+}
+
+/**
+ * Diagnostics are computed entirely from Inventory's own tables — neither reads anything Books
+ * reported. They can be large even when Inventory and Books agree on every transaction: a
+ * point-in-time closing valuation "forgets" a historical cost once the stock that carried it
+ * sells through, while Inventory's own reconstructed running ledger never does. Useful context
+ * for an unexplained residual, never evidence on its own that Books and Inventory disagree.
+ */
+export const DIAGNOSTIC_HELP: Record<string, string> = {
+  valuation_method_variance: 'Closing snapshot versus opening + movement values, both computed inside Inventory — mixed methods, WAC rounding, negative stock or back-dated recosts. Not a Books comparison.',
+  transfer_valuation_gap: 'Stock transfers whose receiving side carries no cost layer (inherited from legacy data), computed entirely from Inventory’s own movements. Not a Books comparison.',
 }
 
 /** The bucket names, in the words the screen uses. */
@@ -301,4 +311,38 @@ export function bucketRows(
 export function actionableBucketCount(breakdown: ReconciliationBreakdown | null | undefined): number | null {
   if (!breakdown?.buckets) return null
   return bucketRows(breakdown).length
+}
+
+/**
+ * Diagnostics as rows, same shape as `bucketRows()` but reading `breakdown.diagnostics` and
+ * `DIAGNOSTIC_HELP` — kept as a separate function, not a flag on `bucketRows()`, so a screen
+ * cannot render the two lists interchangeably by accident.
+ */
+export function diagnosticRows(
+  breakdown: ReconciliationBreakdown | null | undefined,
+  options: { includeEmpty?: boolean } = {},
+): BucketRow[] {
+  if (!breakdown?.diagnostics) return []
+  return Object.entries(breakdown.diagnostics)
+    .map(([key, bucket]) => {
+      const amount = toNumber(bucket?.amount) ?? 0
+      const count = toNumber(bucket?.count) ?? 0
+      const documents = Array.isArray(bucket?.documents)
+        ? bucket.documents.length
+        : Array.isArray(bucket?.entries)
+          ? bucket.entries.length
+          : 0
+      return {
+        key,
+        label: bucketLabel(key),
+        help: DIAGNOSTIC_HELP[key] ?? '',
+        amount,
+        count,
+        share: null,
+        documents,
+        bucket: bucket as ReconciliationBucket,
+      }
+    })
+    .filter((row) => options.includeEmpty || Math.abs(row.amount) >= 0.005 || row.count > 0)
+    .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))
 }

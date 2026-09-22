@@ -244,6 +244,68 @@ final class ReconciliationBreakdownTest extends IntegrationTestCase
         $this->assertArrayNotHasKey('MISSING_IN_INVENTORY', $summary);
     }
 
+    /**
+     * A negative-stock WAC scenario where Inventory's own point-in-time closing valuation and
+     * its own reconstructed running ledger genuinely diverge (the documented trigger for
+     * valuation_method_variance: negative stock priced at the last known cost). This is the exact
+     * shape of the real production incident that prompted the diagnostics split: a large internal
+     * variance sitting alongside a completely clean Books comparison (every other bucket is 0
+     * here) must NEVER be counted as if it "explained" a Books difference.
+     */
+    public function testValuationMethodVarianceIsNeverCountedAsExplainingTheBooksDifference(): void
+    {
+        $pcs = $this->makeUnit();
+        $wh = $this->makeWarehouse();
+        $item = $this->makeItem('Widget', $pcs, 'WAC');
+        $this->setOpening($item, $pcs, 10, 100);
+        // Sell 15 against 10 on hand: 5 go negative, priced at the last known cost (100).
+        $this->postDoc(['document_type' => 'SALES_ISSUE', 'document_date' => '2026-04-15', 'source_document_type' => 'books.sales', 'source_document_id' => 900, 'source_document_no' => 'S-1',
+            'lines' => [['item_id' => $item, 'warehouse_id' => $wh, 'unit_id' => $pcs, 'qty' => 15, 'rate' => 300, 'amount' => 4500]]]);
+        $this->postDoc(['document_type' => 'PURCHASE_RECEIPT', 'document_date' => '2026-04-20', 'source_document_type' => 'books.purchase', 'source_document_id' => 901, 'source_document_no' => 'P-1',
+            'lines' => [['item_id' => $item, 'warehouse_id' => $wh, 'unit_id' => $pcs, 'qty' => 3, 'rate' => 500, 'amount' => 1500]]]);
+        // Books' opening matches Inventory's exactly, and there is nothing else pending, failed,
+        // reversed, revised, revalued, manually journalled or missing -- every genuine bucket is 0.
+        $this->books->balanceResponse = ['ok' => true, 'status' => 200, 'error' => null, 'body' => ['data' => ['balance' => 0, 'opening_balance' => 1000]]];
+        $this->books->postingResponse = ['ok' => true, 'status' => 200, 'error' => null, 'body' => ['data' => []]];
+
+        $run = $this->reconciliation->run($this->cmpId, $this->fyId, $this->boId, '2026-04-30');
+
+        $this->assertEqualsWithDelta(-1000.0, $run['inventory_closing_value'], 0.0001);
+        $this->assertEqualsWithDelta(-1000.0, $run['difference'], 0.0001);
+
+        $diagnostics = $run['breakdown']['diagnostics'];
+        $this->assertEqualsWithDelta(-2000.0, $diagnostics['valuation_method_variance']['amount'], 0.0001, 'the scenario must produce a real, sizeable internal variance, not a trivial one');
+        $this->assertSame(1, $diagnostics['valuation_method_variance']['count']);
+        $this->assertEqualsWithDelta(0.0, $diagnostics['transfer_valuation_gap']['amount'], 0.0001);
+
+        $b = $run['breakdown']['buckets'];
+        $this->assertArrayNotHasKey('valuation_method_variance', $b, 'a diagnostic must never appear in buckets, where it would look like a Books comparison');
+        $this->assertArrayNotHasKey('transfer_valuation_gap', $b, 'a diagnostic must never appear in buckets, where it would look like a Books comparison');
+        foreach (['opening_difference', 'pending_posting', 'failed_posting', 'cancelled_reversed', 'unacknowledged_valuation_revisions', 'revaluation', 'manual_journal', 'missing_source'] as $genuine) {
+            $this->assertEqualsWithDelta(0.0, $b[$genuine]['amount'], 0.0001, "$genuine must be 0: every genuine Books-comparison bucket is clean in this scenario");
+        }
+
+        // The whole -1000 difference is therefore genuinely unexplained -- not silently absorbed
+        // by a diagnostic that never compared anything against Books. This is the actual bug: had
+        // valuation_method_variance's -2000 been summed into $explained the old way, residual
+        // would have come out +1000 (difference -1000 minus explained -2000) -- a materially
+        // different AND wrong-signed number, landing in the wrong bucket (rounding vs unexplained)
+        // for a completely different reason than the real one.
+        $this->assertEqualsWithDelta(0.0, $run['breakdown']['explained_total'], 0.0001);
+        $this->assertEqualsWithDelta(-1000.0, $run['breakdown']['residual'], 0.0001);
+        $this->assertEqualsWithDelta(-1000.0, $b['unexplained']['amount'], 0.0001);
+        $this->assertSame(1, $b['unexplained']['count']);
+        $this->assertEqualsWithDelta(0.0, $b['rounding']['amount'], 0.0001);
+
+        // sum(buckets) == difference must hold using ONLY the buckets that actually compare
+        // against Books -- diagnostics are, correctly, not part of this invariant at all.
+        $sum = 0.0;
+        foreach ($b as $bucket) {
+            $sum += (float) $bucket['amount'];
+        }
+        $this->assertEqualsWithDelta($run['difference'], $sum, 0.0001);
+    }
+
     public function testBooksUnavailableStillPersistsInventorySide(): void
     {
         $this->scenario();

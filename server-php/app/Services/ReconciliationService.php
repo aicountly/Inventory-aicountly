@@ -9,7 +9,8 @@ use Config\DocumentTypeRegistry;
  *
  * A run compares the Inventory closing valuation (ValuationReplayService::snapshot as at a
  * date) with the stock-ledger balance Books reports for the same company / FY / branch, and
- * explains the difference through a fixed set of buckets:
+ * explains the difference through a fixed set of BUCKETS — every one of which nets an
+ * Inventory-side figure against something Books actually reported:
  *
  *   opening_difference                  Inventory opening value for the FY vs Books' opening balance
  *   pending_posting                     Books-sourced documents Inventory has not posted yet (DRAFT / PENDING_APPROVAL / APPROVED)
@@ -24,6 +25,20 @@ use Config\DocumentTypeRegistry;
  *
  * Every bucket amount is expressed as its CONTRIBUTION to `difference = inventory - books`, so
  * `sum(buckets) + rounding + unexplained == difference` (when Books answered).
+ *
+ * DIAGNOSTICS are a second, DELIBERATELY SEPARATE set — valuation_method_variance and
+ * transfer_valuation_gap. Neither reads anything Books reported: both compare two numbers
+ * computed entirely from Inventory's own local tables (the point-in-time closing-valuation
+ * snapshot against Inventory's own reconstructed running ledger). They can be large for a
+ * company where Books and Inventory agree on every transaction to the paisa — a point-in-time
+ * snapshot "forgets" a historical cost once the stock that carried it sells through, while a
+ * running ledger never does, so the two numbers structurally diverge on any sufficiently large
+ * historical event regardless of cross-system agreement. Counting them as if they "explained"
+ * part of the Books difference would let a real Books desync hide behind a plausible-sounding
+ * internal-consistency story, so they are NOT summed into `explained_total`/`residual` and are
+ * reported under `breakdown['diagnostics']`, not `breakdown['buckets']` — useful to an operator
+ * deciding whether an unexplained residual is architecturally expected WAC/FIFO behaviour, but
+ * never evidence, on their own, that Inventory and Books agree or disagree.
  *
  * Books is optional: when the call fails the run is persisted with status BOOKS_UNAVAILABLE,
  * books balance / difference NULL, and only the Inventory-side buckets populated.
@@ -192,24 +207,6 @@ class ReconciliationService
         // 6. Manual journals (Books only).
         $manual = self::sumEntries($books['manual_journals']);
         $buckets['manual_journal'] = ['amount' => round(-$manual['sum'], 4), 'count' => $manual['count'], 'books_reported' => $books['manual_journals']];
-        // 7b. Costing-method variance: the ledger follows movement values (receipts at cost,
-        // issues at COGS) while the closing valuation replays the cost layers (FIFO/LIFO/WAC,
-        // negative stock priced at the last known cost, migrated lines with no cost). The gap
-        // between the two is a valuation effect, not a missing posting.
-        $ledgerLike = $this->ledgerLikeValue($cmpId, $fyId, $boId, $asOf, $inventoryOpening);
-        $buckets['valuation_method_variance'] = [
-            'amount' => round($inventoryValue - $ledgerLike['value'], 4),
-            'count' => abs($inventoryValue - $ledgerLike['value']) >= 0.0001 ? 1 : 0,
-            'closing_valuation' => $inventoryValue,
-            'opening_plus_movements' => round($ledgerLike['value'], 4),
-            'movement_value_in' => $ledgerLike['in'],
-            'movement_value_out' => $ledgerLike['out'],
-            'unvalued_movements' => $ledgerLike['unvalued'],
-        ];
-        // 7c. Transfers must net to zero (the receiving side is priced at the issuing cost). A
-        // gap comes from history migrated from Books, which valued the receiving side at 0.
-        $transferGap = $this->transferValuationGap($cmpId, $fyId, $boId, $asOf);
-        $buckets['transfer_valuation_gap'] = ['amount' => $transferGap['amount'], 'count' => $transferGap['count'], 'documents' => $transferGap['documents']];
         // 8. Missing source (Books posting entries without an inventory document).
         $missing = array_values(array_filter($postingStatus['entries'], static fn ($e) => $e['sync_status'] === self::SYNC_MISSING_INVENTORY));
         $missingSum = 0.0;
@@ -229,6 +226,30 @@ class ReconciliationService
         $buckets['rounding'] = ['amount' => $isRounding ? $residual : 0.0, 'count' => $isRounding && abs($residual) >= 0.0001 ? 1 : 0];
         $buckets['unexplained'] = ['amount' => $residual !== null && !$isRounding ? $residual : 0.0, 'count' => $residual !== null && !$isRounding ? 1 : 0];
 
+        // Diagnostics: Inventory-internal-only numbers, never netted against Books. See the class
+        // docblock for why these must never be summed into $explained/$residual above.
+        $diagnostics = [];
+        // Costing-method variance: the ledger follows movement values (receipts at cost, issues at
+        // COGS) while the closing valuation replays the cost layers (FIFO/LIFO/WAC, negative stock
+        // priced at the last known cost, migrated lines with no cost). The gap between the two is
+        // a point-in-time-vs-cumulative artifact of Inventory's own architecture, not a comparison
+        // with Books.
+        $ledgerLike = $this->ledgerLikeValue($cmpId, $fyId, $boId, $asOf, $inventoryOpening);
+        $diagnostics['valuation_method_variance'] = [
+            'amount' => round($inventoryValue - $ledgerLike['value'], 4),
+            'count' => abs($inventoryValue - $ledgerLike['value']) >= 0.0001 ? 1 : 0,
+            'closing_valuation' => $inventoryValue,
+            'opening_plus_movements' => round($ledgerLike['value'], 4),
+            'movement_value_in' => $ledgerLike['in'],
+            'movement_value_out' => $ledgerLike['out'],
+            'unvalued_movements' => $ledgerLike['unvalued'],
+        ];
+        // Transfers must net to zero (the receiving side is priced at the issuing cost). A gap
+        // comes from history migrated from Books, which valued the receiving side at 0 -- again an
+        // Inventory-internal consistency check, computed entirely from inv_stock_movements.
+        $transferGap = $this->transferValuationGap($cmpId, $fyId, $boId, $asOf);
+        $diagnostics['transfer_valuation_gap'] = ['amount' => $transferGap['amount'], 'count' => $transferGap['count'], 'documents' => $transferGap['documents']];
+
         $breakdown = [
             'as_of'          => $asOf,
             'sign_convention'=> 'amount = contribution to (inventory - books)',
@@ -236,6 +257,7 @@ class ReconciliationService
             'residual'       => $residual,
             'books'          => ['available' => $booksAvailable, 'status' => $books['status'], 'error' => $books['error']],
             'buckets'        => $buckets,
+            'diagnostics'    => $diagnostics,
         ];
 
         return [

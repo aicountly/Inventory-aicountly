@@ -4,6 +4,7 @@ import {
   booksAnswered,
   bucketRows,
   changePercent,
+  diagnosticRows,
   differencePercent,
   differenceTone,
   formatPercent,
@@ -213,5 +214,45 @@ describe('bucketRows', () => {
     expect(bucketRows(breakdown, { includeEmpty: true })).toHaveLength(4)
     expect(bucketRows(null)).toEqual([])
     expect(bucketRows(undefined)).toEqual([])
+  })
+
+  it('never reads diagnostics, even when a run carries them', () => {
+    const withDiagnostics = {
+      ...breakdown,
+      diagnostics: { valuation_method_variance: { amount: -2000, count: 1 } },
+    }
+    expect(bucketRows(withDiagnostics).map((r) => r.key)).not.toContain('valuation_method_variance')
+  })
+})
+
+describe('diagnosticRows', () => {
+  const breakdown = {
+    as_of: '2026-09-16',
+    sign_convention: 'amount = contribution to (inventory - books)',
+    explained_total: 0,
+    residual: -1000,
+    books: { available: true, status: 200, error: null },
+    buckets: { unexplained: { amount: -1000, count: 1 } },
+    diagnostics: {
+      valuation_method_variance: { amount: -2000, count: 1 },
+      transfer_valuation_gap: { amount: 0, count: 0 },
+    },
+  }
+
+  it('reads from diagnostics, not buckets, and carries the diagnostic-specific help text', () => {
+    const rows = diagnosticRows(breakdown)
+    expect(rows.map((r) => r.key)).toEqual(['valuation_method_variance'])
+    expect(rows[0].help).toContain('Not a Books comparison')
+    expect(rows[0].share).toBeNull()
+  })
+
+  it('never reads buckets, keeps zero rows when asked, and reports nothing without a breakdown', () => {
+    expect(diagnosticRows(breakdown, { includeEmpty: true }).map((r) => r.key)).toEqual([
+      'valuation_method_variance',
+      'transfer_valuation_gap',
+    ])
+    expect(diagnosticRows(breakdown).map((r) => r.key)).not.toContain('unexplained')
+    expect(diagnosticRows(null)).toEqual([])
+    expect(diagnosticRows(undefined)).toEqual([])
   })
 })
