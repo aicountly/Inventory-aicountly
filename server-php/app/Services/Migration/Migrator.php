@@ -587,9 +587,12 @@ class Migrator
         $moved = (int) $inv->table('inv_stock_movements')->where('cmp_id', $cmpId)->countAllResults();
         $this->stats['tables']['inv_stock_movements'] = ['inserted' => $moved];
         // Materialised on-hand per (item, warehouse) for the LATEST FY per Books semantics (opening + movements).
+        // fy_id 0 is the legitimate "inception, no year-end close yet" sentinel, not an absence of
+        // data -- a company migrated entirely within its first year resolves latestFyId() to 0 and
+        // must still be rebuilt from its fy_id=0 openings, not silently skipped.
         $balances = new \App\Services\StockBalanceService();
         $fyId = $balances->latestFyId($cmpId);
-        $written = $fyId > 0 ? $balances->rebuildOnHand($cmpId, $fyId) : 0;
+        $written = $balances->rebuildOnHand($cmpId, $fyId);
         $this->stats['tables']['inv_stock_balances.on_hand'] = ['fy_id' => $fyId, 'rows' => $written];
     }
 

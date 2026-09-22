@@ -9,9 +9,17 @@ use CodeIgniter\CLI\BaseCommand;
 use CodeIgniter\CLI\CLI;
 
 /**
- * php spark inventory:backfill-opening-value --company N [--apply] [--dry-run] [--batch 500]
+ * php spark inventory:backfill-opening-value --company N|all [--apply] [--dry-run] [--batch 500]
  *
  * Repairs inv_item_openings rows that carry a real quantity but a zero rate/value.
+ *
+ * --company all loops every company id inv_company_settings knows about (the same "which
+ * companies exist here" source inventory:find-orphan-companies uses), running the identical
+ * per-company repair below for each in turn. One company throwing (a schema gap, an unreachable
+ * table) is reported and does not stop the rest — the loop is not a transaction across companies,
+ * each company's own writes are still all-or-nothing per batch as they always were. The overall
+ * exit code is non-zero if ANY company finished with a still-zero row, an unresolved group, or an
+ * error; a clean run needs every company clean.
  *
  * Two independent, unrelated gaps can leave opening_valuation_rate/opening_value at their column
  * default of 0 while opening_qty is genuine:
@@ -74,9 +82,9 @@ class InventoryBackfillOpeningValue extends BaseCommand
     protected $group       = 'Inventory';
     protected $name        = 'inventory:backfill-opening-value';
     protected $description = 'Recompute the opening rate/value of carried-forward opening rows that were written with a real quantity but a zero cost.';
-    protected $usage       = 'inventory:backfill-opening-value --company N [--apply] [--dry-run] [--batch 500]';
+    protected $usage       = 'inventory:backfill-opening-value --company N|all [--apply] [--dry-run] [--batch 500]';
     protected $options     = [
-        '--company' => 'Company id to repair (required)',
+        '--company' => 'Company id to repair, or "all" for every company inv_company_settings knows about (required)',
         '--apply'   => 'Actually write. Without it nothing is changed and the plan is printed',
         '--dry-run' => 'Explicitly ask for the plan only (the default)',
         '--batch'   => 'Rows per batch (default 500, max 5000)',
@@ -86,9 +94,9 @@ class InventoryBackfillOpeningValue extends BaseCommand
     {
         $this->normaliseEqualsOptions();
 
-        $cmpId = (int) (CLI::getOption('company') ?? $params['company'] ?? 0);
-        if ($cmpId <= 0) {
-            CLI::error('--company is required');
+        $companyOpt = trim((string) (CLI::getOption('company') ?? $params['company'] ?? ''));
+        if ($companyOpt === '') {
+            CLI::error('--company is required: a company id, or "all"');
             CLI::write($this->usage);
 
             return EXIT_ERROR;
@@ -97,6 +105,102 @@ class InventoryBackfillOpeningValue extends BaseCommand
         $batch = (int) (CLI::getOption('batch') ?? $params['batch'] ?? 500);
         $batch = $batch > 0 ? min($batch, 5000) : 500;
 
+        if (strtolower($companyOpt) === 'all') {
+            return $this->runAllCompanies($apply, $batch);
+        }
+
+        $cmpId = (int) $companyOpt;
+        if ($cmpId <= 0) {
+            CLI::error('--company must be a positive company id, or "all"');
+            CLI::write($this->usage);
+
+            return EXIT_ERROR;
+        }
+
+        [$exit] = $this->runForCompany($cmpId, $apply, $batch);
+
+        return $exit;
+    }
+
+    /**
+     * Loops the identical per-company repair over every company id inv_company_settings knows
+     * about. Reported, not thrown: one company's failure never keeps the rest from being tried.
+     */
+    private function runAllCompanies(bool $apply, int $batch): int
+    {
+        $db = \Config\Database::connect();
+        $companyIds = array_map(
+            static fn (array $r): int => (int) $r['cmp_id'],
+            $db->table('inv_company_settings')->select('cmp_id')->orderBy('cmp_id', 'ASC')->get()->getResultArray()
+        );
+        if ($companyIds === []) {
+            CLI::write('No companies found in inv_company_settings.', 'green');
+
+            return EXIT_SUCCESS;
+        }
+
+        CLI::write(sprintf(
+            'inventory:backfill-opening-value --company all: %d compan%s%s',
+            count($companyIds),
+            count($companyIds) === 1 ? 'y' : 'ies',
+            $apply ? '' : ' (dry run — add --apply to write)'
+        ));
+
+        $overallExit = EXIT_SUCCESS;
+        $grand = ['repaired' => 0, 'still_zero' => 0, 'unresolved_groups' => 0, 'inception_flagged' => 0, 'companies_errored' => 0, 'companies_clean' => 0];
+        foreach ($companyIds as $cmpId) {
+            CLI::write('');
+            CLI::write(str_repeat('-', 60));
+            CLI::write(sprintf('Company %d', $cmpId), 'cyan');
+            try {
+                [$exit, $summary] = $this->runForCompany($cmpId, $apply, $batch);
+            } catch (\Throwable $e) {
+                CLI::error(sprintf('  cmp %d: stopped: %s', $cmpId, $e->getMessage()));
+                $grand['companies_errored']++;
+                $overallExit = EXIT_ERROR;
+                continue;
+            }
+            $grand['repaired'] += $summary['repaired'];
+            $grand['still_zero'] += $summary['still_zero'];
+            $grand['unresolved_groups'] += $summary['unresolved_groups'];
+            $grand['inception_flagged'] += $summary['inception_flagged'];
+            if ($exit === EXIT_SUCCESS) {
+                $grand['companies_clean']++;
+            } else {
+                $overallExit = EXIT_ERROR;
+            }
+        }
+
+        CLI::write('');
+        CLI::write(str_repeat('=', 60));
+        CLI::write(sprintf(
+            'ALL COMPANIES: %d row(s) repaired, %d still-zero row(s) left alone, %d unresolved group(s) left alone, %d master-inception row(s) flagged for manual review, %d/%d compan%s clean, %d compan%s errored.',
+            $grand['repaired'],
+            $grand['still_zero'],
+            $grand['unresolved_groups'],
+            $grand['inception_flagged'],
+            $grand['companies_clean'],
+            count($companyIds),
+            count($companyIds) === 1 ? 'y' : 'ies',
+            $grand['companies_errored'],
+            $grand['companies_errored'] === 1 ? 'y' : 'ies'
+        ), $overallExit === EXIT_SUCCESS ? 'green' : 'yellow');
+
+        return $overallExit;
+    }
+
+    /**
+     * The single-company repair — behaviourally identical to this command before --company all
+     * existed. Returns the exit code plus a small summary so runAllCompanies() can aggregate it.
+     *
+     * protected (not private) solely so tests can subclass it to prove --company all isolates one
+     * company's thrown failure from the rest of the loop, without needing to fabricate a real
+     * database-level fault.
+     *
+     * @return array{0:int, 1:array{repaired:int, still_zero:int, unresolved_groups:int, inception_flagged:int}}
+     */
+    protected function runForCompany(int $cmpId, bool $apply, int $batch): array
+    {
         $db = \Config\Database::connect();
         $valuation = new ValuationReplayService();
         $engine = new ValuationEngine();
@@ -164,23 +268,25 @@ class InventoryBackfillOpeningValue extends BaseCommand
         } catch (\Throwable $e) {
             CLI::error('Stopped: ' . $e->getMessage());
 
-            return EXIT_ERROR;
+            return [EXIT_ERROR, ['repaired' => $repaired, 'still_zero' => count($stillZero), 'unresolved_groups' => count($unresolvedGroups), 'inception_flagged' => 0]];
         }
 
         $inception = $this->inceptionSummary($db, $cmpId);
 
         $this->report($repaired, $examples, $stillZero, $unresolvedGroups, $inception);
 
+        $summary = ['repaired' => $repaired, 'still_zero' => count($stillZero), 'unresolved_groups' => count($unresolvedGroups), 'inception_flagged' => $inception['count']];
+
         if ($repaired === 0) {
             CLI::write('Nothing to repair among carry-forward rows.', 'green');
 
-            return $stillZero === [] && $unresolvedGroups === [] ? EXIT_SUCCESS : EXIT_ERROR;
+            return [$stillZero === [] && $unresolvedGroups === [] ? EXIT_SUCCESS : EXIT_ERROR, $summary];
         }
         if (!$apply) {
             CLI::write('');
             CLI::write(sprintf('Dry run. Nothing was written, and no follow-up valuation work was queued for %d item-year(s). Add --apply to perform it.', $this->countItemYears($fixedItemsByFy)), 'yellow');
 
-            return EXIT_SUCCESS;
+            return [EXIT_SUCCESS, $summary];
         }
 
         [$jobs, $reseeded] = $this->settleFixedItems($db, $cmpId, $fixedItemsByFy, $recalc, $engine);
@@ -194,7 +300,7 @@ class InventoryBackfillOpeningValue extends BaseCommand
             $cmpId
         ), 'green');
 
-        return $stillZero === [] && $unresolvedGroups === [] ? EXIT_SUCCESS : EXIT_ERROR;
+        return [$stillZero === [] && $unresolvedGroups === [] ? EXIT_SUCCESS : EXIT_ERROR, $summary];
     }
 
     // ------------------------------------------------------------------ carry-forward repair
