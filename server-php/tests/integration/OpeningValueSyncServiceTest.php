@@ -94,6 +94,46 @@ final class OpeningValueSyncServiceTest extends IntegrationTestCase
         $this->assertEqualsWithDelta(1000.0, (float) $state['last_pushed_value'], 0.0001);
     }
 
+    /**
+     * Most companies have no opening stock at all — a production --all run found 17 of 21 at
+     * zero. Books' own guard refuses a zero when there is no row to delete, so each of those
+     * events is pure outbox noise; at 1 lakh companies an --all run would queue ~1 lakh no-ops
+     * through a dispatcher that drains 300 a minute, holding real events behind them for hours.
+     */
+    public function testNeverEnqueuesAZeroForACompanyThatHasNeverBeenPushed(): void
+    {
+        $pcs = $this->makeUnit();
+        $this->makeItem('Widget', $pcs); // an item, but no opening at all
+
+        (new OpeningValueSyncService())->syncIfChanged($this->cmpId, $this->fyId);
+
+        $this->assertCount(0, $this->events());
+        $this->assertNull(
+            $this->db->table('inv_opening_sync_state')->where('cmp_id', $this->cmpId)->get()->getRowArray(),
+            'a company with nothing to say should not leave a watermark either',
+        );
+    }
+
+    /** A zero AFTER a real push is meaningful: it tells Books to drop the row this sync wrote. */
+    public function testStillEnqueuesAZeroThatFollowsARealPush(): void
+    {
+        $pcs = $this->makeUnit();
+        $item = $this->makeItem('Widget', $pcs);
+        $this->setOpening($item, $pcs, 10, 100);
+
+        $svc = new OpeningValueSyncService();
+        $svc->syncIfChanged($this->cmpId, $this->fyId);
+
+        // The opening is withdrawn in Inventory; the resolved total drops back to zero.
+        $this->db->table('inv_item_openings')->where('cmp_id', $this->cmpId)->delete();
+        $svc->syncIfChanged($this->cmpId, $this->fyId);
+
+        $events = $this->events();
+        $this->assertCount(2, $events);
+        $second = json_decode((string) $events[1]['payload_json'], true);
+        $this->assertEqualsWithDelta(0.0, (float) $second['opening_value'], 0.0001);
+    }
+
     public function testSilentlyDoesNothingForAnInvalidCompanyOrFy(): void
     {
         $svc = new OpeningValueSyncService();

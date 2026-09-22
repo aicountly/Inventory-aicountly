@@ -56,6 +56,16 @@ class OpeningValueSyncService
                 ->where('cmp_id', $cmpId)->where('fy_id', $fyId)->where('bo_id', $boId)
                 ->get()->getRowArray();
 
+            // A company with no opening stock has nothing to tell Books about, and Books' own
+            // guard refuses a zero when there is no row to delete — so the event would be pure
+            // outbox noise. At scale that matters: an --all run across 1 lakh companies would
+            // queue ~1 lakh no-op events through a dispatcher that drains 300 a minute, holding
+            // real events behind them for hours. A zero AFTER a real push is a different thing
+            // and still goes: it tells Books to drop the row this sync wrote.
+            if ($state === null && abs($value) < self::UNCHANGED_TOLERANCE) {
+                return;
+            }
+
             $lastPushed = $state !== null ? (float) $state['last_pushed_value'] : null;
             if ($lastPushed !== null && abs($lastPushed - $value) < self::UNCHANGED_TOLERANCE) {
                 return;
