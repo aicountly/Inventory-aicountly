@@ -17,11 +17,12 @@ const byId = (id: string) => REPORT_DIRECTORY.find((r) => r.id === id)!
 const ids = (list: readonly ReportDirectoryEntry[]) => list.map((r) => r.id)
 
 describe('report directory', () => {
-  it('lists every report the page has always offered, with unique ids', () => {
+  it('lists every report the page offers, with unique ids', () => {
     expect(ids(REPORT_DIRECTORY).sort()).toEqual(
       [
         'batch-stock',
         'movement-analysis',
+        'opening-stock',
         'near-expiry',
         'replenishment',
         'serial-numbers',
@@ -54,10 +55,11 @@ describe('report directory', () => {
     expect(byId('stock-valuation').permission).toBe('reports.valuation.read')
   })
 
-  it('shelves all ten, and only onto shelves the toolbar offers', () => {
+  it('shelves every one, and only onto shelves the toolbar offers', () => {
     const shelved = CATEGORY_ORDER.flatMap((c) => reportsInCategory(REPORT_DIRECTORY, c))
     expect(shelved).toHaveLength(REPORT_DIRECTORY.length)
     expect(ids(reportsInCategory(REPORT_DIRECTORY, 'valuation-ledger'))).toEqual([
+      'opening-stock',
       'stock-ledger',
       'stock-valuation',
     ])
@@ -107,7 +109,9 @@ describe('searching the directory', () => {
 
   it('combines the category with the search', () => {
     const found = filterReports(REPORT_DIRECTORY, { search: 'stock', category: 'valuation-ledger' })
-    expect(ids(found).every((id) => ['stock-ledger', 'stock-valuation'].includes(id))).toBe(true)
+    expect(
+      ids(found).every((id) => ['opening-stock', 'stock-ledger', 'stock-valuation'].includes(id)),
+    ).toBe(true)
   })
 
   it('shows only starred reports when asked', () => {

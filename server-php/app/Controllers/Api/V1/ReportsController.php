@@ -37,6 +37,24 @@ class ReportsController extends BaseController
     }
 
     /**
+     * GET reports/opening-stock — what the financial year opened with, per item.
+     *
+     * `nonzero` defaults on: an opening register is read to see what the year started with, and a
+     * company with 40,000 items and 300 openings would otherwise answer with 39,700 empty rows.
+     */
+    public function openingStock()
+    {
+        return $this->report('opening_stock', function (array $ctx, array $p) {
+            $f = $this->commonFilters($p) + [
+                'nonzero'  => $this->flag('nonzero', true),
+                'unvalued' => $this->flag('unvalued', false),
+            ];
+
+            return $this->reports->openingStock((int) $ctx['cmp_id'], (int) $ctx['fy_id'], (int) $ctx['bo_id'], $f, $p['limit'], $p['offset']);
+        }, 100, 1000, 'item_name');
+    }
+
+    /**
      * The only column the stock ledger can be ordered by.
      *
      * Its balance column is a running total accumulated in movement sequence, so re-ordering the

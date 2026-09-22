@@ -64,6 +64,7 @@ class PermissionRegistry
 
     public const REPORTS = [
         'stock_summary'      => 'Stock Summary',
+        'opening_stock'      => 'Opening Stock',
         'stock_ledger'       => 'Stock Ledger',
         'warehouse_stock'    => 'Warehouse Stock',
         'batch_stock'        => 'Batch Stock',

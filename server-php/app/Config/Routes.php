@@ -186,6 +186,7 @@ $routes->group('', ['namespace' => 'App\Controllers\Api', 'filter' => 'cors'], s
 
         // Reports
         $routes->get('reports/stock-summary', 'ReportsController::stockSummary');
+        $routes->get('reports/opening-stock', 'ReportsController::openingStock');
         $routes->get('reports/stock-ledger', 'ReportsController::stockLedger');
         $routes->get('reports/warehouse-stock', 'ReportsController::warehouseStock');
         $routes->get('reports/batch-stock', 'ReportsController::batchStock');

@@ -46,9 +46,9 @@ beforeEach(() => {
 })
 
 describe('ReportsIndexPage', () => {
-  it('shows all ten reports, each opening the route that report already had', () => {
+  it('shows every report, each opening the route that report already had', () => {
     renderPage()
-    expect(REPORT_DIRECTORY).toHaveLength(10)
+    expect(REPORT_DIRECTORY).toHaveLength(11)
     for (const report of REPORT_DIRECTORY) {
       expect(cardLink(report.title).getAttribute('href'), report.title).toBe(report.route)
     }
@@ -60,8 +60,9 @@ describe('ReportsIndexPage', () => {
     expect(screen.getByRole('heading', { name: /Ageing & expiry reports/i })).toBeTruthy()
     expect(screen.getByRole('heading', { name: /Valuation & ledger reports/i })).toBeTruthy()
     expect(screen.getByText('5 reports')).toBeTruthy()
-    expect(screen.getByText('3 reports')).toBeTruthy()
-    expect(screen.getByText('2 reports')).toBeTruthy()
+    // Ageing & expiry and Valuation & ledger both hold three now — the opening
+    // stock register joined the latter.
+    expect(screen.getAllByText('3 reports')).toHaveLength(2)
   })
 
   it('filters as the reader types, without leaving the page', async () => {

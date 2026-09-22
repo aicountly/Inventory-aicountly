@@ -1,10 +1,11 @@
 import type { RegisterConfig } from '../../registers/RegisterConfig'
 import { movementAnalysisConfig, nearExpiryConfig, replenishmentConfig, stockAgeingConfig } from './analysisReports'
-import { batchStockConfig, serialStockConfig, stockSummaryConfig, warehouseStockConfig } from './stockReports'
+import { batchStockConfig, openingStockConfig, serialStockConfig, stockSummaryConfig, warehouseStockConfig } from './stockReports'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export const REPORT_CONFIGS: RegisterConfig<any, any>[] = [
   stockSummaryConfig,
+  openingStockConfig,
   warehouseStockConfig,
   batchStockConfig,
   serialStockConfig,

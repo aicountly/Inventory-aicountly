@@ -129,6 +129,21 @@ function renderPage() {
   )
 }
 
+/**
+ * Open the export menu and take one of its items.
+ *
+ * The Export and Print buttons are `disabled={!list.data || total === 0}` and go busy while the
+ * list reloads, so they EXIST from the first paint and only become clickable once the runs have
+ * landed. Waiting for the button alone let a loaded CI runner fire the click at a disabled
+ * button: nothing happened, no menu opened, and the test failed looking for the menu item.
+ */
+async function pickExport(name: RegExp): Promise<void> {
+  const button = await screen.findByRole('button', { name: /export/i })
+  await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false))
+  fireEvent.click(button)
+  fireEvent.click(await screen.findByRole('menuitem', { name }))
+}
+
 describe('ReconciliationRunsPage', () => {
   it('says on the screen what a run compares and what its difference means', async () => {
     renderPage()
@@ -146,9 +161,7 @@ describe('ReconciliationRunsPage', () => {
 
   it('exports every run and states the direction of the difference on paper', async () => {
     renderPage()
-    await waitFor(() => expect(screen.getByRole('button', { name: /export/i })).toBeTruthy())
-    fireEvent.click(screen.getByRole('button', { name: /export/i }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /CSV/ }))
+    await pickExport(/CSV/)
     await waitFor(() => expect(downloadCsv).toHaveBeenCalledOnce())
 
     const lines = downloadCsv.mock.calls[0][1].trim().split('\r\n')
@@ -188,8 +201,7 @@ describe('ReconciliationRunsPage', () => {
     expect(document.body.textContent).toContain('this deployment has no background job')
     expect(document.body.textContent).not.toMatch(/\bscheduled\b/)
 
-    fireEvent.click(screen.getByRole('button', { name: /export/i }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /CSV/ }))
+    await pickExport(/CSV/)
     await waitFor(() => expect(downloadCsv).toHaveBeenCalledOnce())
     // The file must reproduce the screen, not drop the cell.
     expect(downloadCsv.mock.calls[0][1]).toContain('Not recorded')
@@ -197,8 +209,9 @@ describe('ReconciliationRunsPage', () => {
 
   it('prints the letterheaded sheet with the sign convention in its footer', async () => {
     renderPage()
-    await waitFor(() => expect(screen.getByRole('button', { name: /print/i })).toBeTruthy())
-    fireEvent.click(screen.getByRole('button', { name: /print/i }))
+    const print = await screen.findByRole('button', { name: /print/i })
+    await waitFor(() => expect((print as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(print)
     await waitFor(() => expect(printTabular).toHaveBeenCalledOnce())
 
     const sheet = printTabular.mock.calls[0][0]
