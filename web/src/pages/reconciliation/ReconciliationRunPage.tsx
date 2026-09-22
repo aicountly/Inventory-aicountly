@@ -12,7 +12,7 @@ import { buildBooksAppLink } from '../../services/booksApi'
 import { reconciliationApi } from '../../services/reconciliationApi'
 import type { BucketDocument, ReconciliationBucket, ReconciliationRunDetail } from '../../services/reconciliationApi'
 import { formatDate, formatDateTime, formatInt, formatMoney, formatQty } from '../../utils/format'
-import { BUCKET_HELP, differenceTone } from './reconciliationModel'
+import { BUCKET_HELP, DIAGNOSTIC_HELP, differenceTone } from './reconciliationModel'
 import { PostingStatusTable } from './PostingStatusTable'
 import '../views.css'
 
@@ -24,6 +24,7 @@ export function ReconciliationRunPage() {
   const r = run.data
   const bd = r?.breakdown ?? null
   const buckets = bd ? Object.entries(bd.buckets ?? {}) : []
+  const diagnostics = bd ? Object.entries(bd.diagnostics ?? {}) : []
 
   return (
     // The module layout used to supply this wrapper; the tabs moved onto the
@@ -75,6 +76,32 @@ export function ReconciliationRunPage() {
                 </table>
               </div>
             </section>
+            {diagnostics.length > 0 ? (
+              <section className="card">
+                <div className="card-body">
+                  <h2 className="card-title">Diagnostics</h2>
+                  <p className="muted">
+                    Computed entirely from Inventory&rsquo;s own data — neither figure below reads anything Books reported.
+                    Not part of the Books comparison above, and never counted in Explained or Unexplained.
+                  </p>
+                  <table className="table compact">
+                    <thead>
+                      <tr>
+                        <th>Diagnostic</th>
+                        <th className="num">Amount</th>
+                        <th className="num">Count</th>
+                        <th>Meaning</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {diagnostics.map(([key, b]) => (
+                        <BucketRow key={key} name={key} bucket={b} run={r} helpMap={DIAGNOSTIC_HELP} />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            ) : null}
             {r.document_status ? (
               <section className="card">
                 <div className="card-body">
@@ -95,7 +122,17 @@ export function ReconciliationRunPage() {
   )
 }
 
-function BucketRow({ name, bucket, run }: { name: string; bucket: ReconciliationBucket; run: ReconciliationRunDetail }) {
+function BucketRow({
+  name,
+  bucket,
+  run,
+  helpMap = BUCKET_HELP,
+}: {
+  name: string
+  bucket: ReconciliationBucket
+  run: ReconciliationRunDetail
+  helpMap?: Record<string, string>
+}) {
   const docs: BucketDocument[] = Array.isArray(bucket.documents) ? bucket.documents : []
   const nonzero = Math.abs(bucket.amount ?? 0) >= 0.005
   // Books owns applying these — Inventory only publishes them and shows the count
@@ -111,7 +148,7 @@ function BucketRow({ name, bucket, run }: { name: string; bucket: Reconciliation
         <td className="num">{formatMoney(bucket.amount)}</td>
         <td className="num">{formatInt(bucket.count)}</td>
         <td className="muted">
-          {BUCKET_HELP[name] ?? ''}
+          {helpMap[name] ?? ''}
           {reviewInBooks ? (
             <>
               {' '}
