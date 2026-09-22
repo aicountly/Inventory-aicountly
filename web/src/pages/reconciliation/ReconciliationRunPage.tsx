@@ -8,8 +8,9 @@ import { StatusBadge } from '../../components/StatusBadge'
 import { SummaryStrip } from '../../components/SummaryStrip'
 import { useQuery } from '../../hooks/useQuery'
 import { P } from '../../services/access'
+import { buildBooksAppLink } from '../../services/booksApi'
 import { reconciliationApi } from '../../services/reconciliationApi'
-import type { BucketDocument, ReconciliationBucket } from '../../services/reconciliationApi'
+import type { BucketDocument, ReconciliationBucket, ReconciliationRunDetail } from '../../services/reconciliationApi'
 import { formatDate, formatDateTime, formatInt, formatMoney, formatQty } from '../../utils/format'
 import { BUCKET_HELP, differenceTone } from './reconciliationModel'
 import { PostingStatusTable } from './PostingStatusTable'
@@ -68,7 +69,7 @@ export function ReconciliationRunPage() {
                   </thead>
                   <tbody>
                     {buckets.map(([key, b]) => (
-                      <BucketRow key={key} name={key} bucket={b} />
+                      <BucketRow key={key} name={key} bucket={b} run={r} />
                     ))}
                   </tbody>
                 </table>
@@ -94,9 +95,13 @@ export function ReconciliationRunPage() {
   )
 }
 
-function BucketRow({ name, bucket }: { name: string; bucket: ReconciliationBucket }) {
+function BucketRow({ name, bucket, run }: { name: string; bucket: ReconciliationBucket; run: ReconciliationRunDetail }) {
   const docs: BucketDocument[] = Array.isArray(bucket.documents) ? bucket.documents : []
   const nonzero = Math.abs(bucket.amount ?? 0) >= 0.005
+  // Books owns applying these — Inventory only publishes them and shows the count
+  // still outstanding. The run's own company/FY, never a global default, so the
+  // Books screen opens on the same books that produced this run's figures.
+  const reviewInBooks = name === 'unacknowledged_valuation_revisions' && (bucket.count ?? 0) > 0
   return (
     <>
       <tr className={name === 'unexplained' && nonzero ? 'row-critical' : undefined}>
@@ -105,7 +110,27 @@ function BucketRow({ name, bucket }: { name: string; bucket: ReconciliationBucke
         </td>
         <td className="num">{formatMoney(bucket.amount)}</td>
         <td className="num">{formatInt(bucket.count)}</td>
-        <td className="muted">{BUCKET_HELP[name] ?? ''}</td>
+        <td className="muted">
+          {BUCKET_HELP[name] ?? ''}
+          {reviewInBooks ? (
+            <>
+              {' '}
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() =>
+                  window.open(
+                    buildBooksAppLink('/reports/cogs-revision-audit', { cmpId: run.cmp_id, fyId: run.fy_id }),
+                    '_blank',
+                    'noopener,noreferrer',
+                  )
+                }
+              >
+                Review in Books
+              </button>
+            </>
+          ) : null}
+        </td>
       </tr>
       {docs.length > 0 ? (
         <tr>

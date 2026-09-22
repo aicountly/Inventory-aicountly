@@ -217,6 +217,66 @@ final class ValuationRevisionSummaryTest extends IntegrationTestCase
         $this->assertSame([$mine], $this->idsFor([]));
     }
 
+    // ------------------------------------------------------------------ revision_ids
+
+    public function testRevisionIdsFilterNarrowsToExactlyTheGivenRows(): void
+    {
+        $a = $this->seedRevision(['document_no' => 'D-1']);
+        $b = $this->seedRevision(['document_no' => 'D-2']);
+        $this->seedRevision(['document_no' => 'D-3']);
+
+        $this->assertSame([$a, $b], $this->idsFor(['revision_ids' => "{$a},{$b}"]));
+        $this->assertSame([$a], $this->idsFor(['revision_ids' => (string) $a]));
+    }
+
+    public function testRevisionIdsFilterDropsNonNumericAndNonPositiveEntries(): void
+    {
+        $a = $this->seedRevision(['document_no' => 'D-1']);
+        $b = $this->seedRevision(['document_no' => 'D-2']);
+        $this->seedRevision(['document_no' => 'D-3']);
+
+        $this->assertSame([$a, $b], $this->idsFor(['revision_ids' => "abc,{$a},-5,0,,{$b}"]));
+    }
+
+    public function testRevisionIdsFilterNeverBypassesTheCompanyScope(): void
+    {
+        $mine = $this->seedRevision(['document_no' => 'D-1']);
+        $other = $this->seedRevision(['document_no' => 'D-2', 'cmp_id' => $this->cmpId + 1]);
+
+        // Asking (by id) for a revision that belongs to another company must still come back
+        // empty for THIS company's request — revision_ids narrows what cmp_id already scoped,
+        // it never widens it.
+        $this->assertSame([$mine], $this->idsFor(['revision_ids' => "{$mine},{$other}"]));
+    }
+
+    public function testAnEmptyOrAllInvalidRevisionIdsLeavesTheFilterOffRatherThanEmptyingTheScreen(): void
+    {
+        $a = $this->seedRevision(['document_no' => 'D-1']);
+        $b = $this->seedRevision(['document_no' => 'D-2']);
+
+        $this->assertSame([$a, $b], $this->idsFor(['revision_ids' => '']));
+        $this->assertSame([$a, $b], $this->idsFor(['revision_ids' => 'not-numeric,-1,0']));
+    }
+
+    public function testRevisionIdsCombinesWithOtherFiltersRatherThanReplacingThem(): void
+    {
+        $up = $this->seedRevision(['document_no' => 'D-1', 'delta' => 2000]);
+        $down = $this->seedRevision(['document_no' => 'D-2', 'delta' => -9000, 'new_rate' => 80.0]);
+
+        // Both ids are asked for, but the delta=increase filter still applies on top of it.
+        $this->assertSame([$up], $this->idsFor(['revision_ids' => "{$up},{$down}", 'delta' => 'increase']));
+    }
+
+    public function testParseRevisionIdsParamCapsALongListRatherThanBuildingAnUnboundedInClause(): void
+    {
+        $raw = implode(',', range(1, ValuationController::REVISION_IDS_FILTER_MAX + 50));
+        $parsed = ValuationController::parseRevisionIdsParam($raw);
+
+        $this->assertCount(ValuationController::REVISION_IDS_FILTER_MAX, $parsed);
+        $this->assertSame(1, $parsed[0]);
+        $this->assertSame(ValuationController::REVISION_IDS_FILTER_MAX, end($parsed));
+    }
+
     public function testTheCreatedRangeBoundsWholeDaysAtBothEnds(): void
     {
         $early = $this->seedRevision(['document_no' => 'D-1', 'created_at' => '2026-06-15 00:00:01']);

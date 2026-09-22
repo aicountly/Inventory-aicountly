@@ -93,6 +93,12 @@ class ValuationController extends BaseController
         . ', COALESCE(SUM(r.delta_amount),0) AS net_delta, COALESCE(SUM(ABS(r.delta_amount)),0) AS abs_delta';
 
     /**
+     * Cap on `?revision_ids=` — well past any real use (an operator, or a Books screen, chasing
+     * a handful of specific rows) and far short of an unbounded IN clause.
+     */
+    public const REVISION_IDS_FILTER_MAX = 500;
+
+    /**
      * Columns the recalculation register may order by.
      *
      * A closed list because the value is interpolated into ORDER BY: anything not
@@ -716,7 +722,9 @@ class ValuationController extends BaseController
      *
      * Filters: acknowledged=0|1, books=awaiting|published|acknowledged|unacknowledged,
      * job_id, document_id, item_id, warehouse_id, source_app, document_type,
-     * delta=increase|decrease|none, min_abs_delta, q (item name / SKU / document no), from, to.
+     * delta=increase|decrease|none, min_abs_delta, q (item name / SKU / document no), from, to,
+     * revision_ids (comma-separated revision_id list — e.g. a Books screen re-fetching the exact
+     * rows it already resolved by id).
      */
     public function revisions()
     {
@@ -755,6 +763,28 @@ class ValuationController extends BaseController
     }
 
     /**
+     * `?revision_ids=199,215,246` → positive ints only. Non-numeric and non-positive entries are
+     * dropped rather than rejected — same as every other filter in this file (an unusable value
+     * is ignored, not a 422) — and the result is capped at REVISION_IDS_FILTER_MAX so a very long
+     * list truncates instead of building an unbounded IN clause. An absent/empty/all-invalid
+     * param yields `[]`, which the caller reads as "no revision_ids filter".
+     *
+     * @return list<int>
+     */
+    public static function parseRevisionIdsParam(string $raw): array
+    {
+        if (trim($raw) === '') {
+            return [];
+        }
+        $ids = array_values(array_unique(array_filter(
+            array_map('intval', explode(',', $raw)),
+            static fn (int $id): bool => $id > 0
+        )));
+
+        return array_slice($ids, 0, self::REVISION_IDS_FILTER_MAX);
+    }
+
+    /**
      * The revisions query with every filter applied.
      *
      * Shared by the list and by the summary below, and that sharing is the point: a KPI card
@@ -778,6 +808,13 @@ class ValuationController extends BaseController
         // revision itself has no branch — the document line it revalued does.
         if ($boId > 0) {
             $b->where('l.bo_id', $boId);
+        }
+        // Added AFTER the cmp_id scope above, never instead of it: a caller (Books' revision
+        // screen, chasing the exact rows it already resolved by id) cannot use this to read
+        // another company's revisions — whereIn only narrows further what cmp_id already let through.
+        $revisionIds = self::parseRevisionIdsParam((string) ($this->request->getGet('revision_ids') ?? ''));
+        if ($revisionIds !== []) {
+            $b->whereIn('r.revision_id', $revisionIds);
         }
         $ack = $this->request->getGet('acknowledged');
         if ($ack !== null && $ack !== '') {
