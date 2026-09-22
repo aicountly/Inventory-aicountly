@@ -237,4 +237,135 @@ final class OpeningValueBackfillTest extends IntegrationTestCase
         $this->assertNull($row['updated_by']);
         $this->assertSame(0, $this->db->table('inv_valuation_recalc_jobs')->countAllResults());
     }
+
+    // ------------------------------------------------------------------ --company all
+
+    /** Same broken-carry-forward shape as seedYearOne()/seedBrokenCarryForward(), but for an arbitrary company id. */
+    private function seedBrokenCompany(int $cmpId, float $qty = 5.0): int
+    {
+        $this->db->table('inv_company_settings')->insert(['cmp_id' => $cmpId, 'default_valuation_method' => 'FIFO', 'valuation_scope' => 'company', 'negative_stock_policy' => 'allow', 'created_at' => date('Y-m-d H:i:s')]);
+        $this->db->table('inv_fy_ranges')->insert(['cmp_id' => $cmpId, 'fy_id' => $this->fyId, 'fy_start' => '2026-04-01', 'fy_end' => '2027-03-31']);
+        $this->db->table('inv_fy_ranges')->insert(['cmp_id' => $cmpId, 'fy_id' => self::FY2, 'fy_start' => '2027-04-01', 'fy_end' => '2028-03-31']);
+
+        $realCmpId = $this->cmpId;
+        $this->cmpId = $cmpId; // makeUnit()/makeItem()/setOpening() all insert against $this->cmpId
+        try {
+            $pcs = $this->makeUnit();
+            $item = $this->makeItem('Company ' . $cmpId . ' Widget', $pcs, 'FIFO');
+            $this->setOpening($item, $pcs, 10, 100, 0);
+            $this->db->table('inv_fy_carryforward_status')->insert([
+                'cmp_id' => $cmpId, 'source_fy_id' => $this->fyId, 'target_fy_id' => self::FY2, 'bo_id' => 0, 'status' => 'completed',
+                'stock_item_count' => 1, 'carried_forward_at' => '2026-08-20 10:57:55', 'carried_forward_by' => 'migration:legacy',
+            ]);
+            $this->setOpening($item, $pcs, $qty, 0, self::FY2); // real qty, rate 0 -> the defect shape
+        } finally {
+            $this->cmpId = $realCmpId;
+        }
+
+        return $item;
+    }
+
+    public function testCompanyAllRepairsEveryCompanyItFindsInCompanySettings(): void
+    {
+        ['unit' => $pcs, 'wh' => $wh, 'item' => $item101] = $this->seedYearOne();
+        $this->db->table('inv_fy_ranges')->insert(['cmp_id' => $this->cmpId, 'fy_id' => self::FY2, 'fy_start' => '2027-04-01', 'fy_end' => '2028-03-31']);
+        $this->seedBrokenCarryForward($item101, $pcs, $wh, 5.0);
+
+        $otherCmpId = 202;
+        $item202 = $this->seedBrokenCompany($otherCmpId, 7.0);
+
+        $exit = $this->runCommand(['company' => 'all', 'apply' => true]);
+
+        $this->assertSame(EXIT_SUCCESS, $exit, 'both companies fully repaired -> clean overall exit');
+
+        $row101 = $this->db->table('inv_item_openings')->where('cmp_id', $this->cmpId)->where('fy_id', self::FY2)->get()->getRowArray();
+        $this->assertEqualsWithDelta(120.0, (float) $row101['opening_valuation_rate'], 0.0001, 'cmp 101 gets its own FIFO closing cost');
+        $this->assertEqualsWithDelta(600.0, (float) $row101['opening_value'], 0.0001);
+
+        $row202 = $this->db->table('inv_item_openings')->where('cmp_id', $otherCmpId)->where('fy_id', self::FY2)->get()->getRowArray();
+        $this->assertEqualsWithDelta(100.0, (float) $row202['opening_valuation_rate'], 0.0001, 'cmp 202 is repaired independently, from its own source-year cost');
+        $this->assertEqualsWithDelta(700.0, (float) $row202['opening_value'], 0.0001);
+        $this->assertSame('backfill:opening-value', $row202['updated_by']);
+
+        // Neither company's items were confused for the other's.
+        $this->assertNotSame((int) $row101['item_id'], (int) $row202['item_id']);
+    }
+
+    public function testCompanyAllRunsAsADryRunByDefaultAndWritesNothingForAnyCompany(): void
+    {
+        ['unit' => $pcs, 'wh' => $wh, 'item' => $item101] = $this->seedYearOne();
+        $this->db->table('inv_fy_ranges')->insert(['cmp_id' => $this->cmpId, 'fy_id' => self::FY2, 'fy_start' => '2027-04-01', 'fy_end' => '2028-03-31']);
+        $this->seedBrokenCarryForward($item101, $pcs, $wh, 5.0);
+        $otherCmpId = 203;
+        $this->seedBrokenCompany($otherCmpId, 7.0);
+
+        $this->runCommand(['company' => 'all']); // no --apply
+
+        $row101 = $this->db->table('inv_item_openings')->where('cmp_id', $this->cmpId)->where('fy_id', self::FY2)->get()->getRowArray();
+        $row203 = $this->db->table('inv_item_openings')->where('cmp_id', $otherCmpId)->where('fy_id', self::FY2)->get()->getRowArray();
+        $this->assertEqualsWithDelta(0.0, (float) $row101['opening_value'], 0.0001, 'dry run: cmp 101 untouched');
+        $this->assertEqualsWithDelta(0.0, (float) $row203['opening_value'], 0.0001, 'dry run: cmp 203 untouched');
+        $this->assertSame(0, $this->db->table('inv_valuation_recalc_jobs')->countAllResults());
+    }
+
+    public function testCompanyAllIsolatesOneCompanysThrownFailureFromTheRestOfTheLoop(): void
+    {
+        ['unit' => $pcs, 'wh' => $wh, 'item' => $item101] = $this->seedYearOne();
+        $this->db->table('inv_fy_ranges')->insert(['cmp_id' => $this->cmpId, 'fy_id' => self::FY2, 'fy_start' => '2027-04-01', 'fy_end' => '2028-03-31']);
+        $this->seedBrokenCarryForward($item101, $pcs, $wh, 5.0);
+        $brokenCmpId = 204;
+        // In inv_company_settings (so it's in scope for --company all) but deliberately given no
+        // other rows at all, so the per-company work itself would find nothing broken; the
+        // subclass below forces a throw for this id regardless, to prove the loop survives one.
+        $this->db->table('inv_company_settings')->insert(['cmp_id' => $brokenCmpId, 'default_valuation_method' => 'FIFO', 'valuation_scope' => 'company', 'negative_stock_policy' => 'allow', 'created_at' => date('Y-m-d H:i:s')]);
+
+        // A named subclass, not an anonymous `new class extends ... {}` expression: the latter
+        // instantiates immediately (calling BaseCommand::__construct(), which needs framework
+        // services this test never sets up), defeating the whole point of
+        // newInstanceWithoutConstructor() below. A named class lets reflection build the instance
+        // without ever calling its constructor.
+        ThrowingBackfillOpeningValueForTest::$poisonCmpId = $brokenCmpId;
+
+        $ref = new \ReflectionProperty(CLI::class, 'options');
+        $ref->setAccessible(true);
+        $ref->setValue(null, ['company' => 'all', 'apply' => true]);
+        $exit = (new \ReflectionClass(ThrowingBackfillOpeningValueForTest::class))->newInstanceWithoutConstructor()->run([]);
+
+        $this->assertSame(EXIT_ERROR, $exit, 'one company throwing marks the overall run dirty');
+
+        // Company 101 was still repaired even though cmp 204 (processed after it, ids ascending) blew up.
+        $row101 = $this->db->table('inv_item_openings')->where('cmp_id', $this->cmpId)->where('fy_id', self::FY2)->get()->getRowArray();
+        $this->assertEqualsWithDelta(120.0, (float) $row101['opening_valuation_rate'], 0.0001, 'cmp 101 was not blocked by cmp 204 throwing');
+        $this->assertEqualsWithDelta(600.0, (float) $row101['opening_value'], 0.0001);
+    }
+
+    public function testCompanyAllWithNoCompaniesAtAllIsAQuietSuccess(): void
+    {
+        $this->db->table('inv_company_settings')->where('cmp_id', $this->cmpId)->delete();
+
+        $exit = $this->runCommand(['company' => 'all', 'apply' => true]);
+
+        $this->assertSame(EXIT_SUCCESS, $exit);
+    }
+}
+
+/**
+ * Test-only double for {@see testCompanyAllIsolatesOneCompanysThrownFailureFromTheRestOfTheLoop}:
+ * forces runForCompany() to throw for exactly one company id, so the test can prove --company
+ * all's per-company try/catch keeps that failure from stopping the rest of the loop, without
+ * needing to fabricate a real database-level fault. A named (not anonymous) class, so reflection
+ * can build it via newInstanceWithoutConstructor() without PHP eagerly instantiating it first.
+ */
+final class ThrowingBackfillOpeningValueForTest extends InventoryBackfillOpeningValue
+{
+    public static int $poisonCmpId = 0;
+
+    protected function runForCompany(int $cmpId, bool $apply, int $batch): array
+    {
+        if ($cmpId === self::$poisonCmpId) {
+            throw new \RuntimeException('simulated failure for cmp ' . $cmpId);
+        }
+
+        return parent::runForCompany($cmpId, $apply, $batch);
+    }
 }
