@@ -150,6 +150,22 @@ function mount(path = '/masters/bill-of-materials') {
   )
 }
 
+/*
+ * SmartTable paints its header the moment the page mounts and carries
+ * `aria-busy` until the first page of rows lands, so finding the table proves
+ * only that the header exists. Every test below then reaches straight for row
+ * content, and on a slow runner that race is lost: CI failed here looking for
+ * a row checkbox against a still-busy table. Wait for the table to go idle.
+ */
+async function loadedTable(): Promise<HTMLElement> {
+  await screen.findByRole('table', { name: /bills of materials/i })
+  return waitFor(() => {
+    const table = screen.getByRole('table', { name: /bills of materials/i })
+    expect(table.getAttribute('aria-busy')).toBeNull()
+    return table
+  })
+}
+
 beforeEach(() => {
   h.state.permissions = null
   h.state.accessLoading = false
@@ -180,7 +196,7 @@ describe('the populated screen', () => {
     expect(within(strip).getByText('₹ 12.46 L')).toBeTruthy()
     expect(within(strip).getByText('+4')).toBeTruthy()
 
-    const table = await screen.findByRole('table', { name: /bills of materials/i })
+    const table = await loadedTable()
     expect(within(table).getByText('BOM-001')).toBeTruthy()
     expect(within(table).getByText('Office Chair - Standard')).toBeTruthy()
     expect(within(table).getByText('ITM-CH-001')).toBeTruthy()
@@ -194,14 +210,14 @@ describe('the populated screen', () => {
    */
   it('shows three component chips and a +N button for the rest', async () => {
     mount()
-    const table = await screen.findByRole('table', { name: /bills of materials/i })
+    const table = await loadedTable()
     expect(within(table).getByRole('button', { name: 'Wooden seat · 1 pc' })).toBeTruthy()
     expect(within(table).getByRole('button', { name: '+3 more' })).toBeTruthy()
   })
 
   it('opens the remaining components in a popover', async () => {
     mount()
-    const table = await screen.findByRole('table', { name: /bills of materials/i })
+    const table = await loadedTable()
     fireEvent.click(within(table).getByRole('button', { name: '+3 more' }))
     const popover = await screen.findByRole('dialog', { name: /Components of Office Chair - Standard/ })
     expect(within(popover).getByText('6 components')).toBeTruthy()
@@ -212,7 +228,7 @@ describe('the populated screen', () => {
 
   it('asks for the component previews in the same request as the rows', async () => {
     mount()
-    await screen.findByRole('table', { name: /bills of materials/i })
+    await loadedTable()
     expect(h.state.listCalls[0]).toMatchObject({ with_preview: 1 })
   })
 
@@ -220,13 +236,13 @@ describe('the populated screen', () => {
     const preview = bom().components_preview!
     h.state.rows = [bom({ components_preview: [{ ...preview[0], item_is_active: 0 }, ...preview.slice(1)] })]
     mount()
-    const table = await screen.findByRole('table', { name: /bills of materials/i })
+    const table = await loadedTable()
     expect(within(table).getByLabelText(/Needs review\. Component "Wooden seat" is inactive\./)).toBeTruthy()
   })
 
   it('narrows the list by status through the URL', async () => {
     mount()
-    await screen.findByRole('table', { name: /bills of materials/i })
+    await loadedTable()
     fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'active' } })
     await waitFor(() => {
       expect(h.state.listCalls.at(-1)).toMatchObject({ status: 'active' })
@@ -235,7 +251,7 @@ describe('the populated screen', () => {
 
   it('searches after the typing stops, not on every keystroke', async () => {
     mount()
-    await screen.findByRole('table', { name: /bills of materials/i })
+    await loadedTable()
     const before = h.state.listCalls.length
     const box = screen.getByLabelText('Search bills of materials')
     fireEvent.change(box, { target: { value: 'c' } })
@@ -249,17 +265,17 @@ describe('the populated screen', () => {
 
   it('switches to the card view and back', async () => {
     mount()
-    await screen.findByRole('table', { name: /bills of materials/i })
+    await loadedTable()
     fireEvent.click(screen.getByRole('button', { name: 'Grid view' }))
     await waitFor(() => expect(screen.queryByRole('table')).toBeNull())
     expect(screen.getByRole('heading', { name: 'Office Chair - Standard', level: 3 })).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'List view' }))
-    await screen.findByRole('table', { name: /bills of materials/i })
+    await loadedTable()
   })
 
   it('offers bulk actions once rows are ticked', async () => {
     mount()
-    const table = await screen.findByRole('table', { name: /bills of materials/i })
+    const table = await loadedTable()
     fireEvent.click(within(table).getByLabelText('Select Office Chair - Standard'))
     expect(await screen.findByText('1 selected')).toBeTruthy()
     expect(screen.getByRole('button', { name: /Deactivate/ })).toBeTruthy()
@@ -274,7 +290,7 @@ describe('the populated screen', () => {
    */
   it('keeps refresh, export and print', async () => {
     mount()
-    await screen.findByRole('table', { name: /bills of materials/i })
+    await loadedTable()
     expect(screen.getByRole('button', { name: /Refresh/ })).toBeTruthy()
     expect(screen.getByRole('button', { name: /^Export$/ })).toBeTruthy()
     expect(screen.getByRole('button', { name: /^Print/ })).toBeTruthy()
@@ -282,7 +298,7 @@ describe('the populated screen', () => {
 
   it('opens the export menu from the BOM report tile', async () => {
     mount()
-    await screen.findByRole('table', { name: /bills of materials/i })
+    await loadedTable()
     fireEvent.click(screen.getByRole('button', { name: /BOM report/ }))
     const menu = await screen.findByRole('menu')
     expect(within(menu).getByRole('menuitem', { name: /PDF/ })).toBeTruthy()
@@ -290,7 +306,7 @@ describe('the populated screen', () => {
 
   it('confirms before deactivating and says what will not change', async () => {
     mount()
-    const table = await screen.findByRole('table', { name: /bills of materials/i })
+    const table = await loadedTable()
     fireEvent.click(within(table).getByRole('button', { name: /More actions for Office Chair/ }))
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Deactivate' }))
     const dialog = await screen.findByRole('dialog')
@@ -368,7 +384,7 @@ describe('permissions', () => {
     h.state.rows = [bom()]
     h.state.total = 1
     mount()
-    await screen.findByRole('table', { name: /bills of materials/i })
+    await loadedTable()
 
     expect(screen.queryByRole('button', { name: /New bill of materials/ })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Import' })).toBeNull()
