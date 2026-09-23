@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router-dom'
 import type { CrudApi } from '../services/masters'
 import type { ListQuery } from '../services/api'
 import type { MasterConfig } from './types'
+import { pickExport, clickPrint } from '../test/exportMenu'
 
 /**
  * Every master screen in Inventory renders through `MasterPage`, and until this
@@ -176,8 +177,7 @@ describe('MasterPage exports', () => {
     // The table holds 25 of the 30; the file must hold all 30.
     expect(screen.queryByText('Warehouse 30')).toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: /export/i }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /CSV/ }))
+    await pickExport(/CSV/)
     await waitFor(() => expect(downloadCsv).toHaveBeenCalledOnce())
 
     const [filename, csv] = downloadCsv.mock.calls[0]
@@ -192,8 +192,7 @@ describe('MasterPage exports', () => {
     renderPage('/masters/warehouses?limit=25&warehouse_type=bonded')
     await waitFor(() => expect(screen.getByText('Warehouse 02')).toBeTruthy())
 
-    fireEvent.click(screen.getByRole('button', { name: /export/i }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /Excel/ }))
+    await pickExport(/Excel/)
     await waitFor(() => expect(exportTabularExcel).toHaveBeenCalledOnce())
 
     const payload = exportTabularExcel.mock.calls[0][0]
@@ -225,7 +224,7 @@ describe('MasterPage exports', () => {
   it('prints the same sheet from the Print button', async () => {
     renderPage()
     await waitForRows()
-    fireEvent.click(screen.getByRole('button', { name: /print/i }))
+    await clickPrint()
     await waitFor(() => expect(printTabular).toHaveBeenCalledOnce())
     expect(printTabular.mock.calls[0][0].rows).toHaveLength(30)
   })
@@ -233,8 +232,7 @@ describe('MasterPage exports', () => {
   it('resolves cells the way the table renders them, never the raw field', async () => {
     renderPage()
     await waitForRows()
-    fireEvent.click(screen.getByRole('button', { name: /export/i }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /PDF/ }))
+    await pickExport(/PDF/)
     await waitFor(() => expect(exportTabularPdf).toHaveBeenCalledOnce())
 
     const rows = exportTabularPdf.mock.calls[0][0].rows

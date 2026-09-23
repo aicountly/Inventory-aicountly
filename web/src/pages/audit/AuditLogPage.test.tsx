@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import type { AuditLogRow, AuditSummary } from '../../services/auditApi'
+import { pickExport, clickPrint } from '../../test/exportMenu'
 
 interface SheetPayload {
   title: string
@@ -143,9 +144,7 @@ describe('AuditLogPage exports', () => {
    */
   it('keeps the before and after snapshots, and every row, in the file', async () => {
     renderPage()
-    await waitFor(() => expect(screen.getByRole('button', { name: /export/i })).toBeTruthy())
-    fireEvent.click(screen.getByRole('button', { name: /export/i }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /CSV/ }))
+    await pickExport(/CSV/)
     await waitFor(() => expect(downloadCsv).toHaveBeenCalledOnce())
 
     const [filename, csv] = downloadCsv.mock.calls[0]
@@ -162,8 +161,7 @@ describe('AuditLogPage exports', () => {
 
   it('prints the audit trail on the company letterhead', async () => {
     renderPage()
-    await waitFor(() => expect(screen.getByRole('button', { name: /print/i })).toBeTruthy())
-    fireEvent.click(screen.getByRole('button', { name: /print/i }))
+    await clickPrint()
     await waitFor(() => expect(printTabular).toHaveBeenCalledOnce())
 
     const sheet = printTabular.mock.calls[0][0]

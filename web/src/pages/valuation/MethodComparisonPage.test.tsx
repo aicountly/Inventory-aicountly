@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import type { ValuationSnapshotResponse } from '../../services/valuationApi'
+import { pickExport, clickPrint } from '../../test/exportMenu'
 
 interface SheetPayload {
   title: string
@@ -222,9 +223,7 @@ describe('MethodComparisonPage', () => {
 
   it('exports the comparison with raw numbers, not formatted strings', async () => {
     renderPage()
-    await waitFor(() => expect(screen.getByRole('button', { name: /export/i })).toBeTruthy())
-    fireEvent.click(screen.getByRole('button', { name: /export/i }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /CSV/ }))
+    await pickExport(/CSV/)
     await waitFor(() => expect(downloadCsv).toHaveBeenCalledOnce())
 
     const [filename, csv] = downloadCsv.mock.calls[0]
@@ -239,8 +238,7 @@ describe('MethodComparisonPage', () => {
 
   it('carries the scope and the basis caveat onto the printed sheet', async () => {
     renderPage()
-    await waitFor(() => expect(screen.getByRole('button', { name: /print/i })).toBeTruthy())
-    fireEvent.click(screen.getByRole('button', { name: /print/i }))
+    await clickPrint()
     await waitFor(() => expect(printTabular).toHaveBeenCalledOnce())
 
     const sheet = printTabular.mock.calls[0][0]

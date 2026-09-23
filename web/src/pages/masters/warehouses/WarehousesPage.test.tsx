@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import type { Warehouse, WarehouseSummary } from '../../../services/masters'
+import { pickExport } from '../../../test/exportMenu'
 
 /**
  * The Warehouses screen, end to end against stubbed endpoints.
@@ -223,8 +224,7 @@ beforeEach(() => {
 
 /** Drive the export menu to the PDF sheet and hand back what it was given. */
 async function sheet(): Promise<SheetPayload> {
-  fireEvent.click(screen.getByRole('button', { name: /export/i }))
-  fireEvent.click(await screen.findByRole('menuitem', { name: /PDF/ }))
+  await pickExport(/PDF/)
   await waitFor(() => expect(exportTabularPdf).toHaveBeenCalledOnce())
   return exportTabularPdf.mock.calls[0][0]
 }

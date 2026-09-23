@@ -1,7 +1,8 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { render, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import type { CostLayerRow, CostLayersResponse, RecalcJob } from '../../services/valuationApi'
+import { pickExport, clickPrint } from '../../test/exportMenu'
 
 /**
  * The two valuation screens that had no export at all. What is worth pinning
@@ -212,9 +213,7 @@ describe('CostLayersPage export', () => {
         <CostLayersPage />
       </MemoryRouter>,
     )
-    await waitFor(() => expect(screen.getByRole('button', { name: /export/i })).toBeTruthy())
-    fireEvent.click(screen.getByRole('button', { name: /export/i }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /CSV/ }))
+    await pickExport(/CSV/)
     await waitFor(() => expect(downloadCsv).toHaveBeenCalledOnce())
 
     const lines = downloadCsv.mock.calls[0][1].trim().split('\r\n')
@@ -234,8 +233,7 @@ describe('CostLayersPage export', () => {
         <CostLayersPage />
       </MemoryRouter>,
     )
-    await waitFor(() => expect(screen.getByRole('button', { name: /print/i })).toBeTruthy())
-    fireEvent.click(screen.getByRole('button', { name: /print/i }))
+    await clickPrint()
     await waitFor(() => expect(printTabular).toHaveBeenCalledOnce())
 
     const sheet = printTabular.mock.calls[0][0]
@@ -256,9 +254,7 @@ describe('RecalculationsPage export', () => {
         <RecalculationsPage />
       </MemoryRouter>,
     )
-    await waitFor(() => expect(screen.getByRole('button', { name: /export/i })).toBeTruthy())
-    fireEvent.click(screen.getByRole('button', { name: /export/i }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /CSV/ }))
+    await pickExport(/CSV/)
     await waitFor(() => expect(downloadCsv).toHaveBeenCalledOnce())
 
     const lines = downloadCsv.mock.calls[0][1].trim().split('\r\n')

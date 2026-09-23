@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import type { CrudApi } from '../services/masters'
 import type { MasterConfig } from './types'
+import { pickExport } from '../test/exportMenu'
 
 /**
  * The REAL master configs, through the real `MasterPage`, into the real sheet.
@@ -87,8 +88,7 @@ async function sheetFor<T>(config: MasterConfig<T>, row: T, firstCellText: strin
     </MemoryRouter>,
   )
   await waitFor(() => expect(screen.getByText(firstCellText)).toBeTruthy())
-  fireEvent.click(screen.getByRole('button', { name: /export/i }))
-  fireEvent.click(screen.getByRole('menuitem', { name: /PDF/ }))
+  await pickExport(/PDF/)
   await waitFor(() => expect(exportTabularPdf).toHaveBeenCalledOnce())
   return exportTabularPdf.mock.calls[0][0]
 }

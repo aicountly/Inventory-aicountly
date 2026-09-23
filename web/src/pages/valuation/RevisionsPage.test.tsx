@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import type { AckResult, RevisionSummary, ValuationRevision } from '../../services/valuationApi'
+import { pickExport, clickPrint } from '../../test/exportMenu'
 
 interface SheetPayload {
   title: string
@@ -240,8 +241,7 @@ describe('RevisionsPage exports', () => {
       expect(screen.getByRole('columnheader', { name: header }), header).toBeTruthy()
     }
 
-    fireEvent.click(screen.getByRole('button', { name: /export/i }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /CSV/ }))
+    await pickExport(/CSV/)
     await waitFor(() => expect(downloadCsv).toHaveBeenCalledOnce())
     const header = (downloadCsv.mock.calls[0][1].split('\r\n')[0] ?? '').split(',')
     expect(header).toContain('Old valuation rate')
@@ -275,8 +275,7 @@ describe('RevisionsPage exports', () => {
     await ready()
     expect(screen.queryByText('DN-30')).toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: /export/i }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /Excel/ }))
+    await pickExport(/Excel/)
     await waitFor(() => expect(exportTabularExcel).toHaveBeenCalledOnce())
     const payload = exportTabularExcel.mock.calls[0][0]
     expect(payload.rows).toHaveLength(30)
@@ -286,7 +285,7 @@ describe('RevisionsPage exports', () => {
   it('prints the letterheaded sheet from the Print button', async () => {
     renderPage()
     await ready()
-    fireEvent.click(screen.getByRole('button', { name: /print/i }))
+    await clickPrint()
     await waitFor(() => expect(printTabular).toHaveBeenCalledOnce())
     const sheet = printTabular.mock.calls[0][0]
     expect(sheet.title).toBe('Valuation revisions')
@@ -299,7 +298,7 @@ describe('RevisionsPage exports', () => {
   it('prints the filters the figures were read under', async () => {
     renderPage()
     await ready()
-    fireEvent.click(screen.getByRole('button', { name: /print/i }))
+    await clickPrint()
     await waitFor(() => expect(printTabular).toHaveBeenCalledOnce())
     expect(printTabular.mock.calls[0][0].metaLines).toContain('Books: Awaiting Books')
   })

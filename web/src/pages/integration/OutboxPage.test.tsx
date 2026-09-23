@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import type { OutboxEvent } from '../../services/integrationApi'
+import { pickExport, clickPrint } from '../../test/exportMenu'
 
 interface SheetPayload {
   title: string
@@ -113,9 +114,7 @@ describe('OutboxPage', () => {
 
   it('exports every queued event with the error that stopped it', async () => {
     renderPage()
-    await waitFor(() => expect(screen.getByRole('button', { name: /export/i })).toBeTruthy())
-    fireEvent.click(screen.getByRole('button', { name: /export/i }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /CSV/ }))
+    await pickExport(/CSV/)
     await waitFor(() => expect(downloadCsv).toHaveBeenCalledOnce())
 
     const lines = downloadCsv.mock.calls[0][1].trim().split('\r\n')
@@ -126,8 +125,7 @@ describe('OutboxPage', () => {
 
   it('prints the letterheaded sheet and says nothing is dispatched on a timer', async () => {
     renderPage()
-    await waitFor(() => expect(screen.getByRole('button', { name: /print/i })).toBeTruthy())
-    fireEvent.click(screen.getByRole('button', { name: /print/i }))
+    await clickPrint()
     await waitFor(() => expect(printTabular).toHaveBeenCalledOnce())
 
     const sheet = printTabular.mock.calls[0][0]
@@ -144,13 +142,13 @@ describe('OutboxPage', () => {
 
   it('prints the status the screen shows, not the raw token', async () => {
     renderPage()
-    await waitFor(() => expect(screen.getByRole('button', { name: /print/i })).toBeTruthy())
     // The screen's StatusBadge reads "Pending", never `PENDING`.
+    await screen.findAllByText('Pending')
     const table = document.querySelector('tbody') as HTMLElement
     expect(within(table).getAllByText('Pending').length).toBeGreaterThan(0)
     expect(within(table).queryByText('PENDING')).toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: /print/i }))
+    await clickPrint()
     await waitFor(() => expect(printTabular).toHaveBeenCalledOnce())
 
     // A letterheaded sheet a user works through on paper must read the way the
