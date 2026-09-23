@@ -155,4 +155,104 @@ describe('ReconciliationVariancePage', () => {
     expect(document.body.textContent).toContain('across 15 movements costed with no real rate on record')
     expect(screen.getByRole('link', { name: /Review negative & zero-cost layers/ })).toBeTruthy()
   })
+
+  /**
+   * Production shape: Orobite opens at 66,18,992.75 in Books and 90,87,528.50 in Inventory. The
+   * net 24,68,535.75 alone does not say which side is short, and the obvious next thought —
+   * "sync them" — has no button, which reads as a missing feature until the row says why.
+   */
+  it('shows both openings, which way the gap leans, and why it cannot be synced', async () => {
+    getRun.mockImplementation(async (id: number) => ({
+      run_id: id,
+      run_uuid: null,
+      cmp_id: 1,
+      fy_id: 3,
+      bo_id: 0,
+      as_of_date: '2026-09-23',
+      inventory_closing_value: 3949461.64,
+      inventory_closing_qty: 461228.66,
+      books_stock_ledger_balance: 2141860.48,
+      difference: 1807601.16,
+      status: 'COMPLETED',
+      requested_by: 'cli:inventory-reconcile',
+      created_at: '2026-09-23 08:35:00',
+      breakdown: {
+        as_of: '2026-09-23',
+        sign_convention: 'amount = contribution to (inventory - books)',
+        explained_total: 2477517.04,
+        residual: -669915.88,
+        books: { available: true, status: 200, error: null },
+        buckets: {
+          opening_difference: {
+            amount: 2468535.75,
+            count: 1,
+            inventory_opening_value: 9087528.5,
+            books_opening_balance: 6618992.75,
+            books_reported: true,
+          },
+        },
+        diagnostics: {},
+      },
+      document_status: null,
+    }))
+    renderPage()
+    await waitFor(() => expect(screen.getByText(/Run #87/)).toBeTruthy())
+
+    fireEvent.click(screen.getByRole('button', { name: /Opening difference/i }))
+
+    await waitFor(() => expect(screen.getByText(/Why this cannot be synced across/)).toBeTruthy())
+    // Both sides named, not just the net.
+    expect(document.body.textContent).toContain('66,18,992.75')
+    expect(document.body.textContent).toContain('90,87,528.50')
+    expect(document.body.textContent).toContain('Inventory holds more')
+    expect(document.body.textContent).toContain('one amount on the Stock-in-Hand ledger')
+    // And an action for each way the truth could lie.
+    expect(document.body.textContent).toContain('If Inventory is right')
+    expect(document.body.textContent).toContain('If Books is right')
+    expect(screen.getByRole('link', { name: /Open the Opening Stock report/ })).toBeTruthy()
+  })
+
+  /** Books unreachable is not "Books opens at nil" — there is nothing to compare. */
+  it('does not present a comparison when Books never answered', async () => {
+    getRun.mockImplementation(async (id: number) => ({
+      run_id: id,
+      run_uuid: null,
+      cmp_id: 1,
+      fy_id: 3,
+      bo_id: 0,
+      as_of_date: '2026-09-23',
+      inventory_closing_value: 3949461.64,
+      inventory_closing_qty: 461228.66,
+      books_stock_ledger_balance: null,
+      difference: null,
+      status: 'BOOKS_UNAVAILABLE',
+      requested_by: 'asha',
+      created_at: '2026-09-23 08:35:00',
+      breakdown: {
+        as_of: '2026-09-23',
+        sign_convention: 'amount = contribution to (inventory - books)',
+        explained_total: 0,
+        residual: null,
+        books: { available: false, status: 0, error: 'unreachable' },
+        buckets: {
+          opening_difference: {
+            amount: 0,
+            count: 1,
+            inventory_opening_value: 9087528.5,
+            books_opening_balance: null,
+            books_reported: false,
+          },
+        },
+        diagnostics: {},
+      },
+      document_status: null,
+    }))
+    renderPage()
+    await waitFor(() => expect(screen.getByText(/Run #87/)).toBeTruthy())
+
+    fireEvent.click(screen.getByRole('button', { name: /Opening difference/i }))
+
+    await waitFor(() => expect(screen.getByText(/Books did not answer on this run/)).toBeTruthy())
+    expect(screen.queryByText(/Why this cannot be synced across/)).toBeNull()
+  })
 })

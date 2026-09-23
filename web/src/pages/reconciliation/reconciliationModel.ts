@@ -279,6 +279,68 @@ export const UNEXPLAINED_ACTION =
 /** Where the corrective action above sends the reader. */
 export const UNEXPLAINED_ACTION_HREF = '/valuation/cost-layers?status=negative'
 
+/**
+ * Why an opening difference cannot simply be pushed across, whichever way it leans.
+ *
+ * Readers reasonably expect a "sync" button here, and its absence looks like a missing feature
+ * until you know what each side actually stores. Books keeps ONE amount on the Stock-in-Hand
+ * ledger. Inventory keeps an opening per item — a quantity and a rate, warehouse by warehouse,
+ * batch by batch — because that is what FIFO, LIFO and WAC consume from.
+ */
+export const OPENING_DIFFERENCE_WHY =
+  "Books keeps one amount on the Stock-in-Hand ledger. Inventory keeps an opening for every item — a quantity and a rate, warehouse by warehouse, batch by batch — because that is what the costing methods consume from. Inventory's total can therefore be written into Books as a single balance, but Books' total cannot be split back into items without deciding which items, how many of each and at what cost, and nothing in Books records that. So this gap is closed by correcting whichever side is wrong, never by copying a number across."
+
+/** What to actually do, in the order a person should consider it. */
+export const OPENING_DIFFERENCE_ACTIONS: readonly { title: string; detail: string }[] = [
+  {
+    title: 'If Inventory is right',
+    detail:
+      'Set this company to "Inventory Real Data" in Books → Settings → Stock-in-Hand. Books then takes its opening from Inventory and stops accepting a typed one, and this gap closes for good.',
+  },
+  {
+    title: 'If Books is right',
+    detail:
+      'The item openings in Inventory are wrong or missing. Enter them against the items — the Opening Stock report lists what is there, and its "Unvalued qty" column finds items carrying quantity with no rate, which is the usual cause of a shortfall.',
+  },
+  {
+    title: 'If neither is certain',
+    detail:
+      'Leave the company on "Manual Stock-in-Hand". The difference stays reported here rather than being silently resolved in favour of a figure nobody has checked.',
+  },
+]
+
+/** Where "if Books is right" sends the reader. */
+export const OPENING_DIFFERENCE_ACTION_HREF = '/reports/opening-stock'
+
+export interface OpeningDifferenceDetail {
+  /** Books' Stock-in-Hand opening, or null when Books did not answer this run. */
+  booksOpening: number | null
+  inventoryOpening: number | null
+  /** inventory − books, i.e. the bucket's own contribution. */
+  delta: number
+  /** False when Books was unreachable — the figures below are not a comparison then. */
+  booksReported: boolean
+}
+
+/**
+ * The two figures behind an opening difference, so the row can show the comparison itself
+ * rather than only its net effect. Both come off the bucket the server already computed.
+ */
+export function openingDifferenceDetail(
+  bucket: ReconciliationBucket | null | undefined,
+): OpeningDifferenceDetail {
+  const books = toNumber(bucket?.books_opening_balance)
+  const inventory = toNumber(bucket?.inventory_opening_value)
+  // The server sends a boolean here for this bucket; other buckets use the same key for a list.
+  const reported = bucket?.books_reported
+  return {
+    booksOpening: books,
+    inventoryOpening: inventory,
+    delta: toNumber(bucket?.amount) ?? 0,
+    booksReported: typeof reported === 'boolean' ? reported : books !== null,
+  }
+}
+
 export interface UnexplainedDriver {
   /** `diagnostics.valuation_method_variance.amount` for this run. */
   amount: number

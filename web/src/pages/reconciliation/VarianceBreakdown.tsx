@@ -7,7 +7,16 @@ import { cx } from '../../ui/cx'
 import { formatDate, formatInt, formatMoney, humanize } from '../../utils/format'
 import type { BucketDocument, PostingStatusEntry } from '../../services/reconciliationApi'
 import type { BucketRow, UnexplainedExplanation } from './reconciliationModel'
-import { UNEXPLAINED_ACTION, UNEXPLAINED_ACTION_HREF, UNEXPLAINED_WHY, formatPercent } from './reconciliationModel'
+import {
+  OPENING_DIFFERENCE_ACTIONS,
+  OPENING_DIFFERENCE_ACTION_HREF,
+  OPENING_DIFFERENCE_WHY,
+  UNEXPLAINED_ACTION,
+  UNEXPLAINED_ACTION_HREF,
+  UNEXPLAINED_WHY,
+  formatPercent,
+  openingDifferenceDetail,
+} from './reconciliationModel'
 
 /**
  * How the gap is explained.
@@ -148,6 +157,87 @@ function UnexplainedInfoPanel({ info }: { info: UnexplainedExplanation | undefin
   )
 }
 
+/**
+ * The two figures behind an opening difference, why neither can be pushed across, and what to
+ * do instead.
+ *
+ * The row's net contribution alone is not enough to act on: a reader looking at
+ * "24,68,535.75" cannot tell whether Books is short or Inventory is, and the obvious next
+ * thought — "sync them" — has no button because Books holds one ledger amount while Inventory
+ * holds an opening per item. Saying that here is the difference between a rule that looks like a
+ * missing feature and one that is plainly about what each system stores.
+ */
+function OpeningDifferenceInfoPanel({ row }: { row: BucketRow }) {
+  const detail = openingDifferenceDetail(row.bucket)
+
+  if (!detail.booksReported) {
+    return (
+      <p className="mt-2 max-w-2xl text-xs leading-relaxed text-gray-600">
+        Books did not answer on this run, so its opening balance is unknown and there is nothing to compare
+        Inventory&apos;s {detail.inventoryOpening !== null ? `₹ ${formatMoney(detail.inventoryOpening)} ` : ''}
+        against. Re-run the reconciliation once Books is reachable.
+      </p>
+    )
+  }
+
+  const leansToInventory = detail.delta > 0
+
+  return (
+    <div className="mt-2 max-w-2xl space-y-3 text-xs leading-relaxed text-gray-600">
+      <table className="w-full max-w-sm border-collapse">
+        <tbody>
+          <tr className="border-b border-gray-100">
+            <td className="py-1 pr-3 text-gray-500">Books — Stock-in-Hand opening</td>
+            <td className="py-1 text-right font-semibold tabular-nums text-gray-900">
+              ₹ {formatMoney(detail.booksOpening ?? 0)}
+            </td>
+          </tr>
+          <tr className="border-b border-gray-100">
+            <td className="py-1 pr-3 text-gray-500">Inventory — opening stock value</td>
+            <td className="py-1 text-right font-semibold tabular-nums text-gray-900">
+              ₹ {formatMoney(detail.inventoryOpening ?? 0)}
+            </td>
+          </tr>
+          <tr>
+            <td className="py-1 pr-3 font-medium text-gray-700">
+              Difference {leansToInventory ? '(Inventory holds more)' : '(Books holds more)'}
+            </td>
+            <td
+              className={cx(
+                'py-1 text-right font-semibold tabular-nums',
+                leansToInventory ? 'text-emerald-700' : 'text-red-600',
+              )}
+            >
+              ₹ {formatMoney(detail.delta)}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p className="m-0">
+        <span className="font-semibold text-gray-700">Why this cannot be synced across.</span>{' '}
+        {OPENING_DIFFERENCE_WHY}
+      </p>
+
+      <div>
+        <p className="m-0 font-semibold text-gray-700">What to do</p>
+        <ul className="mt-1 list-none space-y-1.5 p-0">
+          {OPENING_DIFFERENCE_ACTIONS.map((action) => (
+            <li key={action.title} className="border-l-2 border-gray-200 pl-2">
+              <span className="font-medium text-gray-700">{action.title}.</span> {action.detail}
+            </li>
+          ))}
+        </ul>
+        <p className="mt-2 m-0">
+          <Link to={OPENING_DIFFERENCE_ACTION_HREF} className="font-semibold text-primary hover:underline">
+            Open the Opening Stock report →
+          </Link>
+        </p>
+      </div>
+    </div>
+  )
+}
+
 export interface BucketBreakdownProps {
   rows: readonly BucketRow[]
   loading: boolean
@@ -209,9 +299,10 @@ export function BucketBreakdown({ rows, loading, emptyMessage, unexplained }: Bu
           {rows.map((row) => {
             const docs = documents.get(row.key) ?? []
             const isUnexplained = row.key === 'unexplained'
+            const isOpeningDiff = row.key === 'opening_difference'
             const expanded = open === row.key
             const critical = isUnexplained && Math.abs(row.amount) >= 0.005
-            const expandable = docs.length > 0 || isUnexplained
+            const expandable = docs.length > 0 || isUnexplained || isOpeningDiff
             return (
               <tr key={row.key} className={cx('border-b border-gray-100 align-top', critical && 'bg-red-50/40')}>
                 <td className="px-3 py-2">
@@ -226,6 +317,11 @@ export function BucketBreakdown({ rows, loading, emptyMessage, unexplained }: Bu
                       {row.label}
                       {isUnexplained ? (
                         <Tooltip label="Why this can be nonzero, and what to do about it">
+                          <Info className="h-3.5 w-3.5 text-gray-400" aria-hidden />
+                        </Tooltip>
+                      ) : null}
+                      {isOpeningDiff ? (
+                        <Tooltip label="Both openings side by side, why they cannot be synced, and what to do">
                           <Info className="h-3.5 w-3.5 text-gray-400" aria-hidden />
                         </Tooltip>
                       ) : null}
@@ -255,6 +351,7 @@ export function BucketBreakdown({ rows, loading, emptyMessage, unexplained }: Bu
                     </ul>
                   ) : null}
                   {expanded && isUnexplained ? <UnexplainedInfoPanel info={unexplained} /> : null}
+                  {expanded && isOpeningDiff ? <OpeningDifferenceInfoPanel row={row} /> : null}
                 </td>
                 <td className="px-3 py-2 text-xs text-gray-500">{row.help}</td>
                 <td className="px-3 py-2 text-right tabular-nums text-gray-700">{formatInt(row.count)}</td>
