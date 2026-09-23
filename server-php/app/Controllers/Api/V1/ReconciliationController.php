@@ -93,6 +93,87 @@ class ReconciliationController extends BaseController
         return $this->respond(['data' => $run], 201);
     }
 
+    /**
+     * GET /reconciliation/status — the last known verdict for this company, and nothing more.
+     *
+     * Deliberately ONE indexed row read. This answers a banner that paints on every company load,
+     * so it must never reconcile: compute() calls Books over HTTP and walks every movement, and
+     * doing that on page load would be self-inflicted at any real company count. The banner says
+     * how old the answer is instead of pretending it is live.
+     */
+    public function status()
+    {
+        $a = $this->authorize('reconciliation.read');
+        if (isset($a['response'])) {
+            return $a['response'];
+        }
+        $ctx = $a['ctx'];
+        $b = \Config\Database::connect()->table('inv_reconciliation_runs')
+            ->select('run_id, as_of_date, inventory_closing_value, books_stock_ledger_balance, difference, status, breakdown_json, created_at')
+            ->where('cmp_id', (int) $ctx['cmp_id'])
+            ->where('fy_id', (int) $ctx['fy_id']);
+        if ((int) $ctx['bo_id'] > 0) {
+            $b->where('bo_id', (int) $ctx['bo_id']);
+        }
+        $row = $b->orderBy('created_at', 'DESC')->orderBy('run_id', 'DESC')->limit(1)->get()->getRowArray();
+
+        if ($row === null) {
+            return $this->respond(['data' => ['has_run' => false, 'stock_source' => null]]);
+        }
+
+        $breakdown = json_decode((string) ($row['breakdown_json'] ?? ''), true);
+        $buckets = is_array($breakdown['buckets'] ?? null) ? $breakdown['buckets'] : [];
+
+        return $this->respond(['data' => [
+            'has_run'    => true,
+            'run_id'     => (int) $row['run_id'],
+            'as_of_date' => $row['as_of_date'],
+            'ran_at'     => $row['created_at'],
+            'status'     => $row['status'],
+            'difference' => $row['difference'] !== null ? round((float) $row['difference'], 4) : null,
+            'inventory_closing_value'    => round((float) $row['inventory_closing_value'], 4),
+            'books_stock_ledger_balance' => $row['books_stock_ledger_balance'] !== null ? round((float) $row['books_stock_ledger_balance'], 4) : null,
+            'opening_difference' => round((float) ($buckets['opening_difference']['amount'] ?? 0), 4),
+            'unexplained'        => round((float) ($buckets['unexplained']['amount'] ?? 0), 4),
+            // What a difference MEANS for this company. On 'inventory' Books closed both ways a
+            // person could diverge the two, so a gap is a defect; on 'manual' it is a figure
+            // somebody chose. Null when the run predates Books reporting it.
+            'stock_source' => $breakdown['books']['stock_source'] ?? null,
+        ]]);
+    }
+
+    /**
+     * POST /reconciliation/heal {dry_run?: bool}
+     *
+     * Acts only on what is safe to act on, and names what it is leaving alone — see
+     * ReconciliationHealService for why each excluded bucket is excluded. `dry_run` reports the
+     * same plan without performing it.
+     */
+    public function heal()
+    {
+        $a = $this->authorize('reconciliation.resolve');
+        if (isset($a['response'])) {
+            return $a['response'];
+        }
+        $ctx = $a['ctx'];
+        $body = $this->parseOptionalRequestJson();
+        $dryRun = filter_var($body['dry_run'] ?? $this->request->getGet('dry_run') ?? false, FILTER_VALIDATE_BOOLEAN);
+
+        try {
+            $result = (new \App\Services\ReconciliationHealService())->heal(
+                (int) $ctx['cmp_id'],
+                (int) $ctx['fy_id'],
+                (int) $ctx['bo_id'],
+                $dryRun,
+                $a['session']['uuid'] ?? null,
+            );
+        } catch (\Throwable $e) {
+            return $this->failFromException($e);
+        }
+
+        return $this->respond(['data' => $result]);
+    }
+
     /** GET /reconciliation/{id} */
     public function show($id = null)
     {

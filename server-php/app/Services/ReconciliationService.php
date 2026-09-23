@@ -255,7 +255,7 @@ class ReconciliationService
             'sign_convention'=> 'amount = contribution to (inventory - books)',
             'explained_total'=> $explained,
             'residual'       => $residual,
-            'books'          => ['available' => $booksAvailable, 'status' => $books['status'], 'error' => $books['error']],
+            'books'          => ['available' => $booksAvailable, 'status' => $books['status'], 'error' => $books['error'], 'stock_source' => $books['stock_source']],
             'buckets'        => $buckets,
             'diagnostics'    => $diagnostics,
         ];
@@ -621,7 +621,7 @@ class ReconciliationService
      */
     private function fetchBooksBalance(int $cmpId, int $fyId, int $boId, string $asOf): array
     {
-        $out = ['available' => false, 'status' => 0, 'error' => null, 'balance' => null, 'opening_balance' => null, 'pending_postings' => [], 'failed_postings' => [], 'manual_journals' => [], 'revaluations' => [], 'cancelled_reversed' => []];
+        $out = ['available' => false, 'status' => 0, 'error' => null, 'balance' => null, 'opening_balance' => null, 'stock_source' => null, 'pending_postings' => [], 'failed_postings' => [], 'manual_journals' => [], 'revaluations' => [], 'cancelled_reversed' => []];
         try {
             $r = $this->books->stockLedgerBalance($cmpId, $fyId, $boId, $asOf);
         } catch (\Throwable $e) {
@@ -646,6 +646,11 @@ class ReconciliationService
         $out['balance'] = round((float) $balance, 4);
         $opening = $data['opening_balance'] ?? null;
         $out['opening_balance'] = $opening !== null && is_numeric($opening) ? round((float) $opening, 4) : null;
+        // Which system Books says owns the Stock-in-Hand figure. It decides what a difference
+        // MEANS: on 'inventory' the two ways a person could diverge them are closed, so a gap is a
+        // defect; on 'manual' it is a figure someone chose and the report's job is to state it.
+        $src = strtolower(trim((string) ($data['stock_source'] ?? '')));
+        $out['stock_source'] = in_array($src, ['manual', 'inventory'], true) ? $src : null;
         foreach (['pending_postings', 'failed_postings', 'manual_journals', 'revaluations', 'cancelled_reversed'] as $k) {
             $out[$k] = is_array($data[$k] ?? null) ? array_values(array_filter($data[$k], 'is_array')) : [];
         }

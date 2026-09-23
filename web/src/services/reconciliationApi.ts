@@ -179,6 +179,52 @@ export interface PostingStatusResponse extends ListResponse<PostingStatusEntry> 
   books_error: string | null
 }
 
+/**
+ * The last known verdict for this company — ONE indexed row on the server, never a fresh
+ * reconciliation. The banner that shows it says how old it is rather than pretending it is live.
+ */
+export interface ReconciliationStatusSummary {
+  has_run: boolean
+  run_id?: number
+  as_of_date?: string
+  ran_at?: string
+  status?: ReconciliationStatus | string
+  difference?: number | null
+  inventory_closing_value?: number
+  books_stock_ledger_balance?: number | null
+  opening_difference?: number
+  unexplained?: number
+  /**
+   * Which system Books says owns the Stock-in-Hand figure, and therefore what a difference MEANS.
+   * On `inventory` both ways a person could diverge the two are closed, so a gap is a defect; on
+   * `manual` it is a figure somebody chose. Null when the run predates Books reporting it.
+   */
+  stock_source: 'manual' | 'inventory' | null
+}
+
+export interface HealAction {
+  bucket: string
+  action: string
+  amount: number
+  detail: string
+  performed: boolean
+  result: string | null
+}
+
+export interface HealSkipped {
+  bucket: string
+  amount: number
+  reason: string
+}
+
+export interface HealResult {
+  dry_run: boolean
+  as_of: string
+  difference: number | null
+  actions: HealAction[]
+  skipped: HealSkipped[]
+}
+
 export const reconciliationApi = {
   runs(filters: RunFilters = {}, signal?: AbortSignal): Promise<ListResponse<ReconciliationRun>> {
     return api.list<ReconciliationRun>('v1/reconciliation', filters, { signal })
@@ -191,6 +237,17 @@ export const reconciliationApi = {
 
   async get(id: number, signal?: AbortSignal): Promise<ReconciliationRunDetail> {
     const res = await api.get<ItemResponse<ReconciliationRunDetail>>(`v1/reconciliation/${id}`, { signal })
+    return res.data
+  },
+
+  async status(signal?: AbortSignal): Promise<ReconciliationStatusSummary> {
+    const res = await api.get<ItemResponse<ReconciliationStatusSummary>>('v1/reconciliation/status', { signal })
+    return res.data
+  },
+
+  /** `dryRun` asks for the plan; without it the safe actions are performed. */
+  async heal(dryRun: boolean): Promise<HealResult> {
+    const res = await api.post<ItemResponse<HealResult>>('v1/reconciliation/heal', { dry_run: dryRun })
     return res.data
   },
 

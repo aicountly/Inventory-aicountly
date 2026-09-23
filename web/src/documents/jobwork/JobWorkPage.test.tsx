@@ -225,7 +225,10 @@ describe('settling what is pending', () => {
     // The header button and the assistant's quick action open the same panel.
     fireEvent.click(screen.getAllByRole('button', { name: /Open job orders/ })[0])
     const drawer = await screen.findByRole('dialog')
-    expect(within(drawer).getByText('JW-OUT-2026-0041')).toBeTruthy()
+    // Awaited, not queried: findByRole resolves the moment the dialog EXISTS, which is before the
+    // position inside it has finished rendering. On a loaded runner the synchronous lookup ran in
+    // that gap and failed on an empty drawer.
+    expect(await within(drawer).findByText('JW-OUT-2026-0041')).toBeTruthy()
     expect(within(drawer).queryByRole('checkbox')).toBeNull()
     expect(within(drawer).queryByRole('button', { name: /Apply to document/ })).toBeNull()
   })

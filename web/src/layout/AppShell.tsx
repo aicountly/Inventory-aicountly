@@ -4,6 +4,7 @@ import { Building2, RefreshCw } from 'lucide-react'
 import { useAccess } from '../access/AccessContext'
 import { useAuth } from '../auth/AuthProvider'
 import { useCompany } from '../company/CompanyContext'
+import { ReconciliationAlert } from '../reconciliation/ReconciliationAlert'
 import { Notice } from '../components/Notice'
 import { getManageApiOrigin } from '../services/appLauncher'
 import { Button } from '../ui/Button'
@@ -172,6 +173,15 @@ export function AppShell() {
                   team member.
                 </Notice>
               ) : null}
+            </div>
+          ) : null}
+
+          {/* Outside `hasBanner`: that block is for what is wrong with loading the company, and
+              this is about what the company's figures say once it HAS loaded. It draws nothing
+              at all when the two systems agree. */}
+          {company.status === 'ready' ? (
+            <div className="mb-3 print:hidden empty:mb-0">
+              <ReconciliationAlert />
             </div>
           ) : null}
 
