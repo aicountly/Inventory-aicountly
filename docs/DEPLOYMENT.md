@@ -168,3 +168,15 @@ cd /home/<user>/public_html/<host>/api && php spark inventory:recalc-worker  >/d
 ```
 every five minutes `php spark inventory:expire-reservations` (releases reservations whose
 `expires_at` has passed), and nightly `php spark inventory:reconcile --all`.
+
+**Set `CONSOLE_CRON_MONITOR_KEY` in `api/.env` on this host, on a production-like environment,
+before or right after installing the crontab above** — it is easy to skip because the four jobs
+run perfectly without it, and the only symptom of skipping it is Console's Cron Monitor
+(https://console.aicountly.org/bots/cron-monitor) reading all four as OVERDUE /
+"Registered but has never reported" forever. It must be set to the same plaintext key Console's
+`CRON_MONITOR_KEY_HASH` (preferred) or `CRON_MONITOR_KEY` is configured with — see the comment
+above `CONSOLE_CRON_MONITOR_KEY` in `server-php/.env.example` for the exact precedence rules and
+the "looks configured but Console answers 401" failure mode. Leave it unset on any environment
+that should not report (dev, sandbox). After setting it, wait for the next `outbox-dispatch` or
+`recalc-worker` run (up to a minute) and confirm the four inventory monitors go green on the
+Console page above.
