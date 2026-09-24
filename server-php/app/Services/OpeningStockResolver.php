@@ -66,12 +66,18 @@ class OpeningStockResolver
     /**
      * Opening quantity map keyed "item:warehouse" (warehouse 0 when none), base units.
      *
+     * $boId scopes the openings to one branch, through the warehouse, exactly as openingLines()
+     * does. Unlike the cost side -- where a company-scope WAC/FIFO queue is deliberately shared
+     * across branches (see OpeningValueBranchScopeTest) -- a QUANTITY belongs to the branch that
+     * holds it. A caller that filters its movements by branch and pools everyone's opening here
+     * reports a closing balance that never existed.
+     *
      * @return array<string, float>
      */
-    public function openingQtyMap(int $cmpId, int $fyId, ?int $warehouseId = null, ?int $itemId = null): array
+    public function openingQtyMap(int $cmpId, int $fyId, ?int $warehouseId = null, ?int $itemId = null, ?int $boId = null): array
     {
         $out = [];
-        foreach ($this->openingLines($cmpId, $fyId, $itemId ? [$itemId] : []) as $row) {
+        foreach ($this->openingLines($cmpId, $fyId, $itemId ? [$itemId] : [], $boId) as $row) {
             $wh = (int) ($row['warehouse_id'] ?? 0);
             if ($warehouseId !== null && $warehouseId > 0 && $wh !== $warehouseId) {
                 continue;
