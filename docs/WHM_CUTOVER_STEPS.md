@@ -803,6 +803,21 @@ Wait two minutes, then confirm they run clean. An empty log is the expected resu
 tail -20 /home/inventoryaic/inventory-cron-errors.log 2>/dev/null; echo "--- empty above is correct ---"
 ```
 
+**Also confirm `CONSOLE_CRON_MONITOR_KEY` is set in this host's `api/.env`.** An empty log above
+only proves the four jobs ran without error — it does NOT prove Console's Cron Monitor
+(https://console.aicountly.org/bots/cron-monitor) heard from them, and nothing else in this
+runbook sets that key. Without it `App\Services\CronHeartbeat` is deliberately inert (no HTTP
+call, no log line — see its docblock), so the jobs run cleanly forever while Console reads all
+four as OVERDUE / "Registered but has never reported":
+```bash
+grep -n "^CONSOLE_CRON_MONITOR_KEY" /home/inventoryaic/public_html/api/.env
+```
+If it's blank, set it to the same plaintext key Console's `CRON_MONITOR_KEY_HASH` (preferred) or
+`CRON_MONITOR_KEY` is configured with (see the comment above `CONSOLE_CRON_MONITOR_KEY` in
+`server-php/.env.example` for the precedence rules). Then open the Console page above and confirm
+`inventory.outbox_dispatch` and `inventory.recalc_worker` go green within a couple of minutes
+(the other two report on their own slower schedules).
+
 ### E4. Resync masters (proves the channel works; Books' mirror should already match exactly)
 ```bash
 cd /home/inventoryaic/public_html/api
