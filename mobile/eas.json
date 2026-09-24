@@ -1,0 +1,33 @@
+{
+  "cli": {
+    "version": ">= 17.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_APP_ENV": "local",
+        "EXPO_PUBLIC_API_BASE_URL": "https://inventory.gh.aicountly.com/api"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_APP_ENV": "sandbox",
+        "EXPO_PUBLIC_API_BASE_URL": "https://inventory.gh.aicountly.com/api"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_APP_ENV": "production",
+        "EXPO_PUBLIC_API_BASE_URL": "https://inventory.aicountly.com/api"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

@@ -1,7 +1,9 @@
 # inventory-aicountly
 
 Inventory for Aicountly — a React single-page app built with Vite and TypeScript,
-with a small PHP API alongside it. Both halves deploy to cPanel.
+with a small PHP API alongside it, plus an Expo (React Native) mobile app for
+iOS and Android. The web app and API deploy to cPanel; see
+[mobile/README.md](mobile/README.md) for the mobile app.
 
 | Environment | App | API |
 | --- | --- | --- |
@@ -159,6 +161,7 @@ value ↔ payload mapping, and the item / BOM / serial form helpers.
 
 ```
 web/          React + TypeScript app (Vite). Builds to web/dist, deployed to the document root.
+mobile/       Expo (React Native + TypeScript) app for iOS and Android. See mobile/README.md.
 server-php/   CodeIgniter 4 API (PostgreSQL 13+). Deployed to the api/ folder inside the document root.
   app/        controllers (Api/V1), services (posting engine, valuation, migration), commands
   database/migrations/   SQL migrations applied by `php spark inventory:sql-migrate`
