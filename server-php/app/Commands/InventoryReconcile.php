@@ -12,8 +12,17 @@ use App\Services\CronHeartbeat;
  * php spark inventory:reconcile [--company 1,2 | --all | --due N] [--as-of YYYY-MM-DD] [--bo 0]
  *
  * Runs the Inventory ↔ Books reconciliation for the latest financial year of each company
- * and prints the unexplained difference. Non-zero exit when any company has an unexplained
- * difference or Books was unreachable.
+ * and prints the unexplained difference. Non-zero exit when a company's reconciliation itself
+ * could not be completed — Books was unreachable, or it threw.
+ *
+ * A completed reconciliation that finds a non-zero unexplained amount is NOT a failure and does
+ * not affect the exit code. "Unexplained" means genuine — a bad entry, a negative-stock override,
+ * whatever the breakdown's unexplained bucket says caused it — not a bug in this command or in
+ * the valuation it ran. That is a finding for a human to read in the printed breakdown (still
+ * shown, in yellow rather than green) or in the reconciliation report, never a reason for Console's
+ * cron monitor to page anyone: this job did exactly what it was asked to do. Making every ordinary,
+ * already-understood data discrepancy ring the same alarm as a dead cron is how a monitor gets
+ * ignored — see CronHeartbeat's own docblock.
  *
  * --all runs every company with a document, in one invocation — correct at any scale, but the
  * wall-clock cost (one Books HTTP round-trip plus a valuation snapshot per company) grows with
@@ -130,10 +139,17 @@ class InventoryReconcile extends BaseCommand
                 $r = $svc->run($cmpId, $fyId, $boId, $asOf, 'cli:inventory-reconcile');
                 $status = (string) ($r['status'] ?? '?');
                 $unexplained = (float) ($r['breakdown']['buckets']['unexplained']['amount'] ?? 0);
-                $ok = $status === 'COMPLETED' && abs($unexplained) < 0.005;
-                $bad += $ok ? 0 : 1;
-                CLI::write(sprintf('  cmp %d fy %d: %s inventory=%s books=%s difference=%s unexplained=%s', $cmpId, $fyId, $status, $r['inventory_closing_value'] ?? '?', $r['books_stock_ledger_balance'] ?? 'n/a', $r['difference'] ?? 'n/a', number_format($unexplained, 2, '.', '')), $ok ? 'green' : 'red');
-                if (!$ok && !empty($r['breakdown']['books']['error'])) {
+                // Job health: did the reconciliation itself run to completion? Whether it found a
+                // clean match or a genuine unexplained residual is a data finding, not a job
+                // failure — see this file's docblock. Only a status other than COMPLETED (Books
+                // unreachable, or ReconciliationService::run() catching its own failure) counts
+                // against $bad, which is what drives this command's exit code and therefore
+                // Console's cron-monitor FAILING state.
+                $completed = $status === 'COMPLETED';
+                $clean = $completed && abs($unexplained) < 0.005;
+                $bad += $completed ? 0 : 1;
+                CLI::write(sprintf('  cmp %d fy %d: %s inventory=%s books=%s difference=%s unexplained=%s', $cmpId, $fyId, $status, $r['inventory_closing_value'] ?? '?', $r['books_stock_ledger_balance'] ?? 'n/a', $r['difference'] ?? 'n/a', number_format($unexplained, 2, '.', '')), $completed ? ($clean ? 'green' : 'yellow') : 'red');
+                if (!$completed && !empty($r['breakdown']['books']['error'])) {
                     CLI::write('    books: ' . $r['breakdown']['books']['error'], 'yellow');
                 }
             } catch (\Throwable $e) {
