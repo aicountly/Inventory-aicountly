@@ -45,7 +45,7 @@ final class UnitMismatchRejectionTest extends IntegrationTestCase
         // Item 6649's real shape: exactly one registered unit (Grams), no Kilograms alternate ever added.
 
         $this->expectException(InventoryException::class);
-        $this->expectExceptionMessageMatches('/unit #' . $kilograms . ' is not a registered unit for item #' . $item . '/');
+        $this->expectExceptionMessageMatches('/unit "Kilograms" \(#' . $kilograms . '\) is not a registered unit for item "Silver Articles" \(#' . $item . '\)/');
 
         $this->docs->create($this->ctx(), [
             'document_type' => 'PURCHASE_RECEIPT', 'document_date' => '2026-06-30', 'source_document_type' => 'books.purchase', 'source_document_id' => 77314, 'source_document_no' => 'SA0767',

@@ -861,7 +861,7 @@ class DocumentService
             if ($qty <= 0) {
                 throw InventoryException::validation('Line ' . ($idx + 1) . ': qty must be greater than zero');
             }
-            $item = $db->table('inv_items')->select('item_id, unit_id, item_type, is_active, deleted_at')->where('cmp_id', $cmpId)->where('item_id', $itemId)->get()->getRowArray();
+            $item = $db->table('inv_items')->select('item_id, item_name, unit_id, item_type, is_active, deleted_at')->where('cmp_id', $cmpId)->where('item_id', $itemId)->get()->getRowArray();
             if (!$item) {
                 throw InventoryException::validation('Line ' . ($idx + 1) . ': item #' . $itemId . ' not found in this company', ['item_id' => $itemId]);
             }
@@ -877,9 +877,14 @@ class DocumentService
             // item priced in Grams (with no Kilograms alternate unit registered) posts through at
             // a ~1000x scale error with no warning -- confirmed against real production data.
             if ($explicitUnitId !== null && !$this->units->isRegisteredUnit($cmpId, $itemId, $explicitUnitId)) {
+                $itemLabel = trim((string) ($item['item_name'] ?? '')) !== '' ? $item['item_name'] : null;
+                $unitRow = $db->table('inv_uom')->select('unit_name, unit_symbol')->where('cmp_id', $cmpId)->where('unit_id', $explicitUnitId)->get()->getRowArray();
+                $unitLabel = $unitRow !== null && trim((string) ($unitRow['unit_name'] ?? '')) !== '' ? $unitRow['unit_name']
+                    : ($unitRow !== null && trim((string) ($unitRow['unit_symbol'] ?? '')) !== '' ? $unitRow['unit_symbol'] : null);
                 throw InventoryException::validation(
-                    'Line ' . ($idx + 1) . ': unit #' . $explicitUnitId . ' is not a registered unit for item #' . $itemId . ' -- add it as an alternate unit with a real conversion factor before posting in this unit',
-                    ['item_id' => $itemId, 'unit_id' => $explicitUnitId]
+                    'Line ' . ($idx + 1) . ': unit "' . ($unitLabel ?? ('#' . $explicitUnitId)) . '" (#' . $explicitUnitId . ') is not a registered unit for item "'
+                        . ($itemLabel ?? ('#' . $itemId)) . '" (#' . $itemId . ') -- add it as an alternate unit with a real conversion factor before posting in this unit',
+                    ['item_id' => $itemId, 'item_name' => $itemLabel, 'unit_id' => $explicitUnitId, 'unit_name' => $unitLabel]
                 );
             }
             $unitId = $explicitUnitId ?? ($this->units->defaultUnitId($cmpId, $itemId) ?: (int) ($item['unit_id'] ?? 0));
