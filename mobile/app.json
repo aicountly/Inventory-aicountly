@@ -21,9 +21,17 @@
       },
       "predictiveBackGestureEnabled": false
     },
-    "plugins": ["expo-router"],
+    "plugins": [
+      "expo-router"
+    ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "badb5c0b-1192-4cd9-aec0-b3023f4ba621"
+      }
     }
   }
 }
