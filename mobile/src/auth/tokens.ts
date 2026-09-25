@@ -14,19 +14,23 @@
  * this app keeps its own `auth_token` in SecureStore and signs in independently
  * per install. `ses_key` still never touches persistent storage.
  *
- * TODO(mobile-auth): this module only stores tokens once obtained. Getting the
- * `auth_token` in the first place — the portal login round trip — is not yet
- * implemented and needs portal-side coordination:
- *   - `web/` redirects the full page to
- *     `{portal}/login/authentication_jump/inventory?returnUrl=...`; a mobile
- *     app instead opens that URL with `expo-web-browser`'s
- *     `openAuthSessionAsync` (ASWebAuthenticationSession on iOS, Custom Tabs
- *     on Android).
- *   - The portal needs a `returnUrl` it will redirect back to that this app's
- *     custom scheme can catch, e.g. `inventory://auth/callback?auth_token=...`
- *     (see APP_SCHEME in src/config.ts and the "scheme" field in app.json).
- *     Confirm with whoever owns my.aicountly.com whether a non-https
- *     `returnUrl` is accepted before building the screen around it.
+ * The portal login round trip itself — opening the portal, getting the
+ * `auth_token` back — lives in src/auth/portal.ts (`signInWithPortal`), not
+ * here. This module only ever stores what that flow hands it.
+ *
+ * NOTE: this app's `inventory://` redirect only works once the portal's own
+ * ProductRegistry (aicountly/my-aicountly-com,
+ * web/app/Libraries/ProductRegistry.php) has an `inventory` entry with
+ * `'schemes' => ['inventory']`, the same way `books` has `aicountlybooks`
+ * registered. Until that ships, the portal doesn't recognize our scheme as
+ * belonging to `inventory`, so `productCallbackUrl()` there silently falls
+ * back to the default web callback (a normal https URL, e.g.
+ * https://inventory.gh.aicountly.com/auth/callback) instead of rejecting
+ * the request — the auth session
+ * follows that redirect inside the in-app browser instead of returning to
+ * this app, and `openAuthSessionAsync()` ends up resolving as a cancel or
+ * dismiss once the user closes it. It looks like "sign-in was cancelled";
+ * it's actually this registration gap.
  */
 
 import * as SecureStore from 'expo-secure-store'

@@ -37,6 +37,3 @@ export function getPortalLoginUrl(): string {
 
 /** Portal `authentication_jump` product key — always "inventory" for this app. */
 export const PRODUCT_KEY = 'inventory'
-
-/** Custom URL scheme registered in app.json, used for the auth callback deep link. */
-export const APP_SCHEME = 'inventory'
