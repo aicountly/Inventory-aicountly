@@ -164,7 +164,9 @@ class StockBalanceService
     public function closingQuantities(int $cmpId, int $fyId, int $boId, ?string $from, ?string $to, ?int $itemId = null, ?int $warehouseId = null): array
     {
         $this->units->warmCompany($cmpId);
-        $opening = $this->openings->openingQtyMap($cmpId, $fyId, $warehouseId, $itemId);
+        // Same branch on both sides: movements below are filtered by bo_id, so the opening they
+        // build on must be this branch's too.
+        $opening = $this->openings->openingQtyMap($cmpId, $fyId, $warehouseId, $itemId, $boId > 0 ? $boId : null);
         $out = [];
         foreach ($opening as $key => $qty) {
             [$i, $w] = array_map('intval', explode(':', $key));
