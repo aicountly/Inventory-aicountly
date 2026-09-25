@@ -446,7 +446,7 @@ class InventoryReportService
         $wh = $warehouseId !== null && $warehouseId > 0 ? $warehouseId : null;
 
         // Opening as at `from`: FY opening (base units) + movements dated before `from`.
-        $openingQty = array_sum($this->openings->openingQtyMap($cmpId, $fyId, $wh, $itemId));
+        $openingQty = array_sum($this->openings->openingQtyMap($cmpId, $fyId, $wh, $itemId, $boId > 0 ? $boId : null));
         $openingValue = 0.0;
         foreach ($this->openings->openingLayersByItem($cmpId, $fyId, [$itemId])[$itemId] ?? [] as $layer) {
             $openingValue += (float) $layer['qty_remaining'] * (float) $layer['unit_cost'];
