@@ -17,7 +17,11 @@ import { useAuth } from '@/auth/AuthProvider'
  * session in place) — same outcome, different path to it.
  */
 export default function AuthCallbackScreen() {
-  const { auth_token: authToken, error } = useLocalSearchParams<{ auth_token?: string; error?: string }>()
+  const { auth_token: authToken, error, nonce } = useLocalSearchParams<{
+    auth_token?: string
+    error?: string
+    nonce?: string
+  }>()
   const { completeSignInWithToken } = useAuth()
   const handled = useRef(false)
 
@@ -25,12 +29,12 @@ export default function AuthCallbackScreen() {
     if (handled.current) return
     handled.current = true
 
-    completeSignInWithToken(authToken ?? null, error ?? null).finally(() => {
+    completeSignInWithToken(authToken ?? null, error ?? null, nonce ?? null).finally(() => {
       // Stack.Protected redirects to whichever screen the resulting status
       // actually allows — login again on failure, the dashboard on success.
       router.replace('/')
     })
-  }, [authToken, error, completeSignInWithToken])
+  }, [authToken, error, nonce, completeSignInWithToken])
 
   return (
     <SafeAreaView style={styles.container}>

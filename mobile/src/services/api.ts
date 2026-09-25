@@ -15,7 +15,7 @@
  */
 
 import { getApiBaseUrl } from '../config'
-import { ensureSesKey } from '../auth/portal'
+import { ensureSesKey, ensureFreshSesKey } from '../auth/portal'
 
 export type QueryValue = string | number | boolean | null | undefined
 export type QueryParams = Record<string, QueryValue>
@@ -113,7 +113,10 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   let res = await rawRequest(path, sesKey, options)
 
   if (res.status === 401) {
-    sesKey = await ensureSesKey()
+    // ensureSesKey() alone would hand back the exact same (already-rejected)
+    // key: getSesKey() only checks the local expiry clock, which a
+    // server-side revocation doesn't touch. Force a real re-mint instead.
+    sesKey = await ensureFreshSesKey()
     res = await rawRequest(path, sesKey, options)
   }
 

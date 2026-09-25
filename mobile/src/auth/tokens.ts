@@ -70,7 +70,55 @@ export function getSesKey(): string | null {
   return sesKey
 }
 
+/**
+ * Drops only the cached ses_key, not the auth_token — for forcing a real
+ * re-mint (e.g. a product API call comes back 401 before the local ~15min
+ * timer expired, meaning the key was revoked server-side). getSesKey() alone
+ * can't detect that: it only checks the local clock, so a naive retry would
+ * hand the exact same rejected key straight back. Compare web's
+ * clearSession(), which is this same ses_key-only operation — mobile's
+ * `clearSession()` below is closer to web's `clearAllTokens()`.
+ */
+export function clearSesKey(): void {
+  setSesKey(null)
+}
+
+/**
+ * Bumped on every full session clear, so a mint that was already in flight
+ * when a sign-out happened can tell its result is stale and skip caching it
+ * (see mintSesKey in portal.ts). Sign-in doesn't bump this — only clearing
+ * does, since sign-in has nothing in flight yet to race against.
+ */
+let sessionGeneration = 0
+
+export function currentSessionGeneration(): number {
+  return sessionGeneration
+}
+
+/** Auth_token and ses_key both — a real sign-out, not just a ses_key refresh. */
 export async function clearSession(): Promise<void> {
+  sessionGeneration++
   setSesKey(null)
   await setAuthToken(null)
+}
+
+// ---------- forced sign-out (session revoked from underneath the UI) ----------
+
+/**
+ * mintSesKey() in portal.ts discovers a dead auth_token deep inside a plain
+ * API call, with no React context of its own. It calls forceSignOut() rather
+ * than clearSession() so that whoever is listening — AuthProvider — finds out
+ * the session ended and can update `status`; clearSession() alone only
+ * touches storage and would leave the UI showing a signed-in screen with no
+ * credentials underneath it.
+ */
+let forcedSignOutHandler: (() => void) | null = null
+
+export function onForcedSignOut(handler: (() => void) | null): void {
+  forcedSignOutHandler = handler
+}
+
+export async function forceSignOut(): Promise<void> {
+  await clearSession()
+  forcedSignOutHandler?.()
 }
