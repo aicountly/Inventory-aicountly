@@ -41,11 +41,11 @@ class InventoryRecalcWorker extends BaseCommand
     {
         return CronHeartbeat::reportRun(
             self::MONITOR,
-            fn (): int => (int) ($this->execute($params) ?? EXIT_SUCCESS),
+            fn (CronHeartbeat $beat): int => (int) ($this->execute($params, $beat) ?? EXIT_SUCCESS),
         );
     }
 
-    private function execute(array $params)
+    private function execute(array $params, CronHeartbeat $beat)
     {
         $this->normaliseEqualsOptions();
         $limit = (int) (CLI::getOption('limit') ?? $params['limit'] ?? 20);
@@ -62,10 +62,12 @@ class InventoryRecalcWorker extends BaseCommand
             $jobs = $b->get()->getResultArray();
         } catch (\Throwable $e) {
             CLI::error('Could not read the recalculation queue: ' . $e->getMessage());
+            $beat->failure('Could not read the recalculation queue: ' . $e->getMessage());
 
             return EXIT_ERROR;
         }
         if ($jobs === []) {
+            $beat->success(['picked_up' => 0], 'No queued recalculation jobs.');
             CLI::write('No queued recalculation jobs.', 'yellow');
 
             return EXIT_SUCCESS;
@@ -74,6 +76,8 @@ class InventoryRecalcWorker extends BaseCommand
         $service = new RecalculationService();
         $ok = 0;
         $failed = 0;
+        /** @var list<string> $problems one line per job that did not complete */
+        $problems = [];
         foreach ($jobs as $job) {
             $jobId = (int) $job['job_id'];
             $label = sprintf('job #%d cmp=%d fy=%s item=%s from=%s trigger=%s%s', $jobId, (int) $job['cmp_id'], $job['fy_id'] ?? '-', $job['item_id'] ?? 'all', $job['from_date'], $job['trigger_kind'], (int) $job['dry_run'] === 1 ? ' (dry-run)' : '');
@@ -89,14 +93,23 @@ class InventoryRecalcWorker extends BaseCommand
                     CLI::write($line, 'green');
                 } else {
                     $failed++;
+                    $problems[] = sprintf('job #%d: %s%s', $jobId, $status, !empty($result['failure_reason']) ? ' (' . $result['failure_reason'] . ')' : '');
                     CLI::write($line . ' ' . (string) ($result['failure_reason'] ?? ''), 'red');
                 }
             } catch (\Throwable $e) {
                 $failed++;
+                $problems[] = sprintf('job #%d: %s', $jobId, $e->getMessage());
                 CLI::error(sprintf('  FAILED %s: %s', $label, $e->getMessage()));
             }
         }
         CLI::write(sprintf('Done. %d completed, %d failed, %d picked up.', $ok, $failed, count($jobs)), $failed > 0 ? 'yellow' : 'green');
+
+        $counts = ['picked_up' => count($jobs), 'completed' => $ok, 'failed' => $failed];
+        if ($failed > 0) {
+            $beat->failure(sprintf('%d of %d job%s failed: %s', $failed, count($jobs), count($jobs) === 1 ? '' : 's', implode('; ', $problems)), $counts);
+        } else {
+            $beat->success($counts, sprintf('%d completed, %d picked up', $ok, count($jobs)));
+        }
 
         return $failed > 0 ? EXIT_ERROR : EXIT_SUCCESS;
     }

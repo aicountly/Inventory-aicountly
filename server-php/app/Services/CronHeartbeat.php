@@ -40,6 +40,16 @@ namespace App\Services;
  * is not a gap in this design, it is the design: an emitter that cannot report is indistinguishable
  * from a job that did not run, and OVERDUE is the honest reading of both.
  *
+ * DYING MID-RUN
+ * -------------
+ * "Started, never finished" (STUCK) is not always a symptom of Console being unreachable — it can
+ * be the job itself dying somewhere a catch (\Throwable) cannot reach, chiefly memory exhaustion,
+ * which PHP treats as a true fatal error rather than raising \Error. begin() arms a
+ * register_shutdown_function for exactly this: if the process is going down and this run never
+ * finished, and the last recorded PHP error was a fatal one, it files that as the failure — turning
+ * a silent STUCK row into a diagnosable FAILING one. It cannot catch a SIGKILL from outside the
+ * process (the OS OOM killer, a host resource governor): nothing in userland ever can.
+ *
  * UNCONFIGURED MEANS INERT
  * ------------------------
  * With no service key in .env this class does NOTHING: no HTTP, no log line, not even a run id.
@@ -100,6 +110,14 @@ class CronHeartbeat
 
     /** Sanity cap on the counts object, so a job that hands over a huge array cannot bloat a POST. */
     private const MAX_COUNT_KEYS = 50;
+
+    /**
+     * Error types PHP treats as fatal: the run stops dead at that line, no \Throwable is raised,
+     * and nothing downstream — a catch block, reportRun()'s own try/catch — ever runs. Memory
+     * exhaustion is the one that actually happens on shared hosting; the others are here because
+     * they are exactly as unrecoverable and error_get_last() cannot tell them apart from it.
+     */
+    private const FATAL_ERROR_TYPES = [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR, E_RECOVERABLE_ERROR];
 
     /** Only Console. There is one, at console.aicountly.org; CONSOLE_API_BASE overrides for a rehearsal. */
     private const DEFAULT_BASE = 'https://console.aicountly.org/api';
@@ -191,6 +209,7 @@ class CronHeartbeat
             }
             $this->runId    = $this->newRunId();
             $this->startedAt = $this->now();
+            $this->armFatalErrorGuard();
 
             $this->send([
                 'outcome'    => 'started',
@@ -346,6 +365,59 @@ class CronHeartbeat
             ]);
         } catch (\Throwable $e) {
             $this->finished = true;
+            $this->warn($e);
+        }
+    }
+
+    /**
+     * Register the shutdown-time check for a fatal error that killed this run before it finished.
+     *
+     * Split from handleFatalErrorAtShutdown() so a test can drive the logic directly with a
+     * synthetic error array — registering a real shutdown function against the PHPUnit process
+     * itself would make every test that calls begin() leave a live handler behind, reacting to
+     * whatever error_get_last() happens to hold when the whole suite finally exits.
+     */
+    protected function armFatalErrorGuard(): void
+    {
+        register_shutdown_function(function (): void {
+            $this->handleFatalErrorAtShutdown(error_get_last());
+        });
+    }
+
+    /**
+     * Report a fatal error as this run's failure, if it hasn't already finished some other way.
+     *
+     * "Already finished" means SENT, not merely decided: under reportRun(), a finish the work
+     * reports itself is held in $pending for settle() to send once the exit code is known
+     * ($finished is already true at that point — see finish()'s deferred branch). A fatal error
+     * means settle() is never going to run, so a pending verdict sitting unsent is exactly the
+     * STUCK case this guards against, and is forced out here rather than left to rot.
+     *
+     * Never throws: called from a shutdown function, where an exception would only be lost.
+     */
+    protected function handleFatalErrorAtShutdown(?array $error): void
+    {
+        try {
+            if ($this->finished && ! $this->deferred) {
+                return;
+            }
+            if ($error === null || ! in_array($error['type'], self::FATAL_ERROR_TYPES, true)) {
+                return;
+            }
+
+            $pending = $this->pending;
+            $this->pending  = null;
+            $this->deferred = false;
+            $this->finished = false;
+
+            $message = sprintf('Fatal error: %s in %s:%d', $error['message'], $error['file'], (int) $error['line']);
+            if ($pending !== null && ($pending['outcome'] ?? '') === 'ok') {
+                $reported = (string) ($pending['message'] ?? '');
+                $message .= ' — the run reported success first' . ($reported !== '' ? ': ' . $reported : '');
+            }
+
+            $this->failure($message, (array) ($pending['counts'] ?? []));
+        } catch (\Throwable $e) {
             $this->warn($e);
         }
     }

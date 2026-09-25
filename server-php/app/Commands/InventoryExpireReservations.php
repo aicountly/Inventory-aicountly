@@ -43,11 +43,11 @@ class InventoryExpireReservations extends BaseCommand
     {
         return CronHeartbeat::reportRun(
             self::MONITOR,
-            fn (): int => (int) ($this->execute($params) ?? EXIT_SUCCESS),
+            fn (CronHeartbeat $beat): int => (int) ($this->execute($params, $beat) ?? EXIT_SUCCESS),
         );
     }
 
-    private function execute(array $params)
+    private function execute(array $params, CronHeartbeat $beat)
     {
         $this->normaliseEqualsOptions();
         $this->normaliseOptions();
@@ -64,6 +64,7 @@ class InventoryExpireReservations extends BaseCommand
         }
         $companies = array_map(static fn ($r) => (int) $r['cmp_id'], $q->get()->getResultArray());
         if ($companies === []) {
+            $beat->success(['companies' => 0, 'expired' => 0], 'No reservations due for expiry.');
             CLI::write('No reservations due for expiry.', 'yellow');
 
             return EXIT_SUCCESS;
@@ -72,6 +73,8 @@ class InventoryExpireReservations extends BaseCommand
         $service = new ReservationService();
         $total = 0;
         $failed = 0;
+        /** @var list<string> $problems one line per company whose expiry sweep itself failed */
+        $problems = [];
         foreach ($companies as $company) {
             try {
                 $n = $service->expireDue($company, $asOf);
@@ -79,10 +82,18 @@ class InventoryExpireReservations extends BaseCommand
                 CLI::write(sprintf('company %d: expired %d reservation(s)', $company, $n), 'green');
             } catch (\Throwable $e) {
                 $failed++;
+                $problems[] = sprintf('company %d: %s', $company, $e->getMessage());
                 CLI::error(sprintf('company %d: %s', $company, $e->getMessage()));
             }
         }
         CLI::write(sprintf('expired=%d companies=%d failed=%d as_of=%s', $total, count($companies), $failed, $asOf), $failed > 0 ? 'yellow' : 'green');
+
+        $counts = ['companies' => count($companies), 'expired' => $total, 'failed' => $failed];
+        if ($failed > 0) {
+            $beat->failure(sprintf('%d of %d compan%s failed to expire reservations: %s', $failed, count($companies), count($companies) === 1 ? 'y' : 'ies', implode('; ', $problems)), $counts);
+        } else {
+            $beat->success($counts, sprintf('expired=%d companies=%d', $total, count($companies)));
+        }
 
         return $failed > 0 ? EXIT_ERROR : EXIT_SUCCESS;
     }

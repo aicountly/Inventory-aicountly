@@ -32,6 +32,9 @@ class SpyCronHeartbeat extends CronHeartbeat
     /** @var null|callable(array<string, mixed>):void observes the order reports are filed in */
     public $onPost = null;
 
+    /** True once begin() would have armed the real fatal-error guard. */
+    public bool $fatalGuardArmed = false;
+
     public static function for(string $monitor): static
     {
         if (static::$next !== null) {
@@ -61,6 +64,21 @@ class SpyCronHeartbeat extends CronHeartbeat
     protected function warn(\Throwable $e): void
     {
         $this->warnings[] = $e->getMessage();
+    }
+
+    /**
+     * Records that begin() would have armed the guard, without registering a real shutdown
+     * function against the PHPUnit process — see CronHeartbeat::armFatalErrorGuard().
+     */
+    protected function armFatalErrorGuard(): void
+    {
+        $this->fatalGuardArmed = true;
+    }
+
+    /** Drives the fatal-error-at-shutdown logic directly, the one thing this spy can't provoke for real. */
+    public function simulateFatalErrorAtShutdown(?array $error): void
+    {
+        $this->handleFatalErrorAtShutdown($error);
     }
 
     /**

@@ -438,6 +438,103 @@ final class CronHeartbeatTest extends TestCase
     }
 
     /* ===================================================================== */
+    /* Dying mid-run: the fatal error a catch (\Throwable) never sees        */
+    /* ===================================================================== */
+
+    /** begin() arms the guard only once a run is actually being tracked. */
+    public function testBeginArmsTheFatalErrorGuardOnlyWhenConfigured(): void
+    {
+        $unconfigured = new SpyCronHeartbeat('inventory.outbox_dispatch');
+        $unconfigured->begin();
+        $this->assertFalse($unconfigured->fatalGuardArmed);
+
+        $this->configure();
+        $configured = new SpyCronHeartbeat('inventory.outbox_dispatch');
+        $configured->begin();
+        $this->assertTrue($configured->fatalGuardArmed);
+    }
+
+    /**
+     * The scenario the guard exists for: memory exhaustion (or any other true fatal) kills the
+     * process between begin() and the finish the work never gets to send. error_get_last() is the
+     * only trace left, and it must become the failure — not silence.
+     */
+    public function testAFatalErrorAfterBeginIsReportedAsTheFailure(): void
+    {
+        $this->configure();
+        $beat = new SpyCronHeartbeat('inventory.outbox_dispatch');
+        $beat->begin();
+
+        $beat->simulateFatalErrorAtShutdown([
+            'type' => E_ERROR, 'message' => 'Allowed memory size of 134217728 bytes exhausted',
+            'file' => '/app/Services/OutboxService.php', 'line' => 88,
+        ]);
+
+        $this->assertSame(['started', 'error'], $beat->outcomes());
+        $this->assertStringContainsString('Allowed memory size', (string) $beat->posts[1]['payload']['message']);
+        $this->assertStringContainsString('OutboxService.php:88', (string) $beat->posts[1]['payload']['message']);
+        $this->assertSame($beat->runId(), $beat->posts[1]['payload']['run_id'], 'the failure is paired with the run that started');
+    }
+
+    /** A run that already finished must not be re-reported just because some later error happened. */
+    public function testAFatalErrorIsIgnoredOnceTheRunAlreadyFinished(): void
+    {
+        $this->configure();
+        $beat = new SpyCronHeartbeat('inventory.outbox_dispatch');
+        $beat->begin();
+        $beat->success(['sent' => 4]);
+
+        $beat->simulateFatalErrorAtShutdown(['type' => E_ERROR, 'message' => 'unrelated', 'file' => 'x.php', 'line' => 1]);
+
+        $this->assertCount(2, $beat->posts, 'no third post for an error after the run was already done');
+        $this->assertSame('ok', $beat->posts[1]['payload']['outcome']);
+    }
+
+    /** No error at all, or nothing fatal about the last one recorded: not this run's problem. */
+    public function testANonFatalLastErrorDoesNotReportAFailure(): void
+    {
+        $this->configure();
+        $beat = new SpyCronHeartbeat('inventory.outbox_dispatch');
+        $beat->begin();
+        $beat->simulateFatalErrorAtShutdown(null);
+        $this->assertCount(1, $beat->posts, 'no error at all leaves the run open, not failed');
+
+        $beat2 = new SpyCronHeartbeat('inventory.outbox_dispatch');
+        $this->configure();
+        $beat2->begin();
+        $beat2->simulateFatalErrorAtShutdown(['type' => E_WARNING, 'message' => 'array to string conversion', 'file' => 'x.php', 'line' => 1]);
+        $this->assertCount(1, $beat2->posts, 'a warning is not a reason to report the run as failed');
+    }
+
+    /**
+     * Under reportRun(), a finish the work reports is normally HELD for settle() to send once the
+     * exit code is known. A fatal error means settle() never runs, so the guard must send the held
+     * finish itself rather than leave it stuck in $pending forever.
+     */
+    public function testAFatalErrorSendsAFinishEvenWhenOneWasBeingHeldForSettle(): void
+    {
+        $this->configure();
+        $beat = new SpyCronHeartbeat('inventory.outbox_dispatch');
+        SpyCronHeartbeat::$next = $beat;
+
+        // Mimic reportRun()'s begin() + deferred finish, stopping short of settle() — exactly the
+        // state the process is in when it fatals inside $work after already begin()-ing. $deferred
+        // is private (only reportRun() itself sets it) and reflection is the only way in from here.
+        $target = SpyCronHeartbeat::for('inventory.outbox_dispatch');
+        $deferred = new \ReflectionProperty(CronHeartbeat::class, 'deferred');
+        $deferred->setAccessible(true);
+        $deferred->setValue($target, true);
+        $target->begin();
+        $target->success(['scanned' => 10]);
+
+        $target->simulateFatalErrorAtShutdown([
+            'type' => E_ERROR, 'message' => 'Allowed memory size exhausted', 'file' => 'x.php', 'line' => 1,
+        ]);
+
+        $this->assertSame(['started', 'error'], $beat->outcomes(), 'the fatal error must still surface, not the held ok');
+    }
+
+    /* ===================================================================== */
     /* Timeout                                                               */
     /* ===================================================================== */
 

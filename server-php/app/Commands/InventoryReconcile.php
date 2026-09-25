@@ -66,16 +66,24 @@ class InventoryReconcile extends BaseCommand
      * command: the heartbeat is swallowed and the exit code below still has the last word.
      * Null is coerced to success — a command that falls off the end without returning has
      * not failed, and reporting it as one would make the monitor cry wolf every cycle.
+     *
+     * $beat is handed into execute() so a failing run can tell Console WHICH company failed and
+     * why, instead of reportRun()'s own generic "Exited with code 1" — the two compose (see
+     * execute()'s docblock) rather than one replacing the other.
      */
     public function run(array $params)
     {
         return CronHeartbeat::reportRun(
             self::MONITOR,
-            fn (): int => (int) ($this->execute($params) ?? EXIT_SUCCESS),
+            fn (CronHeartbeat $beat): int => (int) ($this->execute($params, $beat) ?? EXIT_SUCCESS),
         );
     }
 
-    private function execute(array $params)
+    /**
+     * @param CronHeartbeat $beat reports the per-company outcome; reportRun() still decides the
+     *                            final outcome from the exit code this returns (see its docblock)
+     */
+    private function execute(array $params, CronHeartbeat $beat)
     {
         $this->normaliseEqualsOptions();
         foreach ($_SERVER['argv'] ?? [] as $arg) {
@@ -129,6 +137,9 @@ class InventoryReconcile extends BaseCommand
         $svc = new ReconciliationService();
         $balances = new StockBalanceService();
         $bad = 0;
+        $clean = 0;
+        /** @var list<string> $problems one line per company the run itself could not complete */
+        $problems = [];
         foreach ($companies as $cmpId) {
             $fyId = $balances->latestFyId($cmpId);
             if ($fyId <= 0) {
@@ -146,16 +157,32 @@ class InventoryReconcile extends BaseCommand
                 // against $bad, which is what drives this command's exit code and therefore
                 // Console's cron-monitor FAILING state.
                 $completed = $status === 'COMPLETED';
-                $clean = $completed && abs($unexplained) < 0.005;
-                $bad += $completed ? 0 : 1;
-                CLI::write(sprintf('  cmp %d fy %d: %s inventory=%s books=%s difference=%s unexplained=%s', $cmpId, $fyId, $status, $r['inventory_closing_value'] ?? '?', $r['books_stock_ledger_balance'] ?? 'n/a', $r['difference'] ?? 'n/a', number_format($unexplained, 2, '.', '')), $completed ? ($clean ? 'green' : 'yellow') : 'red');
+                $isClean = $completed && abs($unexplained) < 0.005;
+                $clean += $isClean ? 1 : 0;
+                if (!$completed) {
+                    $bad++;
+                    $problems[] = sprintf('cmp %d: %s%s', $cmpId, $status, !empty($r['breakdown']['books']['error']) ? ' (' . $r['breakdown']['books']['error'] . ')' : '');
+                }
+                CLI::write(sprintf('  cmp %d fy %d: %s inventory=%s books=%s difference=%s unexplained=%s', $cmpId, $fyId, $status, $r['inventory_closing_value'] ?? '?', $r['books_stock_ledger_balance'] ?? 'n/a', $r['difference'] ?? 'n/a', number_format($unexplained, 2, '.', '')), $completed ? ($isClean ? 'green' : 'yellow') : 'red');
                 if (!$completed && !empty($r['breakdown']['books']['error'])) {
                     CLI::write('    books: ' . $r['breakdown']['books']['error'], 'yellow');
                 }
             } catch (\Throwable $e) {
                 $bad++;
+                $problems[] = sprintf('cmp %d: %s', $cmpId, $e->getMessage());
                 CLI::error(sprintf('  cmp %d: %s', $cmpId, $e->getMessage()));
             }
+        }
+
+        $counts = ['companies' => count($companies), 'bad' => $bad, 'clean' => $clean];
+        if ($bad > 0) {
+            // Console's Detail column used to read a bare "Exited with code 1" for every reconcile
+            // failure, whatever company or reason caused it — the CLI output naming the actual
+            // company was thrown away by the crontab's own `>/dev/null 2>&1`. This is the only
+            // other place that reason can reach whoever is looking at the monitor.
+            $beat->failure(sprintf('%d of %d compan%s could not be reconciled: %s', $bad, count($companies), count($companies) === 1 ? 'y' : 'ies', implode('; ', $problems)), $counts);
+        } else {
+            $beat->success($counts, sprintf('%d compan%s reconciled, %d clean', count($companies), count($companies) === 1 ? 'y' : 'ies', $clean));
         }
 
         return $bad > 0 ? EXIT_ERROR : EXIT_SUCCESS;
